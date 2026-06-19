@@ -24,9 +24,89 @@ body,
 }
 
 body {
-  background: #ede9fe;
-  color: #1e1b2e;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.15) 34%, transparent 62%),
+    radial-gradient(circle at 20% 10%, rgba(194, 161, 255, 0.5) 0%, transparent 32%),
+    radial-gradient(circle at 85% 18%, rgba(227, 204, 255, 0.65) 0%, transparent 26%),
+    linear-gradient(135deg, #e8dbff 0%, #f0e8ff 42%, #f7f5ff 100%);
+  color: #171425;
   letter-spacing: -0.01em;
+}
+
+.aw-app-shell {
+  position: relative;
+}
+
+.aw-app-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.6) 0, transparent 35%),
+    radial-gradient(circle at 90% 0%, rgba(121, 92, 252, 0.16) 0, transparent 28%);
+  pointer-events: none;
+}
+
+.aw-shell {
+  position: relative;
+  min-height: 640px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.56) !important;
+  backdrop-filter: blur(24px);
+  box-shadow:
+    0 24px 80px rgba(120, 91, 252, 0.12),
+    0 4px 20px rgba(77, 57, 160, 0.08);
+}
+
+.aw-sidebar {
+  background: rgba(255, 255, 255, 0.88) !important;
+  backdrop-filter: blur(24px);
+  overflow: hidden;
+}
+
+.aw-content {
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.aw-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(18px);
+}
+
+.aw-main {
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(124, 92, 252, 0.25) transparent;
+}
+
+@media (max-width: 900px) {
+  .aw-shell {
+    width: 100%;
+    height: auto;
+    min-height: calc(100vh - 40px);
+  }
+
+  .aw-sidebar {
+    width: 76px;
+  }
+
+  .aw-sidebar > div:not(:first-child) span,
+  .aw-sidebar nav a:not(.active),
+  .aw-sidebar nav button {
+    font-size: 0;
+  }
+}
+
+.aw-overlay {
+  backdrop-filter: blur(8px);
+}
+
+.aw-drawer {
+  background: rgba(248, 246, 255, 0.92) !important;
+  backdrop-filter: blur(28px);
 }
 
 @keyframes skeleton-shimmer {

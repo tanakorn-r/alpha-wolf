@@ -8,6 +8,7 @@ export type StockRecord = {
   price: number;
   changePct: number;
   weeklyTrend: number;
+  sparkline: number[];
   recommendation: string;
   story: string;
   strategyScores: Record<StrategyKey, number>;

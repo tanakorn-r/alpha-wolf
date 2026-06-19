@@ -108,10 +108,7 @@ def get_domain_insights(symbol: str) -> dict[str, Any] | None:
 def build_business_profile(modules: dict[str, Any], history: pd.DataFrame, stock: dict[str, Any]) -> dict[str, Any]:
     from internal.market.records import merge_ticker_info
 
-    if "summaryDetail" in modules or "price" in modules or "assetProfile" in modules:
-        info = merge_ticker_info(modules, stock["symbol"])
-    else:
-        info = safe_dict(modules)
+    info = merge_ticker_info(modules, stock["symbol"])
     closes = extract_closes(history)
     annual_return = return_over_window(closes, 252)
     two_year_return = return_over_window(closes, 504)
@@ -133,7 +130,7 @@ def build_business_profile(modules: dict[str, Any], history: pd.DataFrame, stock
         "grossMargin": percent_value(info.get("grossMargins")),
         "revenueGrowth": percent_value(info.get("revenueGrowth")),
         "earningsGrowth": percent_value(info.get("earningsGrowth")),
-        "dividendYield": percent_value(info.get("dividendYield")),
+        "dividendYield": as_float(info.get("dividendYield")),
         "payoutRatio": percent_value(info.get("payoutRatio")),
         "debtToEquity": as_float(info.get("debtToEquity")),
         "beta": as_float(info.get("beta")) or as_float(info.get("beta3Year")),

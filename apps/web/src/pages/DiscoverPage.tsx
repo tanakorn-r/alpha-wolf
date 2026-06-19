@@ -128,15 +128,15 @@ export function DiscoverPage() {
           </div>
 
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-xl bg-violet-50 p-3">
+            <div className="rounded-xl bg-slate-50 p-3">
               <div className="text-xs text-slate-400">Query</div>
               <div className="text-sm font-bold text-slate-900">{deferredSearch || "Explore live names"}</div>
             </div>
-            <div className="rounded-xl bg-violet-50 p-3">
+            <div className="rounded-xl bg-slate-50 p-3">
               <div className="text-xs text-slate-400">Lookup results</div>
               <div className="text-sm font-bold text-slate-900">{resultCount}</div>
             </div>
-            <div className="rounded-xl bg-violet-50 p-3">
+            <div className="rounded-xl bg-slate-50 p-3">
               <div className="text-xs text-slate-400">Strategy</div>
               <div className="text-sm font-bold text-slate-900">{strategyLabels[selectedStrategy]}</div>
             </div>
@@ -159,7 +159,7 @@ export function DiscoverPage() {
                       key={`${section.kind}-${item.symbol}`}
                       type="button"
                       onClick={() => openDetail(item.symbol)}
-                      className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-violet-50"
+                      className="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-slate-100"
                     >
                       <div className="flex min-w-0 flex-col">
                         <strong className="text-sm text-slate-900">{item.symbol}</strong>
@@ -197,7 +197,7 @@ export function DiscoverPage() {
             <div className="text-xs text-slate-400">Top active now</div>
             <div className="text-lg font-extrabold text-slate-900">{liveItems.length} live names</div>
           </div>
-          <span className="rounded-full bg-violet-50 px-3 py-1.5 text-xs font-semibold text-slate-500">Scroll to load more</span>
+          <span className="rounded-full bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-500">Scroll to load more</span>
         </div>
 
         <div className="flex flex-col gap-1">
@@ -207,7 +207,7 @@ export function DiscoverPage() {
                 key={item.symbol}
                 type="button"
                 onClick={() => openDetail(item.symbol)}
-                className="rounded-xl px-3 py-2.5 text-left hover:bg-violet-50"
+                className="rounded-xl px-3 py-2.5 text-left hover:bg-slate-100"
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex min-w-0 flex-col">
@@ -218,7 +218,7 @@ export function DiscoverPage() {
                     {formatChange(item.changePct)}
                   </div>
                 </div>
-                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-violet-50">
+                <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-50">
                   <div
                     className={`h-full rounded-full ${(item.changePct ?? 0) >= 0 ? "bg-emerald-500" : "bg-rose-500"}`}
                     style={{ width: `${Math.min(Math.abs(item.changePct ?? 0) * 12, 100)}%` }}

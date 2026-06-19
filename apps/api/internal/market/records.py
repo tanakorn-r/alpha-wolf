@@ -169,7 +169,7 @@ def fetch_record_from_ticker(
     gross_margins = percent_value(info.get("grossMargins"))
     free_cashflow = as_float(info.get("freeCashflow"))
     debt_to_equity = as_float(info.get("debtToEquity"))
-    dividend_yield = percent_value(info.get("dividendYield"))
+    dividend_yield = as_float(info.get("dividendYield"))
     payout_ratio = percent_value(info.get("payoutRatio"))
     beta = as_float(info.get("beta")) or as_float(info.get("beta3Year"))
     volume = as_float(info.get("regularMarketVolume"))
@@ -216,6 +216,7 @@ def fetch_record_from_ticker(
         "price": round(price, 2),
         "changePct": round(change_pct, 2),
         "weeklyTrend": round(weekly_trend, 2),
+        "sparkline": [round(float(value), 4) for value in closes.tail(30).tolist()],
         "recommendation": recommendation,
         "story": story,
         "strategyScores": {key: int(round(value)) for key, value in strategy_scores.items()},
