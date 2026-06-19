@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "defaultProject": "web",
+  "targetDefaults": {
+    "build": {
+      "dependsOn": ["^build"]
+    },
+    "serve": {
+      "cache": false
+    }
+  }
+}

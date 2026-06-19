@@ -1,0 +1,32 @@
+{
+  "name": "alpha-wolf",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:api & npm run dev:web",
+    "build": "nx build web",
+    "dev:web": "nx serve web",
+    "dev:api": "cd apps/api && python3 -m uvicorn main:app --reload --host 127.0.0.1 --port 8000",
+    "format": "nx format:write"
+  },
+  "devDependencies": {
+    "@nx/react": "^19.6.4",
+    "@nx/vite": "^19.6.4",
+    "@vitejs/plugin-react": "^4.3.3",
+    "@types/node": "^22.10.2",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "nx": "^19.6.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.8"
+  },
+  "dependencies": {
+    "react": "19.2.7",
+    "react-dom": "19.2.7",
+    "react-router-dom": "^6.28.0",
+    "zustand": "^5.0.2"
+  }
+}

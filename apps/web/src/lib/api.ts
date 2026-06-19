@@ -1,0 +1,322 @@
+import type { StockRecord } from "../data/market";
+
+const API_BASE = "/api";
+
+export type StockTechnicals = {
+  rsi14?: number;
+  macd?: number;
+  macdSignal?: number;
+  macdHistogram?: number;
+  sma20?: number;
+  sma50?: number;
+  sma200?: number;
+  ema20?: number;
+  volatility?: number;
+  avgVolume?: number;
+  currentVolume?: number;
+  volumeRatio?: number;
+  support?: number;
+  resistance?: number;
+  momentum?: number;
+  trend?: {
+    week?: number;
+    month?: number;
+    quarter?: number;
+  };
+  signal?: string;
+};
+
+export type StockNewsItem = {
+  title: string;
+  link?: string;
+  publisher?: string;
+  provider?: string;
+  publishedAt?: string;
+  summary?: string;
+};
+
+export type StockDetailResponse = {
+  stock: StockRecord;
+  history: Array<{
+    date: string;
+    close: number;
+    volume?: number;
+    high?: number;
+    low?: number;
+    open?: number;
+  }>;
+  technicals: StockTechnicals;
+  news: StockNewsItem[];
+  business?: {
+    sector?: string;
+    industry?: string;
+    marketCap?: number;
+    enterpriseValue?: number;
+    peRatio?: number;
+    priceToBook?: number;
+    roe?: number;
+    roa?: number;
+    profitMargin?: number;
+    operatingMargin?: number;
+    grossMargin?: number;
+    revenueGrowth?: number;
+    earningsGrowth?: number;
+    dividendYield?: number;
+    payoutRatio?: number;
+    debtToEquity?: number;
+    beta?: number;
+    ytdReturn?: number;
+    oneYearReturn?: number;
+    twoYearReturn?: number;
+    threeYearReturn?: number;
+    fourYearReturn?: number;
+    analystRating?: string;
+    analystScore?: number;
+    targetMeanPrice?: number;
+    currentPrice?: number;
+    companySummary?: string;
+  };
+  performance?: {
+    trend?: string;
+    momentumScore?: number;
+    returns?: {
+      ytd?: number;
+      "1y"?: number;
+      "2y"?: number;
+      "3y"?: number;
+      "4y"?: number;
+    };
+    line?: number[];
+  };
+  peerRank?: {
+    sector?: string;
+    count?: number;
+    rank?: number;
+    isNo1?: boolean;
+    leader?: string;
+    leaderScore?: number;
+  };
+  verdict?: {
+    action?: "BUY" | "WAIT" | "PASS";
+    headline?: string;
+    analyst?: string;
+    confidence?: string;
+    score?: number;
+  };
+  outlook?: {
+    summary?: string;
+    bull?: string;
+    bear?: string;
+    industryLeader?: boolean;
+  };
+  financials?: {
+    incomeStatement?: Record<string, unknown>;
+    quarterlyIncomeStatement?: Record<string, unknown>;
+    balanceSheet?: Record<string, unknown>;
+    quarterlyBalanceSheet?: Record<string, unknown>;
+    cashFlow?: Record<string, unknown>;
+    quarterlyCashFlow?: Record<string, unknown>;
+    earnings?: Array<Record<string, unknown>>;
+    calendar?: Record<string, unknown>;
+    secFilings?: Array<Record<string, unknown>>;
+  };
+  sectorInsight?: {
+    key?: string;
+    industries?: Array<Record<string, unknown>>;
+    topEtfs?: Array<{ symbol: string; name: string }>;
+    topMutualFunds?: Array<{ symbol: string; name: string }>;
+  } | null;
+  industryInsight?: {
+    key?: string;
+    sectorKey?: string | null;
+    sectorName?: string | null;
+    topPerformingCompanies?: Array<Record<string, unknown>>;
+    topGrowthCompanies?: Array<Record<string, unknown>>;
+  } | null;
+  strategy?: string;
+  ai?: StockAnalysisResponse;
+};
+
+export type StockAnalysisResponse = {
+  score: number;
+  recommendation: string;
+  summary: string;
+  reasons: string[];
+  future?: string;
+  confidence?: string;
+  technicalNotes?: string[];
+  newsNotes?: string[];
+  raw?: string;
+};
+
+export type PaginatedStocksResponse = {
+  stocks?: StockRecord[];
+  page?: number;
+  limit?: number;
+  total?: number;
+  totalPages?: number;
+  performance?: {
+    score?: number;
+    confidence?: string;
+    recommendation?: string;
+  };
+  strategy?: string;
+  label?: string;
+  narrative?: Record<string, string>;
+  matches?: StockRecord[];
+};
+
+export type DiscoveryItem = {
+  symbol: string;
+  name: string;
+  kind: string;
+  query: string;
+  exchange?: string | null;
+  quoteType?: string | null;
+  sector?: string | null;
+  industry?: string | null;
+  currency?: string | null;
+  price?: number | null;
+  changePct?: number | null;
+  marketCap?: number | null;
+  source?: string;
+};
+
+export type DiscoverySection = {
+  kind: string;
+  label: string;
+  count: number;
+  items: DiscoveryItem[];
+};
+
+export type DiscoveryResponse = {
+  query: string;
+  kind: string;
+  limit: number;
+  count: number;
+  items: DiscoveryItem[];
+  sections: DiscoverySection[];
+  live: StockRecord[];
+};
+
+export type SectorInsightResponse = {
+  key?: string;
+  industries?: Array<Record<string, unknown>>;
+  topEtfs?: Array<{ symbol: string; name: string }>;
+  topMutualFunds?: Array<{ symbol: string; name: string }>;
+};
+
+export type IndustryInsightResponse = {
+  key?: string;
+  sectorKey?: string | null;
+  sectorName?: string | null;
+  topPerformingCompanies?: Array<Record<string, unknown>>;
+  topGrowthCompanies?: Array<Record<string, unknown>>;
+};
+
+export async function loadStockDetail(symbol: string): Promise<StockDetailResponse> {
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load stock detail: ${response.status}`);
+  }
+
+  return (await response.json()) as StockDetailResponse;
+}
+
+export async function summarizeStock(symbol: string, strategy?: string): Promise<StockAnalysisResponse> {
+  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ strategy })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to summarize stock: ${response.status}`);
+  }
+
+  return (await response.json()) as StockAnalysisResponse;
+}
+
+export async function loadStocks(params?: {
+  strategy?: string;
+  q?: string;
+  index?: string;
+  sort?: string;
+  direction?: string;
+  page?: number;
+  limit?: number;
+  endpoint?: "stocks" | "dashboard" | "radar";
+}): Promise<PaginatedStocksResponse> {
+  const endpoint = params?.endpoint ?? "stocks";
+  const query = new URLSearchParams();
+  if (params?.strategy) {
+    query.set("strategy", params.strategy);
+  }
+  if (params?.q) {
+    query.set("q", params.q);
+  }
+  if (params?.index) {
+    query.set("index", params.index);
+  }
+  if (params?.sort) {
+    query.set("sort", params.sort);
+  }
+  if (params?.direction) {
+    query.set("direction", params.direction);
+  }
+  if (typeof params?.page === "number") {
+    query.set("page", String(params.page));
+  }
+  if (typeof params?.limit === "number") {
+    query.set("limit", String(params.limit));
+  }
+
+  const response = await fetch(`${API_BASE}/${endpoint}${query.toString() ? `?${query}` : ""}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load stocks: ${response.status}`);
+  }
+
+  return (await response.json()) as PaginatedStocksResponse;
+}
+
+export async function loadDiscoveries(params?: {
+  q?: string;
+  kind?: string;
+  limit?: number;
+}): Promise<DiscoveryResponse> {
+  const query = new URLSearchParams();
+  if (params?.q) {
+    query.set("q", params.q);
+  }
+  if (params?.kind) {
+    query.set("kind", params.kind);
+  }
+  if (typeof params?.limit === "number") {
+    query.set("limit", String(params.limit));
+  }
+
+  const response = await fetch(`${API_BASE}/discover${query.toString() ? `?${query}` : ""}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load discovery data: ${response.status}`);
+  }
+
+  return (await response.json()) as DiscoveryResponse;
+}
+
+export async function loadSectorInsight(key: string): Promise<SectorInsightResponse> {
+  const response = await fetch(`${API_BASE}/sectors/${encodeURIComponent(key)}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load sector insight: ${response.status}`);
+  }
+  return (await response.json()) as SectorInsightResponse;
+}
+
+export async function loadIndustryInsight(key: string): Promise<IndustryInsightResponse> {
+  const response = await fetch(`${API_BASE}/industries/${encodeURIComponent(key)}`);
+  if (!response.ok) {
+    throw new Error(`Failed to load industry insight: ${response.status}`);
+  }
+  return (await response.json()) as IndustryInsightResponse;
+}
