@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { StrategyKey } from "../data/market";
+import type { StockRecord, StrategyKey } from "../data/market";
 
 type WolfState = {
   selectedStrategy: StrategyKey;
@@ -9,6 +9,7 @@ type WolfState = {
   radarIndex: string;
   radarSort: "score" | "change" | "trend";
   radarDirection: "desc" | "asc";
+  watchlist: StockRecord[];
   setStrategy: (strategy: StrategyKey) => void;
   setSelectedSymbol: (symbol: string) => void;
   openDetail: (symbol: string) => void;
@@ -18,6 +19,7 @@ type WolfState = {
   setRadarIndex: (index: string) => void;
   setRadarSort: (sort: "score" | "change" | "trend") => void;
   setRadarDirection: (direction: "desc" | "asc") => void;
+  setWatchlist: (rows: StockRecord[]) => void;
 };
 
 export const useWolfStore = create<WolfState>((set) => ({
@@ -28,6 +30,7 @@ export const useWolfStore = create<WolfState>((set) => ({
   radarIndex: "all",
   radarSort: "score",
   radarDirection: "desc",
+  watchlist: [],
   setStrategy: (selectedStrategy) => set({ selectedStrategy }),
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
   openDetail: (selectedSymbol) => set({ selectedSymbol, detailOpen: true }),
@@ -36,5 +39,6 @@ export const useWolfStore = create<WolfState>((set) => ({
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setRadarIndex: (radarIndex) => set({ radarIndex }),
   setRadarSort: (radarSort) => set({ radarSort }),
-  setRadarDirection: (radarDirection) => set({ radarDirection })
+  setRadarDirection: (radarDirection) => set({ radarDirection }),
+  setWatchlist: (watchlist) => set({ watchlist })
 }));

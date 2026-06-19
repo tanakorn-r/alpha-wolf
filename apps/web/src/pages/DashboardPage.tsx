@@ -1,14 +1,14 @@
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
-import { Progress } from "../components/ui/progress";
 import { strategyLabels, type StockRecord, type StrategyKey } from "../data/market";
 import { loadStocks } from "../lib/api";
+import { colorForSymbol, initialFor } from "../lib/symbolColor";
 import { useWolfStore } from "../store/useWolfStore";
 
 const strategyOrder: StrategyKey[] = ["capitalized", "stable_dca", "yield", "momentum"];
-const pageSize = 6;
+const tableSize = 10;
 
 type DashboardNarrative = {
   title?: string;
@@ -42,370 +42,286 @@ function formatChange(value?: number) {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+function buildSparkPath(values: number[], width: number, height: number) {
+  if (!values.length) {
+    return `M 0 ${height}`;
+  }
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 0.0001);
+  const step = width / Math.max(values.length - 1, 1);
+  return values
+    .map((value, index) => {
+      const x = index * step;
+      const y = height - ((value - min) / range) * (height - 6) - 3;
+      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(" ");
+}
+
+function Sparkline({ values, positive }: { values: number[]; positive: boolean }) {
+  const path = buildSparkPath(values, 70, 26);
+  return (
+    <svg viewBox="0 0 70 26" className={`quote-card-spark spark-line ${positive ? "positive" : "negative"}`} aria-hidden="true">
+      <path d={path} fill="none" strokeWidth="2" />
+    </svg>
+  );
+}
+
 export function DashboardPage() {
   const selectedStrategy = useWolfStore((state) => state.selectedStrategy);
   const setStrategy = useWolfStore((state) => state.setStrategy);
   const openDetail = useWolfStore((state) => state.openDetail);
-  const searchQuery = useWolfStore((state) => state.searchQuery);
-  const deferredSearch = useDeferredValue(searchQuery.trim());
+  const setWatchlist = useWolfStore((state) => state.setWatchlist);
 
   const [rows, setRows] = useState<StockRecord[]>([]);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [performance, setPerformance] = useState<DashboardPerformance>({
     score: 0,
     confidence: "Balanced",
     recommendation: ""
   });
   const [narrative, setNarrative] = useState<DashboardNarrative>({});
-  const loadMoreRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    setPage(1);
-    setRows([]);
-    setHasMore(true);
-  }, [selectedStrategy, deferredSearch]);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
 
-    if (page === 1) {
-      setLoading(true);
-    } else {
-      setLoadingMore(true);
-    }
-
-    loadStocks({
-      endpoint: "dashboard",
-      strategy: selectedStrategy,
-      q: deferredSearch || undefined,
-      page,
-      limit: pageSize
-    })
+    loadStocks({ endpoint: "dashboard", strategy: selectedStrategy, page: 1, limit: tableSize })
       .then((payload) => {
         if (!active) {
           return;
         }
-
         const nextRows = payload.stocks ?? [];
-        const nextPerformance = payload.performance ?? {};
-        const nextNarrative = payload.narrative ?? {};
-        const nextTotalPages = payload.totalPages ?? 1;
-
-        setRows((current) => (page === 1 ? nextRows : [...current, ...nextRows]));
-        setTotalPages(nextTotalPages);
-        setHasMore(page < nextTotalPages && nextRows.length > 0);
+        setRows(nextRows);
+        setWatchlist(nextRows.slice(0, 4));
         setPerformance({
-          score: Number(nextPerformance.score ?? 0),
-          confidence: nextPerformance.confidence ?? "Balanced",
-          recommendation: nextPerformance.recommendation ?? ""
+          score: Number(payload.performance?.score ?? 0),
+          confidence: payload.performance?.confidence ?? "Balanced",
+          recommendation: payload.performance?.recommendation ?? ""
         });
-        setNarrative(nextNarrative);
+        setNarrative(payload.narrative ?? {});
       })
       .catch(() => {
         if (!active) {
           return;
         }
-
-        setRows(page === 1 ? [] : rows);
-        setTotalPages(1);
-        setHasMore(false);
+        setRows([]);
         setPerformance({ score: 0, confidence: "Balanced", recommendation: "" });
         setNarrative({});
       })
       .finally(() => {
         if (active) {
           setLoading(false);
-          setLoadingMore(false);
         }
       });
 
     return () => {
       active = false;
     };
-  }, [deferredSearch, page, selectedStrategy]);
+  }, [selectedStrategy, setWatchlist]);
 
-  useEffect(() => {
-    const node = loadMoreRef.current;
-    if (!node || !hasMore || loading || loadingMore) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && hasMore) {
-          setPage((current) => current + 1);
-        }
-      },
-      { rootMargin: "160px" }
-    );
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [hasMore, loading, loadingMore]);
-
+  const quoteRows = rows.slice(0, 4);
+  const pickRows = rows.slice(4, 8);
   const topStock = rows[0] ?? null;
-  const activeNow = [...rows].sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct)).slice(0, 4);
-  const liveLabel = rows.length ? `${rows.length} live names` : "Waiting for live data";
-
-  const heroMetrics = [
-    {
-      label: "Best fit",
-      value: topStock?.symbol ?? "N/A",
-      detail: topStock ? `${topStock.name} · ${topStock.sector}` : "No live matches yet"
-    },
-    {
-      label: "Price",
-      value: formatMoney(topStock?.price),
-      detail: topStock ? `${formatChange(topStock.changePct)} today` : "Pulling live quote"
-    },
-    {
-      label: "Strategy",
-      value: strategyLabels[selectedStrategy],
-      detail: `${performance.score}% fit`
-    }
-  ];
-
-  const activePeak = Math.max(1, ...activeNow.map((stock) => Math.abs(stock.changePct ?? 0)));
+  const pulseValues = rows.map((stock) => stock.price);
+  const pulsePositive = (topStock?.changePct ?? 0) >= 0;
+  const pulsePath = buildSparkPath(pulseValues, 100, 100);
 
   return (
     <div className="page-layout">
-      <section className="hero-grid">
-        <Card className="hero-card">
+      <div className="detail-pills">
+        {strategyOrder.map((strategy) => (
+          <Button
+            key={strategy}
+            variant={strategy === selectedStrategy ? "default" : "secondary"}
+            onClick={() => setStrategy(strategy)}
+          >
+            {strategyLabels[strategy]}
+          </Button>
+        ))}
+      </div>
+
+      <div className="quote-row">
+        {quoteRows.length
+          ? quoteRows.map((stock) => {
+              const color = colorForSymbol(stock.symbol);
+              const positive = stock.changePct >= 0;
+              return (
+                <button key={stock.symbol} className="quote-card shadcn-card" type="button" onClick={() => openDetail(stock.symbol)}>
+                  <div className="quote-card-top">
+                    <div className="quote-card-id">
+                      <span className="quote-icon" style={{ background: color.bg, color: color.fg }}>
+                        {initialFor(stock.symbol)}
+                      </span>
+                      <span className="quote-card-meta">
+                        <span className="quote-card-symbol">{stock.symbol}</span>
+                        <span className="quote-card-name">{stock.name}</span>
+                      </span>
+                    </div>
+                    <Sparkline values={[stock.price * 0.97, stock.price * (1 - stock.weeklyTrend / 400), stock.price]} positive={positive} />
+                  </div>
+                  <div className="quote-card-bottom">
+                    <div className="quote-card-price">
+                      <span className="quote-card-price-label">Price</span>
+                      <span className="quote-card-price-value">{formatMoney(stock.price)}</span>
+                    </div>
+                    <Badge variant={positive ? "default" : "muted"} className={positive ? "badge-positive" : "badge-negative"}>
+                      {formatChange(stock.changePct)}
+                    </Badge>
+                  </div>
+                </button>
+              );
+            })
+          : Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="quote-card shadcn-card">
+                <div className="empty-state">Loading live quote...</div>
+              </div>
+            ))}
+      </div>
+
+      <div className="widget-grid">
+        <Card className="pulse-card">
           <CardHeader>
-            <Badge>Dashboard</Badge>
-            <CardTitle className="hero-title">Live stocks ranked for the strategy you picked.</CardTitle>
-            <CardDescription className="hero-description">
-              Search by symbol or company, then review real price, trend, and fit from the yfinance feed.
-            </CardDescription>
-          </CardHeader>
-
-          <CardContent className="stack-gap">
-            <div className="detail-pills">
-              {strategyOrder.map((strategy) => {
-                const active = strategy === selectedStrategy;
-                return (
-                  <Button
-                    key={strategy}
-                    variant={active ? "default" : "secondary"}
-                    onClick={() => setStrategy(strategy)}
-                  >
-                    {strategyLabels[strategy]}
-                  </Button>
-                );
-              })}
-            </div>
-
-            <div className="summary-grid">
-              {heroMetrics.map((item) => (
-                <div key={item.label} className="summary-card">
-                  <div className="summary-label">{item.label}</div>
-                  <div className="summary-value">{item.value}</div>
-                  <div className="summary-copy">{item.detail}</div>
+            <div className="pulse-card-head">
+              <div>
+                <CardDescription>Strategy pulse</CardDescription>
+                <div className="pulse-total-label">{strategyLabels[selectedStrategy]} - live read across {rows.length} names</div>
+                <div className="pulse-total-value">{performance.score}% fit</div>
+                <div className={`pulse-total-change ${pulsePositive ? "positive" : "negative"}`}>
+                  {topStock ? `${topStock.symbol} ${formatChange(topStock.changePct)}` : "Waiting for live data"}
                 </div>
-              ))}
+              </div>
+              <Button variant="secondary" onClick={() => topStock && openDetail(topStock.symbol)}>
+                More insight
+              </Button>
             </div>
-
-            <div className="performance-stack">
-              <div className="performance-card performance-positive">
-                <div className="performance-label">{narrative.title ?? "Fantastic view"}</div>
-                <div className="performance-copy">{narrative.positive ?? "Loading live strategy insight."}</div>
-              </div>
-              <div className="performance-card performance-negative">
-                <div className="performance-label">Bad potential performance</div>
-                <div className="performance-copy">{narrative.negative ?? "Loading downside view."}</div>
-              </div>
-              <div className="performance-card performance-recommendation">
-                <div className="performance-label">Recommendation</div>
-                <div className="performance-copy">{narrative.recommendation || performance.recommendation || "Waiting for live recommendation."}</div>
-              </div>
-            </div>
+          </CardHeader>
+          <CardContent>
+            <svg viewBox="0 0 100 100" className="pulse-chart" aria-label="Strategy pulse chart">
+              <path d={`${pulsePath} L 100 100 L 0 100 Z`} className={`pulse-fill ${pulsePositive ? "positive" : "negative"}`} />
+              <path d={pulsePath} className={`pulse-line ${pulsePositive ? "positive" : "negative"}`} fill="none" strokeWidth="2" />
+            </svg>
           </CardContent>
         </Card>
 
-        <Card className="hero-side-card">
+        <Card className="balance-card">
           <CardHeader>
             <CardDescription>Performance view</CardDescription>
-            <div className="card-headline">
-              <div className="card-amount">{performance.score}% fit</div>
-              <Badge variant="muted">{performance.confidence}</Badge>
-            </div>
+            <div className="balance-total-label">Confidence</div>
+            <div className="balance-total-value">{performance.confidence}</div>
           </CardHeader>
-          <CardContent className="score-shell">
-            <div className="active-now-panel">
-              <div className="active-now-header">
-                <div>
-                  <div className="score-note-label">Most active now</div>
-                  <div className="active-now-title">Names moving enough to trigger FOMO.</div>
-                </div>
-                <div className="active-now-chip">Live</div>
-              </div>
-
-              <div className="active-now-rows">
-                {activeNow.length ? (
-                  activeNow.map((stock) => {
-                    const score = stock.strategyScores[selectedStrategy] ?? 0;
-                    const width = Math.max(14, (Math.abs(stock.changePct ?? 0) / activePeak) * 100);
-                    return (
-                      <button key={stock.symbol} className="active-now-row" type="button" onClick={() => openDetail(stock.symbol)}>
-                        <div className="active-now-main">
-                          <strong>{stock.symbol}</strong>
-                          <span>{stock.sector}</span>
-                        </div>
-                        <div className={`active-now-change ${stock.changePct >= 0 ? "positive" : "negative"}`}>
-                          {formatChange(stock.changePct)}
-                        </div>
-                        <div className="active-now-meter">
-                          <span style={{ width: `${width}%` }} className={`active-now-fill ${stock.changePct >= 0 ? "positive" : "negative"}`} />
-                        </div>
-                        <div className="active-now-score">{score}/100</div>
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="empty-state">Loading active names...</div>
-                )}
-              </div>
-
-              <div className="active-now-chart">
-                <svg viewBox="0 0 100 34" aria-label="Active stock change chart">
-                  {activeNow.map((stock, index) => {
-                    const width = 12;
-                    const gap = 8;
-                    const x = index * (width + gap) + 4;
-                    const height = Math.max(6, (Math.abs(stock.changePct ?? 0) / activePeak) * 26);
-                    const y = 30 - height;
-                    return (
-                      <rect
-                        key={stock.symbol}
-                        x={x}
-                        y={y}
-                        width={width}
-                        height={height}
-                        rx="4"
-                        className={stock.changePct >= 0 ? "positive" : "negative"}
-                      />
-                    );
-                  })}
-                </svg>
-              </div>
-            </div>
-
-            <div className="score-ring" style={{ ["--score" as string]: performance.score }}>
-              <div className="score-ring-inner">
-                <div className="score-ring-value">{performance.score}%</div>
-                <div className="score-ring-label">strategy fit</div>
-              </div>
-            </div>
-
-            <div className="score-notes">
-              <div className="score-note">
-                <span className="score-note-label">Live watchlist</span>
-                <span className="score-note-value">{liveLabel}</span>
-              </div>
-              <div className="score-note">
-                <span className="score-note-label">Total pages</span>
-                <span className="score-note-value">{totalPages}</span>
-              </div>
-              <div className="score-note">
-                <span className="score-note-label">Best current match</span>
-                <span className="score-note-value">{topStock?.symbol ?? "N/A"}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </section>
-
-      <section className="content-grid">
-        <Card className="list-card">
-          <CardHeader>
-            <CardTitle>Interesting stocks</CardTitle>
-            <CardDescription>Sorted and paginated by real market data, not demo rows.</CardDescription>
-          </CardHeader>
-
           <CardContent className="stack-gap">
-            {rows.map((stock) => {
-              const score = stock.strategyScores[selectedStrategy] ?? 0;
-              return (
-                <article key={stock.symbol} className="stock-row clickable-row" onClick={() => openDetail(stock.symbol)}>
-                  <div className="stock-main">
-                    <div className="stock-symbol">{stock.symbol}</div>
-                    <div className="stock-name">{stock.name}</div>
-                    <div className="stock-meta">
-                      <Badge variant="muted">{stock.sector}</Badge>
-                      {stock.indexes.slice(0, 3).map((item) => (
-                        <span key={item} className="stock-tag">
-                          {item}
-                        </span>
-                      ))}
-                    </div>
-                    <div className="stock-story">{stock.story}</div>
-                  </div>
-
-                  <div className="stock-side">
-                    <div className="stock-price">{formatMoney(stock.price)}</div>
-                    <div className={`stock-change ${stock.changePct >= 0 ? "positive" : "negative"}`}>
-                      {formatChange(stock.changePct)}
-                    </div>
-                    <div className="stock-score">
-                      <div className="stock-score-head">
-                        <span>Strategy score</span>
-                        <span>{score}/100</span>
-                      </div>
-                      <Progress value={score} />
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
-
-            {loading && rows.length === 0 ? (
-              <div className="empty-state">Loading live market data from yfinance...</div>
-            ) : null}
-
-            {!loading && rows.length === 0 ? (
-              <div className="empty-state">No live stocks matched your search.</div>
-            ) : null}
-
-            <div ref={loadMoreRef} className="load-more-sentinel">
-              {loadingMore ? "Loading more live rows..." : hasMore ? "Scroll for more" : "End of live results"}
+            <div className="balance-row">
+              <span className="balance-row-label">Best current match</span>
+              <span className="balance-row-value">{topStock?.symbol ?? "N/A"}</span>
+            </div>
+            <div className="balance-row">
+              <span className="balance-row-label">Recommendation</span>
+              <span className="balance-row-value">{narrative.recommendation || performance.recommendation || "Loading..."}</span>
+            </div>
+            <div className="balance-actions">
+              <Button variant="secondary" onClick={() => topStock && openDetail(topStock.symbol)}>
+                View detail
+              </Button>
+              <Button onClick={() => topStock && openDetail(topStock.symbol)}>Ask AI</Button>
             </div>
           </CardContent>
         </Card>
+      </div>
 
-        <Card className="insight-card">
+      <div className="widget-grid">
+        <Card>
           <CardHeader>
-            <CardTitle>Performance view</CardTitle>
-            <CardDescription>Quick read on the upside, downside, and current recommendation.</CardDescription>
+            <CardTitle>Market overview</CardTitle>
+            <CardDescription>Live names ranked for {strategyLabels[selectedStrategy]}, straight from the yfinance feed.</CardDescription>
           </CardHeader>
-
-          <CardContent className="stack-gap">
-            <div className="performance-card performance-positive">
-              <div className="performance-label">Fantastic view</div>
-              <div className="performance-copy">
-                {narrative.positive ?? "The live feed will populate the best upside case for your selected strategy."}
-              </div>
-            </div>
-
-            <div className="performance-card performance-negative">
-              <div className="performance-label">Bad potential performance</div>
-              <div className="performance-copy">
-                {narrative.negative ?? "The live feed will show where the strategy can still break down."}
-              </div>
-            </div>
-
-            <div className="performance-card performance-recommendation">
-              <div className="performance-label">Recommendation</div>
-              <div className="performance-copy">
-                {narrative.recommendation || performance.recommendation || "Best current live match will appear here."}
-              </div>
-            </div>
+          <CardContent>
+            <table className="market-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Price</th>
+                  <th>Change</th>
+                  <th>Chart</th>
+                  <th>Fit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((stock) => {
+                  const color = colorForSymbol(stock.symbol);
+                  const positive = stock.changePct >= 0;
+                  const score = stock.strategyScores[selectedStrategy] ?? 0;
+                  return (
+                    <tr key={stock.symbol} className="clickable-row" onClick={() => openDetail(stock.symbol)}>
+                      <td>
+                        <div className="market-table-symbol">
+                          <span className="market-table-symbol-icon" style={{ background: color.bg, color: color.fg }}>
+                            {initialFor(stock.symbol)}
+                          </span>
+                          <span className="market-table-symbol-meta">
+                            <strong>{stock.symbol}</strong>
+                            <span className="market-table-symbol-name">{stock.sector}</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td>{formatMoney(stock.price)}</td>
+                      <td className={positive ? "positive" : "negative"}>{formatChange(stock.changePct)}</td>
+                      <td>
+                        <svg viewBox="0 0 70 26" className={`market-table-spark spark-line ${positive ? "positive" : "negative"}`} aria-hidden="true">
+                          <path
+                            d={buildSparkPath([stock.price * (1 - stock.weeklyTrend / 100), stock.price], 70, 26)}
+                            fill="none"
+                            strokeWidth="2"
+                          />
+                        </svg>
+                      </td>
+                      <td>{score}/100</td>
+                    </tr>
+                  );
+                })}
+                {!loading && !rows.length ? (
+                  <tr>
+                    <td colSpan={5} className="empty-state">
+                      No live stocks matched right now.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+            {loading && !rows.length ? <div className="empty-state">Loading live market data...</div> : null}
           </CardContent>
         </Card>
-      </section>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Top picks</CardTitle>
+            <CardDescription>Next best fits after the headline names above.</CardDescription>
+          </CardHeader>
+          <CardContent className="picks-list">
+            {pickRows.length ? (
+              pickRows.map((stock) => {
+                const color = colorForSymbol(stock.symbol);
+                const score = stock.strategyScores[selectedStrategy] ?? 0;
+                return (
+                  <button key={stock.symbol} className="picks-row" type="button" onClick={() => openDetail(stock.symbol)}>
+                    <span className="picks-row-icon" style={{ background: color.bg, color: color.fg }}>
+                      {initialFor(stock.symbol)}
+                    </span>
+                    <span className="picks-row-meta">
+                      <span className="picks-row-symbol">{stock.symbol}</span>
+                      <span className="picks-row-story">{stock.story}</span>
+                    </span>
+                    <span className="picks-row-score">{score}/100</span>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="empty-state">Loading more live names...</div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

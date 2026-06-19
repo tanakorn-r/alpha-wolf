@@ -8,6 +8,7 @@ import { DiscoverPage } from "./pages/DiscoverPage";
 import { RadarPage } from "./pages/RadarPage";
 import { brandTheme } from "./theme";
 import { loadStockDetail, summarizeStock, type StockAnalysisResponse, type StockDetailResponse } from "./lib/api";
+import { colorForSymbol, initialFor } from "./lib/symbolColor";
 import { useWolfStore } from "./store/useWolfStore";
 
 type NavItem = {
@@ -193,10 +194,13 @@ export default function App() {
     };
   }, [detailOpen, selectedSymbol]);
 
-  const navItems: NavItem[] = [
+  const overviewNavItems: NavItem[] = [
     { to: "/", label: "Dashboard", kind: "dashboard" },
-    { to: "/discover", label: "Discover", kind: "discover" },
     { to: "/radar", label: "Radar", kind: "radar" },
+    { to: "/discover", label: "Discover", kind: "discover" }
+  ];
+
+  const activityNavItems: NavItem[] = [
     {
       label: "Search",
       kind: "search",
@@ -215,6 +219,8 @@ export default function App() {
       }
     }
   ];
+
+  const watchlist = useWolfStore((state) => state.watchlist);
 
   const chartPath = useMemo(() => {
     const values = detail?.history.map((point) => point.close).filter((value): value is number => typeof value === "number") ?? [];
@@ -303,21 +309,78 @@ export default function App() {
             </div>
           </div>
 
-          <nav className="sidebar-nav">
-            {navItems.map((item) =>
-              item.to ? (
-                <NavLink key={item.label} to={item.to} className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
+          <div>
+            <div className="sidebar-section-label">Overview</div>
+            <nav className="sidebar-nav">
+              {overviewNavItems.map((item) => (
+                <NavLink key={item.label} to={item.to!} className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
                   {iconFor(item.kind)}
                   <span className="sidebar-link-label">{item.label}</span>
                 </NavLink>
-              ) : (
+              ))}
+            </nav>
+          </div>
+
+          <div>
+            <div className="sidebar-section-label">Activity</div>
+            <nav className="sidebar-nav">
+              {activityNavItems.map((item) => (
                 <button key={item.label} className="sidebar-link" type="button" onClick={item.onClick}>
                   {iconFor(item.kind)}
                   <span className="sidebar-link-label">{item.label}</span>
                 </button>
-              )
-            )}
-          </nav>
+              ))}
+            </nav>
+          </div>
+
+          <div>
+            <div className="sidebar-section-label">My Watchlist</div>
+            <div className="sidebar-watchlist">
+              {watchlist.length ? (
+                watchlist.map((stock) => {
+                  const color = colorForSymbol(stock.symbol);
+                  return (
+                    <button
+                      key={stock.symbol}
+                      type="button"
+                      className="watchlist-row"
+                      onClick={() => useWolfStore.getState().openDetail(stock.symbol)}
+                    >
+                      <span className="watchlist-icon" style={{ background: color.bg, color: color.fg }}>
+                        {initialFor(stock.symbol)}
+                      </span>
+                      <span className="watchlist-meta">
+                        <span className="watchlist-symbol">{stock.symbol}</span>
+                        <span className="watchlist-sector">{stock.sector}</span>
+                      </span>
+                      <span className="watchlist-price">{formatMoney(stock.price)}</span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="watchlist-row" style={{ color: "var(--sidebar-text)" }}>
+                  Loading live names...
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="sidebar-spacer" />
+
+          <div className="sidebar-cta">
+            <div className="sidebar-cta-title">Unlock deeper AI analysis</div>
+            <div className="sidebar-cta-copy">Get GPT-driven verdicts, technicals, and sector insight on every name.</div>
+            <Button
+              type="button"
+              onClick={() => {
+                if (selectedSymbol) {
+                  useWolfStore.getState().openDetail(selectedSymbol);
+                }
+              }}
+            >
+              Open AI summary
+            </Button>
+          </div>
         </aside>
 
         <div className="workspace">
@@ -339,7 +402,13 @@ export default function App() {
             <div className="topbar-right">
               <div className="topbar-chip">Live</div>
               <div className="topbar-chip">{selectedSymbol || "Pick a name"}</div>
-              <div className="avatar">D</div>
+              <div className="avatar-block">
+                <div className="avatar">D</div>
+                <div className="avatar-caption">
+                  <span className="avatar-name">Daniel</span>
+                  <span className="avatar-role">Trader</span>
+                </div>
+              </div>
             </div>
           </header>
 

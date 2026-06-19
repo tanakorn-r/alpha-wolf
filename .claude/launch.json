@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd apps/api && python3 -m uvicorn main:app --reload --host 127.0.0.1 --port 8000"],
+      "port": 8000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["nx", "serve", "web", "--port", "4201"],
+      "port": 4201
+    }
+  ]
+}
