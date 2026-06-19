@@ -6,9 +6,6 @@ type WolfState = {
   selectedSymbol: string;
   detailOpen: boolean;
   searchQuery: string;
-  radarIndex: string;
-  radarSort: "score" | "change" | "trend";
-  radarDirection: "desc" | "asc";
   watchlist: StockRecord[];
   setStrategy: (strategy: StrategyKey) => void;
   setSelectedSymbol: (symbol: string) => void;
@@ -16,9 +13,6 @@ type WolfState = {
   closeDetail: () => void;
   setDetailOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
-  setRadarIndex: (index: string) => void;
-  setRadarSort: (sort: "score" | "change" | "trend") => void;
-  setRadarDirection: (direction: "desc" | "asc") => void;
   setWatchlist: (rows: StockRecord[]) => void;
 };
 
@@ -27,9 +21,6 @@ export const useWolfStore = create<WolfState>((set) => ({
   selectedSymbol: "",
   detailOpen: false,
   searchQuery: "",
-  radarIndex: "all",
-  radarSort: "score",
-  radarDirection: "desc",
   watchlist: [],
   setStrategy: (selectedStrategy) => set({ selectedStrategy }),
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
@@ -37,8 +28,5 @@ export const useWolfStore = create<WolfState>((set) => ({
   closeDetail: () => set({ detailOpen: false }),
   setDetailOpen: (detailOpen) => set({ detailOpen }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
-  setRadarIndex: (radarIndex) => set({ radarIndex }),
-  setRadarSort: (radarSort) => set({ radarSort }),
-  setRadarDirection: (radarDirection) => set({ radarDirection }),
   setWatchlist: (watchlist) => set({ watchlist })
 }));

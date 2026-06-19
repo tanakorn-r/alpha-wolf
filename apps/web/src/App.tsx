@@ -1,68 +1,49 @@
 import { useEffect, useMemo, useState } from "react";
 import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./components/ui/card";
-import { Button } from "./components/ui/button";
-import { Progress } from "./components/ui/progress";
 import { DashboardPage } from "./pages/DashboardPage";
 import { DiscoverPage } from "./pages/DiscoverPage";
-import { RadarPage } from "./pages/RadarPage";
 import { brandTheme } from "./theme";
 import { loadStockDetail, summarizeStock, type StockAnalysisResponse, type StockDetailResponse } from "./lib/api";
 import { colorForSymbol, initialFor } from "./lib/symbolColor";
+import { negative, panel, positive } from "./lib/ui";
 import { useWolfStore } from "./store/useWolfStore";
 
 type NavItem = {
   to?: string;
   label: string;
-  kind: "dashboard" | "discover" | "radar" | "search" | "settings" | "insights";
+  kind: "dashboard" | "discover" | "search" | "insights";
   onClick?: () => void;
 };
 
-function iconFor(kind: NavItem["kind"]) {
+function NavIcon({ kind }: { kind: NavItem["kind"] }) {
+  const common = "h-[18px] w-[18px] flex-none stroke-current fill-none stroke-[1.8]";
   switch (kind) {
     case "dashboard":
       return (
-        <svg viewBox="0 0 24 24" className="sidebar-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" className={common} aria-hidden="true">
           <path d="M4 11.5 12 4l8 7.5" />
           <path d="M6.5 10.5V20h11V10.5" />
         </svg>
       );
     case "discover":
       return (
-        <svg viewBox="0 0 24 24" className="sidebar-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" className={common} aria-hidden="true">
           <circle cx="12" cy="12" r="7.5" />
           <path d="M14.8 9.2 16 8l-1.2 1.2M8 16l1.2-1.2M9.2 8 8 6.8M16 16.2 14.8 15" />
-          <path d="M12 7.5v2.5M12 14v2.5M7.5 12h2.5M14 12h2.5" />
-        </svg>
-      );
-    case "radar":
-      return (
-        <svg viewBox="0 0 24 24" className="sidebar-nav-icon" aria-hidden="true">
-          <circle cx="12" cy="12" r="8" />
-          <circle cx="12" cy="12" r="3" />
-          <path d="M12 4v4M20 12h-4M12 20v-4M4 12h4" />
         </svg>
       );
     case "search":
       return (
-        <svg viewBox="0 0 24 24" className="sidebar-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" className={common} aria-hidden="true">
           <circle cx="11" cy="11" r="6.5" />
           <path d="m16 16 4 4" />
         </svg>
       );
     case "insights":
       return (
-        <svg viewBox="0 0 24 24" className="sidebar-nav-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" className={common} aria-hidden="true">
           <path d="M5 19h14" />
           <path d="M7 15l3-4 3 2 4-7" />
-        </svg>
-      );
-    default:
-      return (
-        <svg viewBox="0 0 24 24" className="sidebar-nav-icon" aria-hidden="true">
-          <circle cx="12" cy="6" r="1.5" />
-          <circle cx="12" cy="12" r="1.5" />
-          <circle cx="12" cy="18" r="1.5" />
         </svg>
       );
   }
@@ -104,12 +85,10 @@ function buildPath(values: number[]) {
   if (!values.length) {
     return "M 0 100";
   }
-
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = Math.max(max - min, 1);
   const step = 100 / Math.max(values.length - 1, 1);
-
   return values
     .map((value, index) => {
       const x = index * step;
@@ -120,23 +99,28 @@ function buildPath(values: number[]) {
 }
 
 function DetailSkeleton() {
+  const block = "skeleton-block";
   return (
-    <div className="detail-drawer-content skeleton-stack" aria-label="Loading stock detail" aria-busy="true">
-      <div className="skeleton-chart-grid">
-        <div className="skeleton-block" style={{ height: 220 }} />
-        <div className="skeleton-block" style={{ height: 104 }} />
-        <div className="skeleton-block" style={{ height: 104 }} />
+    <div className="flex flex-col gap-4" aria-label="Loading stock detail" aria-busy="true">
+      <div className="grid grid-cols-[1.35fr_0.75fr_0.6fr] gap-3">
+        <div className={block} style={{ height: 220 }} />
+        <div className={block} style={{ height: 104 }} />
+        <div className={block} style={{ height: 104 }} />
       </div>
-      <div className="skeleton-block" style={{ height: 140 }} />
-      <div className="skeleton-card-grid">
-        <div className="skeleton-block" style={{ height: 220 }} />
-        <div className="skeleton-block" style={{ height: 220 }} />
+      <div className={block} style={{ height: 140 }} />
+      <div className="grid grid-cols-2 gap-4">
+        <div className={block} style={{ height: 220 }} />
+        <div className={block} style={{ height: 220 }} />
       </div>
-      <div className="skeleton-block" style={{ height: 160 }} />
-      <div className="skeleton-card-grid">
-        <div className="skeleton-block" style={{ height: 140 }} />
-        <div className="skeleton-block" style={{ height: 140 }} />
-      </div>
+    </div>
+  );
+}
+
+function PanelHeader({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="mb-4">
+      <div className="text-base font-bold text-slate-900">{title}</div>
+      {description ? <div className="mt-1 text-sm text-slate-500">{description}</div> : null}
     </div>
   );
 }
@@ -149,6 +133,7 @@ export default function App() {
   const detailOpen = useWolfStore((state) => state.detailOpen);
   const closeDetail = useWolfStore((state) => state.closeDetail);
   const selectedStrategy = useWolfStore((state) => state.selectedStrategy);
+  const watchlist = useWolfStore((state) => state.watchlist);
 
   const [detail, setDetail] = useState<StockDetailResponse | null>(null);
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
@@ -156,14 +141,12 @@ export default function App() {
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
 
-  const pageTitle =
-    location.pathname === "/discover" ? "Discover" : location.pathname === "/radar" ? "Radar" : "Dashboard";
+  const pageTitle = location.pathname === "/discover" ? "Discover" : "Dashboard";
 
   useEffect(() => {
     if (!detailOpen || !selectedSymbol) {
       return;
     }
-
     let active = true;
     setDetailLoading(true);
     setDetailError("");
@@ -171,22 +154,15 @@ export default function App() {
 
     loadStockDetail(selectedSymbol)
       .then((payload) => {
-        if (!active) {
-          return;
-        }
-        setDetail(payload);
+        if (active) setDetail(payload);
       })
       .catch(() => {
-        if (!active) {
-          return;
-        }
+        if (!active) return;
         setDetail(null);
         setDetailError("Unable to load the live detail panel right now.");
       })
       .finally(() => {
-        if (active) {
-          setDetailLoading(false);
-        }
+        if (active) setDetailLoading(false);
       });
 
     return () => {
@@ -196,7 +172,6 @@ export default function App() {
 
   const overviewNavItems: NavItem[] = [
     { to: "/", label: "Dashboard", kind: "dashboard" },
-    { to: "/radar", label: "Radar", kind: "radar" },
     { to: "/discover", label: "Discover", kind: "discover" }
   ];
 
@@ -204,46 +179,32 @@ export default function App() {
     {
       label: "Search",
       kind: "search",
-      onClick: () => {
-        const input = document.querySelector<HTMLInputElement>(".search-bar input");
-        input?.focus();
-      }
+      onClick: () => document.querySelector<HTMLInputElement>("#global-search")?.focus()
     },
     {
       label: "Insights",
       kind: "insights",
-      onClick: () => {
-        if (!detailOpen && selectedSymbol) {
-          useWolfStore.getState().openDetail(selectedSymbol);
-        }
-      }
+      onClick: () => selectedSymbol && useWolfStore.getState().openDetail(selectedSymbol)
     }
   ];
 
-  const watchlist = useWolfStore((state) => state.watchlist);
-
   const chartPath = useMemo(() => {
-    const values = detail?.history.map((point) => point.close).filter((value): value is number => typeof value === "number") ?? [];
+    const values = detail?.history.map((point) => point.close).filter((v): v is number => typeof v === "number") ?? [];
     return buildPath(values);
   }, [detail]);
 
-  const performancePath = useMemo(() => {
-    const values = detail?.performance?.line ?? [];
-    return buildPath(values);
-  }, [detail]);
+  const performancePath = useMemo(() => buildPath(detail?.performance?.line ?? []), [detail]);
 
   const currentHistory = detail?.history ?? [];
   const currentClose = currentHistory.at(-1)?.close;
   const previousClose = currentHistory.at(-2)?.close;
-  const chartChange = typeof currentClose === "number" && typeof previousClose === "number" && previousClose !== 0
-    ? ((currentClose - previousClose) / previousClose) * 100
-    : undefined;
+  const chartChange =
+    typeof currentClose === "number" && typeof previousClose === "number" && previousClose !== 0
+      ? ((currentClose - previousClose) / previousClose) * 100
+      : undefined;
 
   async function handleAnalyze() {
-    if (!selectedSymbol) {
-      return;
-    }
-
+    if (!selectedSymbol) return;
     setAnalysisLoading(true);
     try {
       const response = await summarizeStock(selectedSymbol, selectedStrategy);
@@ -272,7 +233,6 @@ export default function App() {
   const decisionScore = verdict?.score ?? detail?.stock.strategyScores[selectedStrategy] ?? 0;
   const decisionAction = verdict?.action ?? "WAIT";
   const decisionConfidence = verdict?.confidence ?? "Balanced";
-  const decisionLabel = decisionAction === "BUY" ? "Buy now" : decisionAction === "PASS" ? "Wait it out" : "Watch and confirm";
   const performanceRows = [
     { label: "YTD", value: returns.ytd },
     { label: "1Y", value: returns["1y"] },
@@ -298,44 +258,59 @@ export default function App() {
     : [];
 
   return (
-    <div className="shell-bg">
-      <div className="shell-frame">
-        <aside className="sidebar">
-          <div className="brand-block">
-            <div className="brand-mark">AW</div>
-            <div className="brand-caption">
-              <span className="brand-name">{brandTheme.name}</span>
-              <span className="brand-tagline">{brandTheme.tagline}</span>
+    <div className="min-h-screen bg-violet-50">
+      <div className="mx-auto flex max-w-[1560px] gap-5 p-5">
+        <aside className="sticky top-5 flex h-[calc(100vh-40px)] w-64 flex-none flex-col gap-6 rounded-2xl bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2.5 px-1">
+            <div className="flex h-9 w-9 flex-none items-center justify-center rounded-xl bg-violet-600 text-sm font-extrabold text-white">
+              AW
+            </div>
+            <div className="flex flex-col leading-tight">
+              <span className="text-sm font-extrabold text-slate-900">{brandTheme.name}</span>
+              <span className="text-[11px] text-slate-400">{brandTheme.tagline}</span>
             </div>
           </div>
 
           <div>
-            <div className="sidebar-section-label">Overview</div>
-            <nav className="sidebar-nav">
+            <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Overview</div>
+            <nav className="flex flex-col gap-1">
               {overviewNavItems.map((item) => (
-                <NavLink key={item.label} to={item.to!} className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`}>
-                  {iconFor(item.kind)}
-                  <span className="sidebar-link-label">{item.label}</span>
+                <NavLink
+                  key={item.label}
+                  to={item.to!}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition-colors ${
+                      isActive ? "bg-violet-600 text-white" : "text-slate-500 hover:bg-violet-50 hover:text-slate-900"
+                    }`
+                  }
+                >
+                  <NavIcon kind={item.kind} />
+                  {item.label}
                 </NavLink>
               ))}
             </nav>
           </div>
 
           <div>
-            <div className="sidebar-section-label">Activity</div>
-            <nav className="sidebar-nav">
+            <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">Activity</div>
+            <nav className="flex flex-col gap-1">
               {activityNavItems.map((item) => (
-                <button key={item.label} className="sidebar-link" type="button" onClick={item.onClick}>
-                  {iconFor(item.kind)}
-                  <span className="sidebar-link-label">{item.label}</span>
+                <button
+                  key={item.label}
+                  type="button"
+                  onClick={item.onClick}
+                  className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-slate-500 transition-colors hover:bg-violet-50 hover:text-slate-900"
+                >
+                  <NavIcon kind={item.kind} />
+                  {item.label}
                 </button>
               ))}
             </nav>
           </div>
 
-          <div>
-            <div className="sidebar-section-label">My Watchlist</div>
-            <div className="sidebar-watchlist">
+          <div className="flex-1 overflow-y-auto">
+            <div className="px-2 pb-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">My Watchlist</div>
+            <div className="flex flex-col gap-1">
               {watchlist.length ? (
                 watchlist.map((stock) => {
                   const color = colorForSymbol(stock.symbol);
@@ -343,469 +318,343 @@ export default function App() {
                     <button
                       key={stock.symbol}
                       type="button"
-                      className="watchlist-row"
                       onClick={() => useWolfStore.getState().openDetail(stock.symbol)}
+                      className="grid grid-cols-[26px_1fr_auto] items-center gap-2.5 rounded-xl px-2 py-1.5 text-left hover:bg-violet-50"
                     >
-                      <span className="watchlist-icon" style={{ background: color.bg, color: color.fg }}>
+                      <span
+                        className="flex h-[26px] w-[26px] items-center justify-center rounded-full text-[11px] font-extrabold"
+                        style={{ background: color.bg, color: color.fg }}
+                      >
                         {initialFor(stock.symbol)}
                       </span>
-                      <span className="watchlist-meta">
-                        <span className="watchlist-symbol">{stock.symbol}</span>
-                        <span className="watchlist-sector">{stock.sector}</span>
+                      <span className="flex min-w-0 flex-col">
+                        <span className="truncate text-[13px] font-bold text-slate-900">{stock.symbol}</span>
+                        <span className="truncate text-[11px] text-slate-400">{stock.sector}</span>
                       </span>
-                      <span className="watchlist-price">{formatMoney(stock.price)}</span>
+                      <span className="whitespace-nowrap text-[13px] font-bold text-slate-900">{formatMoney(stock.price)}</span>
                     </button>
                   );
                 })
               ) : (
-                <div className="watchlist-row" style={{ color: "var(--sidebar-text)" }}>
-                  Loading live names...
-                </div>
+                <div className="px-2 py-2 text-xs text-slate-400">Loading live names...</div>
               )}
             </div>
           </div>
 
-          <div className="sidebar-spacer" />
-
-          <div className="sidebar-cta">
-            <div className="sidebar-cta-title">Unlock deeper AI analysis</div>
-            <div className="sidebar-cta-copy">Get GPT-driven verdicts, technicals, and sector insight on every name.</div>
-            <Button
+          <div className="flex flex-col gap-2.5 rounded-2xl bg-gradient-to-br from-violet-600 to-slate-900 p-4 text-white">
+            <div className="text-sm font-bold leading-snug">Unlock deeper AI analysis</div>
+            <div className="text-xs leading-relaxed text-violet-100">
+              Get GPT-driven verdicts, technicals, and sector insight on every name.
+            </div>
+            <button
               type="button"
-              onClick={() => {
-                if (selectedSymbol) {
-                  useWolfStore.getState().openDetail(selectedSymbol);
-                }
-              }}
+              onClick={() => selectedSymbol && useWolfStore.getState().openDetail(selectedSymbol)}
+              className="rounded-xl bg-white px-4 py-2 text-sm font-bold text-violet-700"
             >
               Open AI summary
-            </Button>
+            </button>
           </div>
         </aside>
 
-        <div className="workspace">
-          <header className="topbar">
-            <div className="topbar-left">
-              <div className="page-kicker">{brandTheme.tagline}</div>
-              <div className="page-title">{pageTitle}</div>
+        <div className="flex min-w-0 flex-1 flex-col gap-5">
+          <header className="flex items-center gap-4 rounded-2xl bg-white px-5 py-3.5 shadow-sm">
+            <div className="flex flex-col">
+              <span className="text-xs text-slate-400">
+                Overview <span className="text-slate-300">/</span> <span className="font-semibold text-slate-600">{pageTitle}</span>
+              </span>
             </div>
 
-            <label className="search-bar" aria-label="Search stocks">
-              <span className="search-icon">⌕</span>
+            <label className="flex min-h-[42px] flex-1 items-center gap-2.5 rounded-full bg-violet-50 px-4" htmlFor="global-search">
+              <span className="text-slate-400">⌕</span>
               <input
+                id="global-search"
                 placeholder="Search stocks, strategies, or symbols"
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
+                className="w-full bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400"
               />
             </label>
 
-            <div className="topbar-right">
-              <div className="topbar-chip">Live</div>
-              <div className="topbar-chip">{selectedSymbol || "Pick a name"}</div>
-              <div className="avatar-block">
-                <div className="avatar">D</div>
-                <div className="avatar-caption">
-                  <span className="avatar-name">Daniel</span>
-                  <span className="avatar-role">Trader</span>
+            <div className="flex items-center gap-2.5">
+              <span className="rounded-full bg-violet-50 px-3 py-2 text-xs font-bold text-violet-600">Live</span>
+              <span className="hidden rounded-full bg-violet-50 px-3 py-2 text-xs font-bold text-slate-600 sm:inline">
+                {selectedSymbol || "Pick a name"}
+              </span>
+              <div className="flex items-center gap-2">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-sm font-bold text-white">D</div>
+                <div className="hidden flex-col leading-tight md:flex">
+                  <span className="text-xs font-bold text-slate-900">Daniel</span>
+                  <span className="text-[11px] text-slate-400">Trader</span>
                 </div>
               </div>
             </div>
           </header>
 
-          <main className="page-stack">
+          <main className="flex min-w-0 flex-col gap-5">
             <Routes>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/discover" element={<DiscoverPage />} />
-              <Route path="/radar" element={<RadarPage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>
         </div>
       </div>
 
-      <div className={`drawer-backdrop ${detailOpen ? "open" : ""}`} onClick={closeDetail} aria-hidden="true" />
-      <aside className={`detail-drawer ${detailOpen ? "open" : ""}`} aria-label="Stock detail panel">
-        <div className="detail-drawer-shell">
-          <div className="detail-drawer-header">
+      <div
+        className={`fixed inset-0 z-30 bg-slate-900/30 transition-opacity ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`}
+        onClick={closeDetail}
+        aria-hidden="true"
+      />
+      <aside
+        className={`fixed right-0 top-0 z-40 h-screen w-full max-w-[560px] overflow-y-auto bg-violet-50 shadow-2xl transition-transform ${
+          detailOpen ? "translate-x-0" : "translate-x-full"
+        }`}
+        aria-label="Stock detail panel"
+      >
+        <div className="flex flex-col gap-4 p-5">
+          <div className="flex items-center justify-between rounded-2xl bg-white p-5 shadow-sm">
             <div>
-              <div className="detail-drawer-kicker">Stock detail</div>
-              <div className="detail-drawer-title">{detail?.stock.symbol ?? (selectedSymbol || "Live data")}</div>
-              <div className="detail-drawer-subtitle">{detail?.stock.name ?? "Live data panel"}</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-violet-500">Stock detail</div>
+              <div className="text-2xl font-extrabold text-slate-900">{detail?.stock.symbol ?? (selectedSymbol || "Live data")}</div>
+              <div className="text-sm text-slate-400">{detail?.stock.name ?? "Live data panel"}</div>
             </div>
-            <button className="drawer-close" type="button" onClick={closeDetail} aria-label="Close detail panel">
+            <button
+              type="button"
+              onClick={closeDetail}
+              aria-label="Close detail panel"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-violet-50 text-lg text-slate-500 hover:bg-violet-100"
+            >
               ×
             </button>
           </div>
 
-          {detailLoading ? <DetailSkeleton /> : null}
-          {detailError ? <div className="empty-state">{detailError}</div> : null}
+          {detailLoading ? (
+            <div className={panel}>
+              <DetailSkeleton />
+            </div>
+          ) : null}
+          {detailError ? <div className={panel}>{detailError}</div> : null}
 
           {detail ? (
-            <div className="detail-drawer-content">
-              <div className="detail-chart-grid">
-                <Card className="detail-chart-card detail-chart-card-large">
-                  <CardHeader>
-                    <CardTitle>Price path</CardTitle>
-                    <CardDescription>The live trend that the market is pricing right now.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="stack-gap">
-                    <div className="detail-chart detail-chart-animated">
-                      <svg viewBox="0 0 100 100" className="detail-chart-svg" aria-label="Price trend chart">
-                        <path d={`${chartPath} L 100 90 L 0 90 Z`} className="detail-chart-fill" />
-                        <path d={chartPath} className="detail-chart-line" />
-                      </svg>
-                    </div>
-                    <div className="detail-chart-foot">
-                      <span>Today</span>
-                      <strong className={`stock-change ${detail.stock.changePct >= 0 ? "positive" : "negative"}`}>
-                        {formatPercent(detail.stock.changePct)}
-                      </strong>
-                    </div>
-                  </CardContent>
-                </Card>
+            <>
+              <div className="grid grid-cols-[1.35fr_0.75fr] gap-4">
+                <div className={panel}>
+                  <PanelHeader title="Price path" description="The live trend that the market is pricing right now." />
+                  <svg viewBox="0 0 100 100" className="h-40 w-full" aria-label="Price trend chart">
+                    <path d={`${chartPath} L 100 90 L 0 90 Z`} fill="rgba(124,92,252,0.12)" />
+                    <path d={chartPath} fill="none" stroke="#7c5cfc" strokeWidth="2" />
+                  </svg>
+                  <div className="mt-2 flex items-center justify-between text-xs uppercase tracking-wide text-slate-400">
+                    <span>Today</span>
+                    <strong className={`text-sm ${detail.stock.changePct >= 0 ? positive : negative}`}>
+                      {formatPercent(detail.stock.changePct)}
+                    </strong>
+                  </div>
+                </div>
 
-                <Card className="detail-chart-card">
-                  <CardHeader>
-                    <CardTitle>Return profile</CardTitle>
-                    <CardDescription>How the tape has treated holders across key horizons.</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="detail-bar-chart" aria-label="Return profile chart">
-                      {performanceRows.map((item) => {
-                        const value = Math.abs(item.value ?? 0);
-                        const barHeight = Math.max(12, (value / performancePeak) * 100);
-                        const positive = (item.value ?? 0) >= 0;
-                        return (
-                          <div key={item.label} className="detail-bar-column">
-                            <div className={`detail-bar ${positive ? "positive" : "negative"}`} style={{ height: `${barHeight}%` }} />
-                            <span>{item.label}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card className="detail-chart-card">
-                  <CardHeader>
-                    <CardTitle>Industry pulse</CardTitle>
-                    <CardDescription>How close this name sits to the current sector lead.</CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="detail-ring-wrap">
-                      <div className="score-ring score-ring-small" style={{ ["--score" as string]: peerProgress }}>
-                        <div className="score-ring-inner">
-                          <div className="score-ring-value">{Math.round(peerProgress)}%</div>
-                          <div className="score-ring-label">sector rank</div>
-                        </div>
-                      </div>
-                      <div className="detail-ring-copy">
-                        <strong>{peerRank?.isNo1 ? "Leader" : `#${peerRank?.rank ?? 1}`}</strong>
-                        <span>{peerRank?.sector ?? business?.sector ?? detail.stock.sector}</span>
+                <div className={panel}>
+                  <PanelHeader title="Industry pulse" description="Distance to the current sector lead." />
+                  <div className="flex items-center gap-4">
+                    <div
+                      className="relative grid h-20 w-20 flex-none place-items-center rounded-full"
+                      style={{ background: `conic-gradient(#7c5cfc ${peerProgress}%, #ede9fe 0)` }}
+                    >
+                      <div className="grid h-[62px] w-[62px] place-items-center rounded-full bg-white text-center">
+                        <span className="text-sm font-extrabold text-slate-900">{Math.round(peerProgress)}%</span>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
+                    <div className="flex flex-col">
+                      <strong className="text-sm font-bold text-slate-900">{peerRank?.isNo1 ? "Leader" : `#${peerRank?.rank ?? 1}`}</strong>
+                      <span className="text-xs text-slate-400">{peerRank?.sector ?? business?.sector ?? detail.stock.sector}</span>
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <Card className="verdict-card">
-                <CardContent className="verdict-shell">
-                  <div className="verdict-top">
-                    <div>
-                      <div className="detail-drawer-kicker">Decision</div>
-                      <div className="verdict-action verdict-slide">{decisionAction}</div>
-                      <div className="verdict-headline">{verdict?.headline ?? "Loading verdict..."}</div>
-                    </div>
-                    <div className="verdict-score-block">
-                      <div className="verdict-score">{decisionScore}</div>
-                      <div className="verdict-subtitle">{decisionConfidence}</div>
-                    </div>
+              <div className={panel}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-violet-500">Decision</div>
+                    <div className="text-2xl font-extrabold text-slate-900">{decisionAction}</div>
+                    <div className="text-sm text-slate-500">{verdict?.headline ?? "Loading verdict..."}</div>
                   </div>
-
-                  <div className="verdict-rail">
-                    {(["BUY", "WAIT", "PASS"] as const).map((item) => (
-                      <div key={item} className={`verdict-step ${decisionAction === item ? "active" : ""}`}>
-                        <span className="verdict-step-label">{item}</span>
-                        <span className="verdict-step-copy">
-                          {item === "BUY" ? "Strong conviction" : item === "WAIT" ? "Needs confirmation" : "Not a clean setup"}
-                        </span>
-                      </div>
-                    ))}
-                    <div className="verdict-progress">
-                      <div className="verdict-progress-track">
-                        <div className="verdict-progress-fill" style={{ width: `${decisionScore}%` }} />
-                      </div>
-                      <div className="verdict-progress-meta">
-                        <span>{decisionLabel}</span>
-                        <span>{verdict?.analyst ?? business?.analystRating ?? "Hold"}</span>
-                      </div>
-                    </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-extrabold text-violet-600">{decisionScore}</div>
+                    <div className="text-xs font-semibold text-slate-400">{decisionConfidence}</div>
                   </div>
-
-                  <div className="verdict-meter">
-                    <div className="verdict-meter-track">
-                      <div className="verdict-meter-fill" style={{ width: `${decisionScore}%` }} />
-                    </div>
-                    <div className="verdict-meter-meta">
-                      <span>Analyst view</span>
-                      <span>{business?.analystRating ?? "Hold"}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="detail-grid">
-                <Card className="detail-focus-card">
-                  <CardHeader>
-                    <CardDescription>{detail.stock.sector}</CardDescription>
-                    <CardTitle className="detail-stock-head">{formatMoney(detail.stock.price)}</CardTitle>
-                    <div className={`stock-change ${detail.stock.changePct >= 0 ? "positive" : "negative"}`}>
-                      {formatPercent(detail.stock.changePct)} today
-                    </div>
-                  </CardHeader>
-                  <CardContent className="stack-gap">
-                    <div className="detail-meta-grid">
-                      <div className="detail-meta">
-                        <span>Strategy fit</span>
-                        <strong>{decisionScore}/100</strong>
-                      </div>
-                      <div className="detail-meta">
-                        <span>Weekly trend</span>
-                        <strong>{formatPercent(detail.stock.weeklyTrend)}</strong>
-                      </div>
-                      <div className="detail-meta">
-                        <span>Chart move</span>
-                        <strong>{formatPercent(chartChange)}</strong>
-                      </div>
-                    </div>
-
-                    <div className="detail-chart detail-chart-animated">
-                      <svg viewBox="0 0 100 100" className="detail-chart-svg" aria-label="Price trend chart">
-                        <path d={`${chartPath} L 100 90 L 0 90 Z`} className="detail-chart-fill" />
-                        <path d={chartPath} className="detail-chart-line" />
-                      </svg>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Business outlook</CardTitle>
-                    <CardDescription>What the business, valuation, and analyst view say together.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="stack-gap">
-                    <div className="business-summary">{outlook?.summary ?? business?.companySummary ?? "No outlook yet."}</div>
-                    <div className="business-callouts">
-                      <div className={`business-callout ${outlook?.industryLeader ? "strong" : ""}`}>
-                        <span>Industry</span>
-                        <strong>{peerRank?.sector ?? business?.sector ?? detail.stock.sector}</strong>
-                        <small>
-                          {peerRank?.isNo1 ? "Leading the live sector watchlist" : `Rank ${peerRank?.rank ?? 1} of ${peerRank?.count ?? 1} peers`}
-                        </small>
-                      </div>
-                      <div className="business-callout">
-                        <span>Analyst</span>
-                        <strong>{business?.analystRating ?? "Hold"}</strong>
-                        <small>
-                          Target {formatMoney(business?.targetMeanPrice)} vs {formatMoney(business?.currentPrice ?? detail.stock.price)}
-                        </small>
-                      </div>
-                      <div className="business-callout">
-                        <span>Long view</span>
-                        <strong>
-                          {performance?.trend === "positive"
-                            ? "Momentum intact"
-                            : performance?.trend === "negative"
-                              ? "Needs patience"
-                              : "Sideways setup"}
-                        </strong>
-                        <small>Momentum score {performance?.momentumScore ?? 0}/100</small>
-                      </div>
-                    </div>
-                    <div className="business-grid">
-                      <div className="business-pill">
-                        <span>PE</span>
-                        <strong>{formatMultiple(business?.peRatio)}</strong>
-                      </div>
-                      <div className="business-pill">
-                        <span>PBV</span>
-                        <strong>{formatMultiple(business?.priceToBook)}</strong>
-                      </div>
-                      <div className="business-pill">
-                        <span>ROE</span>
-                        <strong>{formatPercent(business?.roe)}</strong>
-                      </div>
-                      <div className="business-pill">
-                        <span>ROA</span>
-                        <strong>{formatPercent(business?.roa)}</strong>
-                      </div>
-                      <div className="business-pill">
-                        <span>Margin</span>
-                        <strong>{formatPercent(business?.profitMargin)}</strong>
-                      </div>
-                      <div className="business-pill">
-                        <span>Yield</span>
-                        <strong>{formatPercent(business?.dividendYield)}</strong>
-                      </div>
-                      <div className="business-pill">
-                        <span>Growth</span>
-                        <strong>{formatPercent(business?.revenueGrowth)}</strong>
-                      </div>
-                      <div className="business-pill">
-                        <span>Earnings</span>
-                        <strong>{formatPercent(business?.earningsGrowth)}</strong>
-                      </div>
-                    </div>
-                    <div className="detail-chart detail-chart-animated business-mini-chart">
-                      <svg viewBox="0 0 100 100" className="detail-chart-svg" aria-label="Business performance sparkline">
-                        <path d={`${performancePath} L 100 90 L 0 90 Z`} className="detail-chart-fill" />
-                        <path d={performancePath} className="detail-chart-line" />
-                      </svg>
-                    </div>
-                  </CardContent>
-                </Card>
+                </div>
+                <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-violet-50">
+                  <div className="h-full rounded-full bg-violet-600" style={{ width: `${decisionScore}%` }} />
+                </div>
+                <div className="mt-2 flex items-center justify-between text-xs text-slate-400">
+                  <span>Analyst view</span>
+                  <span className="font-semibold text-slate-600">{business?.analystRating ?? verdict?.analyst ?? "Hold"}</span>
+                </div>
               </div>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>Performance history</CardTitle>
-                  <CardDescription>Long-horizon returns and whether the current setup still has momentum.</CardDescription>
-                </CardHeader>
-                <CardContent className="performance-history">
-                  <div className="performance-strip">
-                    {performanceRows.map((item) => (
-                      <div key={item.label} className="performance-chip">
-                        <span>{item.label}</span>
-                        <strong>{formatPercent(item.value)}</strong>
+              <div className="grid grid-cols-2 gap-4">
+                <div className={panel}>
+                  <div className="text-xs text-slate-400">{detail.stock.sector}</div>
+                  <div className="text-2xl font-extrabold text-slate-900">{formatMoney(detail.stock.price)}</div>
+                  <div className={`text-sm font-semibold ${detail.stock.changePct >= 0 ? positive : negative}`}>
+                    {formatPercent(detail.stock.changePct)} today
+                  </div>
+                  <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                    <div className="rounded-xl bg-violet-50 px-2 py-2">
+                      <div className="text-[10px] text-slate-400">Fit</div>
+                      <div className="text-sm font-bold text-slate-900">{decisionScore}/100</div>
+                    </div>
+                    <div className="rounded-xl bg-violet-50 px-2 py-2">
+                      <div className="text-[10px] text-slate-400">Weekly</div>
+                      <div className="text-sm font-bold text-slate-900">{formatPercent(detail.stock.weeklyTrend)}</div>
+                    </div>
+                    <div className="rounded-xl bg-violet-50 px-2 py-2">
+                      <div className="text-[10px] text-slate-400">Move</div>
+                      <div className="text-sm font-bold text-slate-900">{formatPercent(chartChange)}</div>
+                    </div>
+                  </div>
+                  <svg viewBox="0 0 100 100" className="mt-3 h-20 w-full" aria-label="Business performance sparkline">
+                    <path d={`${performancePath} L 100 90 L 0 90 Z`} fill="rgba(124,92,252,0.1)" />
+                    <path d={performancePath} fill="none" stroke="#7c5cfc" strokeWidth="2" />
+                  </svg>
+                </div>
+
+                <div className={panel}>
+                  <PanelHeader title="Business outlook" description="Valuation and analyst view together." />
+                  <div className="mb-3 text-sm text-slate-600">{outlook?.summary ?? business?.companySummary ?? "No outlook yet."}</div>
+                  <div className="grid grid-cols-4 gap-2 text-center">
+                    {[
+                      { label: "PE", value: formatMultiple(business?.peRatio) },
+                      { label: "PBV", value: formatMultiple(business?.priceToBook) },
+                      { label: "ROE", value: formatPercent(business?.roe) },
+                      { label: "ROA", value: formatPercent(business?.roa) },
+                      { label: "Margin", value: formatPercent(business?.profitMargin) },
+                      { label: "Yield", value: formatPercent(business?.dividendYield) },
+                      { label: "Growth", value: formatPercent(business?.revenueGrowth) },
+                      { label: "Earnings", value: formatPercent(business?.earningsGrowth) }
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-xl bg-violet-50 px-1 py-2">
+                        <div className="text-[10px] text-slate-400">{item.label}</div>
+                        <div className="text-xs font-bold text-slate-900">{item.value}</div>
                       </div>
                     ))}
                   </div>
+                </div>
+              </div>
+
+              <div className={panel}>
+                <PanelHeader title="Performance history" description="Long-horizon returns across key windows." />
+                <div className="flex flex-col gap-3">
                   {performanceRows.map((item) => (
-                    <div key={item.label} className="history-row">
-                      <div className="history-top">
-                        <span>{item.label}</span>
-                        <strong>{formatPercent(item.value)}</strong>
+                    <div key={item.label}>
+                      <div className="mb-1 flex items-center justify-between text-xs">
+                        <span className="text-slate-400">{item.label}</span>
+                        <strong className={(item.value ?? 0) >= 0 ? positive : negative}>{formatPercent(item.value)}</strong>
                       </div>
-                      <div className="history-track">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-violet-50">
                         <div
-                          className={`history-fill ${((item.value ?? 0) >= 0 ? "positive" : "negative")}`}
-                          style={{ width: `${Math.min(Math.abs(item.value ?? 0), 100)}%` }}
+                          className={`h-full rounded-full ${(item.value ?? 0) >= 0 ? "bg-emerald-500" : "bg-rose-500"}`}
+                          style={{ width: `${Math.min((Math.abs(item.value ?? 0) / performancePeak) * 100, 100)}%` }}
                         />
                       </div>
                     </div>
                   ))}
-                </CardContent>
-              </Card>
-
-              <div className="detail-grid">
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Industry rank</CardTitle>
-                    <CardDescription>How the stock stacks up against peers in the live watchlist.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="peer-card">
-                    <div className="peer-score">{peerRank?.rank ?? 1} / {peerRank?.count ?? 1}</div>
-                    <div className="peer-copy">
-                      {peerRank?.isNo1 ? "This name is currently leading its sector." : `The sector leader is ${peerRank?.leader ?? "n/a"}.`}
-                    </div>
-                    <div className="peer-subcopy">Sector: {peerRank?.sector ?? business?.sector ?? detail.stock.sector}</div>
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Technical analysis</CardTitle>
-                    <CardDescription>Still useful, but now shown as part of the full decision stack.</CardDescription>
-                  </CardHeader>
-                  <CardContent className="tech-grid">
-                    {techCards.map((item) => (
-                      <div key={item.label} className="tech-pill">
-                        <span>{item.label}</span>
-                        <strong>{item.value}</strong>
-                      </div>
-                    ))}
-                    <div className="tech-pill tech-pill-wide">
-                      <span>Signal</span>
-                      <strong>{tech?.signal ?? "neutral"}</strong>
-                    </div>
-                    <div className="tech-pill tech-pill-wide">
-                      <span>Support / Resistance</span>
-                      <strong>
-                        {formatMoney(tech?.support)} / {formatMoney(tech?.resistance)}
-                      </strong>
-                    </div>
-                  </CardContent>
-                </Card>
+                </div>
               </div>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle>News + AI recap</CardTitle>
-                  <CardDescription>Recent headlines and a direct GPT summary of what matters most.</CardDescription>
-                </CardHeader>
-                <CardContent className="news-ai-grid">
-                  <div className="stack-gap">
-                    {(detail.news || []).slice(0, 4).map((item) =>
-                      item.link ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div className={panel}>
+                  <PanelHeader title="Industry rank" description="How this name stacks up against peers." />
+                  <div className="text-2xl font-extrabold text-slate-900">
+                    {peerRank?.rank ?? 1} / {peerRank?.count ?? 1}
+                  </div>
+                  <div className="mt-1 text-sm text-slate-500">
+                    {peerRank?.isNo1 ? "This name is currently leading its sector." : `The sector leader is ${peerRank?.leader ?? "n/a"}.`}
+                  </div>
+                  <div className="mt-1 text-xs text-slate-400">Sector: {peerRank?.sector ?? business?.sector ?? detail.stock.sector}</div>
+                </div>
+
+                <div className={panel}>
+                  <PanelHeader title="Technical analysis" description="Quant signals behind the verdict." />
+                  <div className="grid grid-cols-2 gap-2">
+                    {techCards.map((item) => (
+                      <div key={item.label} className="rounded-xl bg-violet-50 px-2 py-2">
+                        <div className="text-[10px] text-slate-400">{item.label}</div>
+                        <div className="text-xs font-bold text-slate-900">{item.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between rounded-xl bg-violet-50 px-3 py-2 text-xs">
+                    <span className="text-slate-400">Signal</span>
+                    <span className="font-bold text-slate-900">{tech?.signal ?? "neutral"}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className={panel}>
+                <PanelHeader title="News + AI recap" description="Recent headlines and a direct GPT summary." />
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div className="flex flex-col gap-2">
+                    {(detail.news || []).slice(0, 4).map((item) => {
+                      const content = (
+                        <>
+                          <div className="text-sm font-semibold text-slate-900">{item.title}</div>
+                          <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-400">
+                            <span>{item.publisher ?? "News"}</span>
+                            <span>{item.publishedAt ? new Date(item.publishedAt).toLocaleString() : ""}</span>
+                          </div>
+                          {item.summary ? <div className="mt-1 text-xs text-slate-500">{item.summary}</div> : null}
+                        </>
+                      );
+                      return item.link ? (
                         <a
                           key={`${item.title}-${item.link}`}
-                          className="news-item"
                           href={item.link}
                           target="_blank"
                           rel="noreferrer"
+                          className="rounded-xl bg-violet-50 p-3 hover:bg-violet-100"
                         >
-                          <div className="news-title">{item.title}</div>
-                          <div className="news-meta">
-                            <span>{item.publisher ?? "News"}</span>
-                            <span>{item.publishedAt ? new Date(item.publishedAt).toLocaleString() : ""}</span>
-                          </div>
-                          {item.summary ? <div className="news-summary">{item.summary}</div> : null}
+                          {content}
                         </a>
                       ) : (
-                        <div key={item.title} className="news-item">
-                          <div className="news-title">{item.title}</div>
-                          <div className="news-meta">
-                            <span>{item.publisher ?? "News"}</span>
-                            <span>{item.publishedAt ? new Date(item.publishedAt).toLocaleString() : ""}</span>
-                          </div>
-                          {item.summary ? <div className="news-summary">{item.summary}</div> : null}
+                        <div key={item.title} className="rounded-xl bg-violet-50 p-3">
+                          {content}
                         </div>
-                      )
-                    )}
-                    {!detail.news?.length ? <div className="empty-state">No recent news came back from the live feed.</div> : null}
+                      );
+                    })}
+                    {!detail.news?.length ? <div className="text-sm text-slate-400">No recent news came back from the live feed.</div> : null}
                   </div>
 
-                  <Card className="ai-panel">
-                    <CardHeader>
-                      <CardTitle>AI summary</CardTitle>
-                      <CardDescription>Press the button for a short thesis, score, and reasoned call.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="stack-gap">
-                      <Button onClick={handleAnalyze} disabled={analysisLoading}>
-                        {analysisLoading ? "Summarizing..." : "Ask GPT-5.4-mini"}
-                      </Button>
-                      {analysis ? (
-                        <div className="analysis-stack">
-                          <div className="analysis-score">{analysis.score}/100</div>
-                          <div className="analysis-copy">{analysis.recommendation}</div>
-                          <div className="analysis-copy">{analysis.summary}</div>
-                          {analysis.future ? <div className="analysis-future">{analysis.future}</div> : null}
-                          {analysis.reasons?.length ? (
-                            <div className="analysis-list">
-                              {analysis.reasons.map((reason) => (
-                                <div key={reason} className="analysis-item">
-                                  {reason}
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </CardContent>
-                  </Card>
-                </CardContent>
-              </Card>
-            </div>
+                  <div className="rounded-2xl bg-violet-50 p-4">
+                    <div className="mb-1 text-sm font-bold text-slate-900">AI summary</div>
+                    <div className="mb-3 text-xs text-slate-500">Press the button for a thesis, score, and reasoned call.</div>
+                    <button
+                      type="button"
+                      onClick={handleAnalyze}
+                      disabled={analysisLoading}
+                      className="w-full rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+                    >
+                      {analysisLoading ? "Summarizing..." : "Ask GPT-5.4-mini"}
+                    </button>
+                    {analysis ? (
+                      <div className="mt-3 flex flex-col gap-2">
+                        <div className="text-xl font-extrabold text-violet-600">{analysis.score}/100</div>
+                        <div className="text-sm font-semibold text-slate-900">{analysis.recommendation}</div>
+                        <div className="text-sm text-slate-600">{analysis.summary}</div>
+                        {analysis.future ? <div className="text-xs italic text-slate-500">{analysis.future}</div> : null}
+                        {analysis.reasons?.length ? (
+                          <ul className="list-disc pl-4 text-xs text-slate-500">
+                            {analysis.reasons.map((reason) => (
+                              <li key={reason}>{reason}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </>
           ) : null}
         </div>
       </aside>

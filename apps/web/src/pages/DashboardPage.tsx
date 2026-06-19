@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
-import { Badge } from "../components/ui/badge";
-import { Button } from "../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { strategyLabels, type StockRecord, type StrategyKey } from "../data/market";
 import { loadStocks } from "../lib/api";
 import { colorForSymbol, initialFor } from "../lib/symbolColor";
+import { badgeNegative, badgePositive, negative, panel, pillActive, pillInactive, positive } from "../lib/ui";
 import { useWolfStore } from "../store/useWolfStore";
 
 const strategyOrder: StrategyKey[] = ["capitalized", "stable_dca", "yield", "momentum"];
-const tableSize = 10;
+const pageSize = 8;
 
 type DashboardNarrative = {
   title?: string;
@@ -59,11 +57,11 @@ function buildSparkPath(values: number[], width: number, height: number) {
     .join(" ");
 }
 
-function Sparkline({ values, positive }: { values: number[]; positive: boolean }) {
+function Sparkline({ values, positive: isPositive }: { values: number[]; positive: boolean }) {
   const path = buildSparkPath(values, 70, 26);
   return (
-    <svg viewBox="0 0 70 26" className={`quote-card-spark spark-line ${positive ? "positive" : "negative"}`} aria-hidden="true">
-      <path d={path} fill="none" strokeWidth="2" />
+    <svg viewBox="0 0 70 26" className="h-[26px] w-[70px] flex-none" aria-hidden="true">
+      <path d={path} fill="none" stroke={isPositive ? "#16a34a" : "#dc2626"} strokeWidth="2" />
     </svg>
   );
 }
@@ -75,6 +73,8 @@ export function DashboardPage() {
   const setWatchlist = useWolfStore((state) => state.setWatchlist);
 
   const [rows, setRows] = useState<StockRecord[]>([]);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [performance, setPerformance] = useState<DashboardPerformance>({
     score: 0,
@@ -84,17 +84,22 @@ export function DashboardPage() {
   const [narrative, setNarrative] = useState<DashboardNarrative>({});
 
   useEffect(() => {
+    setPage(1);
+  }, [selectedStrategy]);
+
+  useEffect(() => {
     let active = true;
     setLoading(true);
 
-    loadStocks({ endpoint: "dashboard", strategy: selectedStrategy, page: 1, limit: tableSize })
+    loadStocks({ endpoint: "dashboard", strategy: selectedStrategy, page, limit: pageSize })
       .then((payload) => {
-        if (!active) {
-          return;
-        }
+        if (!active) return;
         const nextRows = payload.stocks ?? [];
         setRows(nextRows);
-        setWatchlist(nextRows.slice(0, 4));
+        setTotalPages(payload.totalPages ?? 1);
+        if (page === 1) {
+          setWatchlist(nextRows.slice(0, 4));
+        }
         setPerformance({
           score: Number(payload.performance?.score ?? 0),
           confidence: payload.performance?.confidence ?? "Balanced",
@@ -103,224 +108,218 @@ export function DashboardPage() {
         setNarrative(payload.narrative ?? {});
       })
       .catch(() => {
-        if (!active) {
-          return;
-        }
+        if (!active) return;
         setRows([]);
+        setTotalPages(1);
         setPerformance({ score: 0, confidence: "Balanced", recommendation: "" });
         setNarrative({});
       })
       .finally(() => {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       });
 
     return () => {
       active = false;
     };
-  }, [selectedStrategy, setWatchlist]);
+  }, [selectedStrategy, page, setWatchlist]);
 
-  const quoteRows = rows.slice(0, 4);
-  const pickRows = rows.slice(4, 8);
+  const quoteRows = page === 1 ? rows.slice(0, 4) : [];
+  const tableRows = page === 1 ? rows.slice(4) : rows;
   const topStock = rows[0] ?? null;
   const pulseValues = rows.map((stock) => stock.price);
   const pulsePositive = (topStock?.changePct ?? 0) >= 0;
   const pulsePath = buildSparkPath(pulseValues, 100, 100);
 
   return (
-    <div className="page-layout">
-      <div className="detail-pills">
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap gap-2">
         {strategyOrder.map((strategy) => (
-          <Button
+          <button
             key={strategy}
-            variant={strategy === selectedStrategy ? "default" : "secondary"}
+            type="button"
             onClick={() => setStrategy(strategy)}
+            className={strategy === selectedStrategy ? pillActive : pillInactive}
           >
             {strategyLabels[strategy]}
-          </Button>
+          </button>
         ))}
       </div>
 
-      <div className="quote-row">
-        {quoteRows.length
-          ? quoteRows.map((stock) => {
-              const color = colorForSymbol(stock.symbol);
-              const positive = stock.changePct >= 0;
-              return (
-                <button key={stock.symbol} className="quote-card shadcn-card" type="button" onClick={() => openDetail(stock.symbol)}>
-                  <div className="quote-card-top">
-                    <div className="quote-card-id">
-                      <span className="quote-icon" style={{ background: color.bg, color: color.fg }}>
-                        {initialFor(stock.symbol)}
-                      </span>
-                      <span className="quote-card-meta">
-                        <span className="quote-card-symbol">{stock.symbol}</span>
-                        <span className="quote-card-name">{stock.name}</span>
-                      </span>
-                    </div>
-                    <Sparkline values={[stock.price * 0.97, stock.price * (1 - stock.weeklyTrend / 400), stock.price]} positive={positive} />
-                  </div>
-                  <div className="quote-card-bottom">
-                    <div className="quote-card-price">
-                      <span className="quote-card-price-label">Price</span>
-                      <span className="quote-card-price-value">{formatMoney(stock.price)}</span>
-                    </div>
-                    <Badge variant={positive ? "default" : "muted"} className={positive ? "badge-positive" : "badge-negative"}>
-                      {formatChange(stock.changePct)}
-                    </Badge>
-                  </div>
-                </button>
-              );
-            })
-          : Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="quote-card shadcn-card">
-                <div className="empty-state">Loading live quote...</div>
-              </div>
-            ))}
-      </div>
-
-      <div className="widget-grid">
-        <Card className="pulse-card">
-          <CardHeader>
-            <div className="pulse-card-head">
-              <div>
-                <CardDescription>Strategy pulse</CardDescription>
-                <div className="pulse-total-label">{strategyLabels[selectedStrategy]} - live read across {rows.length} names</div>
-                <div className="pulse-total-value">{performance.score}% fit</div>
-                <div className={`pulse-total-change ${pulsePositive ? "positive" : "negative"}`}>
-                  {topStock ? `${topStock.symbol} ${formatChange(topStock.changePct)}` : "Waiting for live data"}
-                </div>
-              </div>
-              <Button variant="secondary" onClick={() => topStock && openDetail(topStock.symbol)}>
-                More insight
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <svg viewBox="0 0 100 100" className="pulse-chart" aria-label="Strategy pulse chart">
-              <path d={`${pulsePath} L 100 100 L 0 100 Z`} className={`pulse-fill ${pulsePositive ? "positive" : "negative"}`} />
-              <path d={pulsePath} className={`pulse-line ${pulsePositive ? "positive" : "negative"}`} fill="none" strokeWidth="2" />
-            </svg>
-          </CardContent>
-        </Card>
-
-        <Card className="balance-card">
-          <CardHeader>
-            <CardDescription>Performance view</CardDescription>
-            <div className="balance-total-label">Confidence</div>
-            <div className="balance-total-value">{performance.confidence}</div>
-          </CardHeader>
-          <CardContent className="stack-gap">
-            <div className="balance-row">
-              <span className="balance-row-label">Best current match</span>
-              <span className="balance-row-value">{topStock?.symbol ?? "N/A"}</span>
-            </div>
-            <div className="balance-row">
-              <span className="balance-row-label">Recommendation</span>
-              <span className="balance-row-value">{narrative.recommendation || performance.recommendation || "Loading..."}</span>
-            </div>
-            <div className="balance-actions">
-              <Button variant="secondary" onClick={() => topStock && openDetail(topStock.symbol)}>
-                View detail
-              </Button>
-              <Button onClick={() => topStock && openDetail(topStock.symbol)}>Ask AI</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="widget-grid">
-        <Card>
-          <CardHeader>
-            <CardTitle>Market overview</CardTitle>
-            <CardDescription>Live names ranked for {strategyLabels[selectedStrategy]}, straight from the yfinance feed.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <table className="market-table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Price</th>
-                  <th>Change</th>
-                  <th>Chart</th>
-                  <th>Fit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((stock) => {
-                  const color = colorForSymbol(stock.symbol);
-                  const positive = stock.changePct >= 0;
-                  const score = stock.strategyScores[selectedStrategy] ?? 0;
-                  return (
-                    <tr key={stock.symbol} className="clickable-row" onClick={() => openDetail(stock.symbol)}>
-                      <td>
-                        <div className="market-table-symbol">
-                          <span className="market-table-symbol-icon" style={{ background: color.bg, color: color.fg }}>
-                            {initialFor(stock.symbol)}
-                          </span>
-                          <span className="market-table-symbol-meta">
-                            <strong>{stock.symbol}</strong>
-                            <span className="market-table-symbol-name">{stock.sector}</span>
-                          </span>
-                        </div>
-                      </td>
-                      <td>{formatMoney(stock.price)}</td>
-                      <td className={positive ? "positive" : "negative"}>{formatChange(stock.changePct)}</td>
-                      <td>
-                        <svg viewBox="0 0 70 26" className={`market-table-spark spark-line ${positive ? "positive" : "negative"}`} aria-hidden="true">
-                          <path
-                            d={buildSparkPath([stock.price * (1 - stock.weeklyTrend / 100), stock.price], 70, 26)}
-                            fill="none"
-                            strokeWidth="2"
-                          />
-                        </svg>
-                      </td>
-                      <td>{score}/100</td>
-                    </tr>
-                  );
-                })}
-                {!loading && !rows.length ? (
-                  <tr>
-                    <td colSpan={5} className="empty-state">
-                      No live stocks matched right now.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-            {loading && !rows.length ? <div className="empty-state">Loading live market data...</div> : null}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Top picks</CardTitle>
-            <CardDescription>Next best fits after the headline names above.</CardDescription>
-          </CardHeader>
-          <CardContent className="picks-list">
-            {pickRows.length ? (
-              pickRows.map((stock) => {
-                const color = colorForSymbol(stock.symbol);
-                const score = stock.strategyScores[selectedStrategy] ?? 0;
-                return (
-                  <button key={stock.symbol} className="picks-row" type="button" onClick={() => openDetail(stock.symbol)}>
-                    <span className="picks-row-icon" style={{ background: color.bg, color: color.fg }}>
+      {quoteRows.length ? (
+        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          {quoteRows.map((stock) => {
+            const color = colorForSymbol(stock.symbol);
+            const isPositive = stock.changePct >= 0;
+            return (
+              <button key={stock.symbol} type="button" onClick={() => openDetail(stock.symbol)} className={`${panel} text-left`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className="flex h-8 w-8 flex-none items-center justify-center rounded-full text-xs font-extrabold"
+                      style={{ background: color.bg, color: color.fg }}
+                    >
                       {initialFor(stock.symbol)}
                     </span>
-                    <span className="picks-row-meta">
-                      <span className="picks-row-symbol">{stock.symbol}</span>
-                      <span className="picks-row-story">{stock.story}</span>
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate text-sm font-bold text-slate-900">{stock.symbol}</span>
+                      <span className="truncate text-xs text-slate-400">{stock.name}</span>
                     </span>
-                    <span className="picks-row-score">{score}/100</span>
-                  </button>
-                );
-              })
-            ) : (
-              <div className="empty-state">Loading more live names...</div>
-            )}
-          </CardContent>
-        </Card>
+                  </div>
+                  <Sparkline values={[stock.price * 0.97, stock.price * (1 - stock.weeklyTrend / 400), stock.price]} positive={isPositive} />
+                </div>
+                <div className="mt-3 flex items-end justify-between">
+                  <div>
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400">Price</div>
+                    <div className="text-lg font-extrabold text-slate-900">{formatMoney(stock.price)}</div>
+                  </div>
+                  <span className={isPositive ? badgePositive : badgeNegative}>{formatChange(stock.changePct)}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.5fr_0.85fr]">
+        <div className={panel}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-sm text-slate-400">Strategy pulse</div>
+              <div className="text-xs text-slate-400">
+                {strategyLabels[selectedStrategy]} - live read across {rows.length} names
+              </div>
+              <div className="mt-1 text-3xl font-extrabold text-slate-900">{performance.score}% fit</div>
+              <div className={`text-sm font-semibold ${pulsePositive ? positive : negative}`}>
+                {topStock ? `${topStock.symbol} ${formatChange(topStock.changePct)}` : "Waiting for live data"}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => topStock && openDetail(topStock.symbol)}
+              className="rounded-full bg-violet-50 px-4 py-2 text-sm font-bold text-violet-600 hover:bg-violet-100"
+            >
+              More insight
+            </button>
+          </div>
+          <svg viewBox="0 0 100 100" className="mt-4 h-48 w-full" aria-label="Strategy pulse chart">
+            <path d={`${pulsePath} L 100 100 L 0 100 Z`} fill={pulsePositive ? "rgba(22,163,74,0.1)" : "rgba(220,38,38,0.1)"} />
+            <path d={pulsePath} fill="none" stroke={pulsePositive ? "#16a34a" : "#dc2626"} strokeWidth="2" />
+          </svg>
+        </div>
+
+        <div className={panel}>
+          <div className="text-sm text-slate-400">Performance view</div>
+          <div className="text-xs text-slate-400">Confidence</div>
+          <div className="mt-1 text-2xl font-extrabold text-slate-900">{performance.confidence}</div>
+          <div className="mt-4 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between rounded-xl bg-violet-50 px-3 py-2.5">
+              <span className="text-xs text-slate-400">Best current match</span>
+              <span className="text-sm font-bold text-slate-900">{topStock?.symbol ?? "N/A"}</span>
+            </div>
+            <div className="rounded-xl bg-violet-50 px-3 py-2.5">
+              <div className="text-xs text-slate-400">Recommendation</div>
+              <div className="text-sm font-bold text-slate-900">
+                {narrative.recommendation || performance.recommendation || "Loading..."}
+              </div>
+            </div>
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => topStock && openDetail(topStock.symbol)}
+                className="flex-1 rounded-xl bg-violet-50 px-4 py-2.5 text-sm font-bold text-violet-600 hover:bg-violet-100"
+              >
+                View detail
+              </button>
+              <button
+                type="button"
+                onClick={() => topStock && openDetail(topStock.symbol)}
+                className="flex-1 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-bold text-white"
+              >
+                Ask AI
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className={panel}>
+        <div className="mb-1 flex items-center justify-between">
+          <div className="text-base font-bold text-slate-900">Market overview</div>
+          <div className="flex items-center gap-2 text-xs font-semibold text-slate-400">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-600 disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <span>
+              Page {page} of {totalPages}
+            </span>
+            <button
+              type="button"
+              disabled={page >= totalPages}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              className="rounded-full bg-violet-50 px-3 py-1.5 text-violet-600 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+        <div className="mb-3 text-sm text-slate-400">Live names ranked for {strategyLabels[selectedStrategy]}, straight from the yfinance feed.</div>
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+              <th className="border-b border-violet-50 pb-2">Symbol</th>
+              <th className="border-b border-violet-50 pb-2">Price</th>
+              <th className="border-b border-violet-50 pb-2">Change</th>
+              <th className="border-b border-violet-50 pb-2">Chart</th>
+              <th className="border-b border-violet-50 pb-2">Fit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tableRows.map((stock) => {
+              const color = colorForSymbol(stock.symbol);
+              const isPositive = stock.changePct >= 0;
+              const score = stock.strategyScores[selectedStrategy] ?? 0;
+              return (
+                <tr key={stock.symbol} className="cursor-pointer hover:bg-violet-50" onClick={() => openDetail(stock.symbol)}>
+                  <td className="border-b border-violet-50 py-2.5">
+                    <div className="flex items-center gap-2.5">
+                      <span
+                        className="flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-extrabold"
+                        style={{ background: color.bg, color: color.fg }}
+                      >
+                        {initialFor(stock.symbol)}
+                      </span>
+                      <span className="flex flex-col">
+                        <strong className="text-sm text-slate-900">{stock.symbol}</strong>
+                        <span className="text-xs text-slate-400">{stock.sector}</span>
+                      </span>
+                    </div>
+                  </td>
+                  <td className="border-b border-violet-50 py-2.5 text-sm text-slate-900">{formatMoney(stock.price)}</td>
+                  <td className={`border-b border-violet-50 py-2.5 text-sm font-semibold ${isPositive ? positive : negative}`}>
+                    {formatChange(stock.changePct)}
+                  </td>
+                  <td className="border-b border-violet-50 py-2.5">
+                    <Sparkline values={[stock.price * (1 - stock.weeklyTrend / 100), stock.price]} positive={isPositive} />
+                  </td>
+                  <td className="border-b border-violet-50 py-2.5 text-sm text-slate-900">{score}/100</td>
+                </tr>
+              );
+            })}
+            {!loading && !tableRows.length ? (
+              <tr>
+                <td colSpan={5} className="py-6 text-center text-sm text-slate-400">
+                  No live stocks matched right now.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+        {loading && !rows.length ? <div className="py-6 text-center text-sm text-slate-400">Loading live market data...</div> : null}
       </div>
     </div>
   );

@@ -242,12 +242,9 @@ export async function summarizeStock(symbol: string, strategy?: string): Promise
 export async function loadStocks(params?: {
   strategy?: string;
   q?: string;
-  index?: string;
-  sort?: string;
-  direction?: string;
   page?: number;
   limit?: number;
-  endpoint?: "stocks" | "dashboard" | "radar";
+  endpoint?: "stocks" | "dashboard";
 }): Promise<PaginatedStocksResponse> {
   const endpoint = params?.endpoint ?? "stocks";
   const query = new URLSearchParams();
@@ -256,15 +253,6 @@ export async function loadStocks(params?: {
   }
   if (params?.q) {
     query.set("q", params.q);
-  }
-  if (params?.index) {
-    query.set("index", params.index);
-  }
-  if (params?.sort) {
-    query.set("sort", params.sort);
-  }
-  if (params?.direction) {
-    query.set("direction", params.direction);
   }
   if (typeof params?.page === "number") {
     query.set("page", String(params.page));
