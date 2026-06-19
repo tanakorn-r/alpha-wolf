@@ -5,3 +5,5 @@ coverage
 .DS_Store
 apps/api/data/
 apps/api/*.db
+__pycache__/
+*.pyc

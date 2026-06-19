@@ -36,10 +36,13 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     ticker = make_ticker(symbol)
     modules = load_ticker_modules(ticker, symbol)
 
+    # yfinance.Ticker isn't thread-safe for concurrent attribute access - reusing
+    # one instance across these futures made history()/financials silently come
+    # back empty under load. Each concurrent call gets its own instance instead.
     with ThreadPoolExecutor(max_workers=4) as pool:
-        history_future = pool.submit(lambda: fetch_history(ticker, period="5y"))
-        news_future = pool.submit(lambda: fetch_news(ticker))
-        financials_future = pool.submit(lambda: build_financial_snapshot(ticker))
+        history_future = pool.submit(lambda: fetch_history(make_ticker(symbol), period="5y"))
+        news_future = pool.submit(lambda: fetch_news(make_ticker(symbol)))
+        financials_future = pool.submit(lambda: build_financial_snapshot(make_ticker(symbol)))
         sector_future = pool.submit(lambda: fetch_sector_insight(stock.get("sectorKey") or stock.get("sector")))
         industry_future = pool.submit(lambda: fetch_industry_insight(stock.get("industryKey") or stock.get("industry") or ""))
 
