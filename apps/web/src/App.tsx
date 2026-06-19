@@ -118,6 +118,28 @@ function buildPath(values: number[]) {
     .join(" ");
 }
 
+function DetailSkeleton() {
+  return (
+    <div className="detail-drawer-content skeleton-stack" aria-label="Loading stock detail" aria-busy="true">
+      <div className="skeleton-chart-grid">
+        <div className="skeleton-block" style={{ height: 220 }} />
+        <div className="skeleton-block" style={{ height: 104 }} />
+        <div className="skeleton-block" style={{ height: 104 }} />
+      </div>
+      <div className="skeleton-block" style={{ height: 140 }} />
+      <div className="skeleton-card-grid">
+        <div className="skeleton-block" style={{ height: 220 }} />
+        <div className="skeleton-block" style={{ height: 220 }} />
+      </div>
+      <div className="skeleton-block" style={{ height: 160 }} />
+      <div className="skeleton-card-grid">
+        <div className="skeleton-block" style={{ height: 140 }} />
+        <div className="skeleton-block" style={{ height: 140 }} />
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const location = useLocation();
   const searchQuery = useWolfStore((state) => state.searchQuery);
@@ -346,7 +368,7 @@ export default function App() {
             </button>
           </div>
 
-          {detailLoading ? <div className="empty-state">Loading live detail data...</div> : null}
+          {detailLoading ? <DetailSkeleton /> : null}
           {detailError ? <div className="empty-state">{detailError}</div> : null}
 
           {detail ? (

@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 from internal.store.cache import cache_get, cache_set
+from internal.store.db import load_snapshot_records
 from internal.store.presets import list_market_presets
 from internal.store.utils import as_float, percent_value, string_or_none
-from internal.yahoo.client import fetch_quote_map
 from models import DiscoveryKind, LookupItem, LookupResponse, LookupSection
 
 
@@ -16,7 +16,8 @@ def lookup_discovery(query: str, kind: DiscoveryKind, limit: int, ttl_seconds: i
         return LookupResponse.model_validate(cached)
 
     presets = list_market_presets(kind=None if kind is DiscoveryKind.all else kind.value)
-    if not presets:
+    records = {str(record.get("symbol") or "").upper(): record for record in load_snapshot_records()}
+    if not presets or not records:
         result = LookupResponse(query=query, kind=kind)
         cache_set("lookup", cache_key, result.model_dump(), ttl_seconds)
         return result
@@ -25,12 +26,15 @@ def lookup_discovery(query: str, kind: DiscoveryKind, limit: int, ttl_seconds: i
     combined: list[LookupItem] = []
 
     for preset in presets:
-        quotes = fetch_quote_map(preset.symbols)
-        if not quotes:
-            continue
+        items = []
+        for symbol in preset.symbols:
+            record = records.get(str(symbol).upper())
+            if not record:
+                continue
+            item = build_lookup_item(record, preset.code, query)
+            if item.symbol and matches_lookup_query(item, query):
+                items.append(item)
 
-        items = [build_lookup_item(quote, preset.code, query) for quote in quotes.values()]
-        items = [item for item in items if item.symbol and matches_lookup_query(item, query)]
         if not items:
             continue
 
@@ -45,31 +49,23 @@ def lookup_discovery(query: str, kind: DiscoveryKind, limit: int, ttl_seconds: i
     return result
 
 
-def build_lookup_item(quote: dict[str, Any], kind: str, query: str) -> LookupItem:
-    symbol = str(quote.get("symbol") or quote.get("ticker") or "").upper()
-    name = (
-        quote.get("longname")
-        or quote.get("longName")
-        or quote.get("shortname")
-        or quote.get("shortName")
-        or quote.get("name")
-        or quote.get("displayName")
-        or symbol
-    )
+def build_lookup_item(record: dict[str, Any], kind: str, query: str) -> LookupItem:
+    symbol = str(record.get("symbol") or "").upper()
+    name = str(record.get("name") or record.get("shortName") or record.get("longName") or symbol)
 
     return LookupItem(
         symbol=symbol,
-        name=str(name),
+        name=name,
         kind=kind,
         query=query,
-        exchange=string_or_none(quote.get("exchange") or quote.get("fullExchangeName") or quote.get("exchDisp")),
-        quoteType=string_or_none(quote.get("quoteType") or quote.get("typeDisp")),
-        sector=string_or_none(quote.get("sector") or quote.get("sectorDisp")),
-        industry=string_or_none(quote.get("industry") or quote.get("industryDisp")),
-        currency=string_or_none(quote.get("currency") or quote.get("currencyCode")),
-        price=as_float(quote.get("regularMarketPrice") or quote.get("price") or quote.get("lastPrice")),
-        changePct=percent_value(quote.get("regularMarketChangePercent") or quote.get("changePercent") or quote.get("percentChange")),
-        marketCap=as_float(quote.get("marketCap")),
+        exchange=string_or_none(record.get("exchange") or record.get("fullExchangeName") or record.get("exchangeDisp")),
+        quoteType=string_or_none(record.get("quoteType") or record.get("typeDisp")),
+        sector=string_or_none(record.get("sector") or record.get("sectorDisp")),
+        industry=string_or_none(record.get("industry") or record.get("industryDisp")),
+        currency=string_or_none(record.get("currency") or record.get("currencyCode")),
+        price=as_float(record.get("price") or record.get("regularMarketPrice") or record.get("currentPrice")),
+        changePct=percent_value(record.get("changePct") or record.get("regularMarketChangePercent") or record.get("changePercent")),
+        marketCap=as_float(record.get("marketCap")),
     )
 
 

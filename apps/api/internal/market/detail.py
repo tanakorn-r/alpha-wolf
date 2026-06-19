@@ -36,21 +36,20 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     ticker = make_ticker(symbol)
     modules = load_ticker_modules(ticker, symbol)
 
+    # financials/sectorInsight/industryInsight used to be fetched here too (6
+    # statement calls + 2 network round-trips), but the frontend never renders
+    # them - see routes/details.py for the lazy /financials and /insights
+    # endpoints that fetch them on demand instead.
+    #
     # yfinance.Ticker isn't thread-safe for concurrent attribute access - reusing
     # one instance across these futures made history()/financials silently come
     # back empty under load. Each concurrent call gets its own instance instead.
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool:
         history_future = pool.submit(lambda: fetch_history(make_ticker(symbol), period="5y"))
         news_future = pool.submit(lambda: fetch_news(make_ticker(symbol)))
-        financials_future = pool.submit(lambda: build_financial_snapshot(make_ticker(symbol)))
-        sector_future = pool.submit(lambda: fetch_sector_insight(stock.get("sectorKey") or stock.get("sector")))
-        industry_future = pool.submit(lambda: fetch_industry_insight(stock.get("industryKey") or stock.get("industry") or ""))
 
         history = history_future.result()
         news = news_future.result()
-        financials = financials_future.result()
-        sector_insight = sector_future.result()
-        industry_insight = industry_future.result()
 
     technicals = build_technicals(history)
     business = build_business_profile(modules, history, stock)
@@ -58,8 +57,6 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     peers = build_peer_profile(stock, strategy, get_live_records())
     verdict = build_verdict(stock, business, performance, peers, strategy)
     outlook = build_outlook(business, performance, peers)
-    sector_insight = sector_insight or fetch_sector_insight(stock.get("sectorKey") or stock.get("sector") or business.get("sector"))
-    industry_insight = industry_insight or fetch_industry_insight(stock.get("industryKey") or stock.get("industry") or business.get("industry"))
 
     result = {
         "stock": stock,
@@ -67,9 +64,6 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
         "technicals": technicals,
         "news": news,
         "business": business,
-        "financials": financials,
-        "sectorInsight": sector_insight,
-        "industryInsight": industry_insight,
         "performance": performance,
         "peerRank": peers,
         "verdict": verdict,
@@ -78,6 +72,37 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     }
     cache_set("detail_bundle", cache_key, result, DETAIL_TTL_SECONDS)
     return result
+
+
+def get_financials(symbol: str) -> dict[str, Any] | None:
+    """Lazy counterpart to the financials field build_detail_bundle used to
+    always compute - fetched only when routes/details.py's /financials
+    endpoint is actually requested."""
+    normalized = symbol.upper().strip()
+    if not normalized:
+        return None
+    cache_key = f"financials:{normalized}"
+    cached = cache_get("detail_bundle", cache_key)
+    if cached is not None:
+        return cached
+    result = build_financial_snapshot(make_ticker(normalized))
+    cache_set("detail_bundle", cache_key, result, DETAIL_TTL_SECONDS)
+    return result
+
+
+def get_domain_insights(symbol: str) -> dict[str, Any] | None:
+    """Lazy counterpart to sectorInsight/industryInsight."""
+    from internal.market.symbol import fetch_symbol_record
+
+    normalized = symbol.upper().strip()
+    if not normalized:
+        return None
+    stock = fetch_symbol_record(normalized)
+    if not stock:
+        return None
+    sector_insight = fetch_sector_insight(stock.get("sectorKey") or stock.get("sector") or "")
+    industry_insight = fetch_industry_insight(stock.get("industryKey") or stock.get("industry") or "")
+    return {"sectorInsight": sector_insight, "industryInsight": industry_insight}
 
 
 def build_business_profile(modules: dict[str, Any], history: pd.DataFrame, stock: dict[str, Any]) -> dict[str, Any]:

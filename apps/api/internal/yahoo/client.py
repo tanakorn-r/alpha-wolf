@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import pandas as pd
@@ -142,61 +141,6 @@ def build_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
             "calendarEvents": calendar,
         }
     }
-
-
-def _fetch_one_quote(symbol: str) -> dict[str, Any] | None:
-    flat = _build_flat_info(ticker(symbol), symbol)
-    if not flat:
-        return None
-
-    price = as_float(flat.get("regularMarketPrice") or flat.get("currentPrice") or flat.get("lastPrice") or flat.get("last_price"))
-    previous_close = as_float(flat.get("regularMarketPreviousClose") or flat.get("previousClose") or flat.get("previous_close"))
-    change_pct = None
-    if price is not None and previous_close not in (None, 0):
-        change_pct = ((price - previous_close) / previous_close) * 100.0
-
-    return {
-        "symbol": symbol,
-        "longName": flat.get("longName") or flat.get("shortName") or symbol,
-        "shortName": flat.get("shortName") or flat.get("longName") or symbol,
-        "name": flat.get("shortName") or flat.get("longName") or symbol,
-        "displayName": flat.get("displayName") or flat.get("shortName") or symbol,
-        "exchange": flat.get("exchange"),
-        "fullExchangeName": flat.get("fullExchangeName") or flat.get("exchange"),
-        "quoteType": flat.get("quoteType"),
-        "sector": flat.get("sector"),
-        "industry": flat.get("industry"),
-        "currency": flat.get("currency"),
-        "regularMarketPrice": price,
-        "price": price,
-        "lastPrice": price,
-        "regularMarketChangePercent": change_pct,
-        "changePercent": change_pct,
-        "marketCap": as_float(flat.get("marketCap")),
-    }
-
-
-def fetch_quote_map(symbols: list[str]) -> dict[str, dict[str, Any]]:
-    # yfinance has no batch-quote endpoint (unlike yahooquery's Ticker(list).quotes),
-    # so each symbol needs its own `.info` call. Without concurrency this loop took
-    # 1-2s per symbol times 150+ symbols per preset - several minutes per refresh.
-    cleaned = [str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()]
-    if not cleaned:
-        return {}
-
-    quotes: dict[str, dict[str, Any]] = {}
-    with ThreadPoolExecutor(max_workers=min(16, len(cleaned))) as pool:
-        futures = {pool.submit(_fetch_one_quote, symbol): symbol for symbol in cleaned}
-        for future in as_completed(futures):
-            symbol = futures[future]
-            try:
-                quote = future.result()
-            except Exception:
-                continue
-            if quote:
-                quotes[symbol] = quote
-
-    return quotes
 
 
 def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:

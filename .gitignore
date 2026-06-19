@@ -7,3 +7,4 @@ apps/api/data/
 apps/api/*.db
 __pycache__/
 *.pyc
+.nx/

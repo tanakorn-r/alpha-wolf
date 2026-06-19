@@ -89,3 +89,34 @@ def load_snapshot_symbols(region: str | None = None) -> list[str]:
         seen.add(symbol)
         symbols.append(symbol)
     return symbols
+
+
+def load_snapshot_records(limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+    query = [
+        "SELECT payload",
+        "FROM snapshots",
+        "ORDER BY symbol",
+    ]
+    params: list[Any] = []
+    if limit is not None:
+        query.append("LIMIT ? OFFSET ?")
+        params.extend([max(limit, 0), max(offset, 0)])
+
+    with connect() as db:
+        rows = db.execute(" ".join(query), params).fetchall()
+
+    records: list[dict[str, Any]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row[0] or "{}")
+        except Exception:
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records
+
+
+def count_snapshots() -> int:
+    with connect() as db:
+        row = db.execute("SELECT COUNT(*) FROM snapshots").fetchone()
+    return int(row[0] or 0)
