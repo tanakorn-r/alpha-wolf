@@ -13,10 +13,11 @@ router = APIRouter()
 @router.get("/api/radar")
 def radar(
     strategy: StrategyKey = Query("capitalized"),
+    region: str = Query("all", pattern="^(all|us|th)$"),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
 ) -> dict[str, Any]:
-    page_items, total_pages, total = build_market_page(page=page, limit=limit)
+    page_items, total_pages, total = build_market_page(page=page, limit=limit, strategy=strategy, region=region)
     top = page_items[0] if page_items else None
     return {
         "strategy": strategy,

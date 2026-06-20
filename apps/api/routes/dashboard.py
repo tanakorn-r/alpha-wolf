@@ -16,7 +16,7 @@ def dashboard(
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=100),
 ) -> dict[str, Any]:
-    page_items, total_pages, total = build_market_page(page=page, limit=limit)
+    page_items, total_pages, total = build_market_page(page=page, limit=limit, strategy=strategy)
     top = page_items[0] if page_items else None
     performance = {
         "score": int(round(top["strategyScores"][strategy])) if top else 0,

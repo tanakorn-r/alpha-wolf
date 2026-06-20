@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Body, Response, status
 
 from internal.market.portfolio import build_portfolio_dashboard
-from internal.store.portfolio import create_dca_order, delete_dca_order, delete_holding, upsert_holding
+from internal.store.portfolio import create_dca_order, delete_dca_order, delete_holding, update_dca_order_amount, upsert_holding
 from models import DcaOrder, DcaOrderInput, Holding, HoldingInput, PortfolioDashboard
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -32,3 +32,8 @@ def save_dca_order(value: DcaOrderInput) -> DcaOrder:
 def remove_dca_order(order_id: int) -> Response:
     delete_dca_order(order_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/dca-orders/{order_id}", response_model=DcaOrder)
+def patch_dca_order(order_id: int, payload: dict[str, float] = Body(...)) -> DcaOrder:
+    return update_dca_order_amount(order_id, payload["amount"])

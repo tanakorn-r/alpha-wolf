@@ -20,7 +20,7 @@ type WolfState = {
 };
 
 export const useWolfStore = create<WolfState>((set) => ({
-  selectedStrategy: "capitalized",
+  selectedStrategy: "stable_dca",
   selectedSymbol: "",
   detailOpen: false,
   searchQuery: "",

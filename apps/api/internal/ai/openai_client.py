@@ -2,79 +2,100 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 from typing import Any
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
-from internal.ai.heuristics import normalize_analysis
-from internal.market.scoring import StrategyKey
+import certifi
+from pydantic import ValidationError
+
 from internal.store.utils import parse_json_fragment
+from models import StockAnalysis
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini"
-OPENAI_TIMEOUT_SECONDS = 30
+OPENAI_TIMEOUT_SECONDS = 45
+DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
+EXPECTED_SCORE_LABELS = ["Value", "Financial health", "Dividend safety", "Growth", "Timing"]
 
 
-def analyze_with_openai(bundle: dict[str, Any], strategy: StrategyKey) -> dict[str, Any] | None:
-    if not OPENAI_API_KEY:
-        return None
+class OpenAIAnalysisError(RuntimeError):
+    pass
 
-    stock = bundle["stock"]
-    technicals = bundle["technicals"]
-    news = bundle["news"]
-    dividend_pattern = bundle.get("dividendPattern")
-    prompt = {
-        "symbol": stock["symbol"],
-        "name": stock["name"],
-        "strategy": strategy,
-        "price": stock.get("price"),
-        "changePct": stock.get("changePct"),
-        "weeklyTrend": stock.get("weeklyTrend"),
-        "strategyScores": stock.get("strategyScores"),
-        "technicals": technicals,
-        "dividendDipPattern": dividend_pattern,
-        "recentNews": news[:5],
-        "instructions": [
-            "Return strict JSON only.",
-            "Fields: score (1-100 integer), recommendation (short sentence), summary (2-3 sentences), reasons (array of 3-5 short bullets), future (1-2 sentence forecast), confidence (Low, Medium, High), technicalNotes (array), newsNotes (array), dcaTiming (1-2 sentences).",
-            "Use the supplied live technicals and news to justify the score.",
-            "For dcaTiming: this is for a DCA investor deciding WHEN in the month to place a recurring buy, not whether to buy at all. "
-            "If dividendDipPattern.hasPattern is true, recommend timing the buy a few days after the next ex-dividend date and cite the historical hit rate / average dip. "
-            "If dividendDipPattern.hasPattern is false or there is no usable pattern, say this stock does not show a reliable post-dividend dip and a flat/scheduled DCA (or a dip-buy based on technicals instead) is more appropriate.",
-            "Do not mention that you are an AI model.",
-        ],
-    }
 
+def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """OpenAI's strict structured-output mode requires every key in "properties" to also
+    appear in "required" at every object level (nullable fields stay optional via their
+    type, not by omission) - Pydantic's model_json_schema() only lists non-default fields,
+    so this walks the schema and fills in "required" everywhere recursively."""
+    if isinstance(schema, dict):
+        if schema.get("type") == "object" and "properties" in schema:
+            schema["required"] = list(schema["properties"].keys())
+            schema.setdefault("additionalProperties", False)
+        for value in schema.values():
+            _strict_schema(value)
+    elif isinstance(schema, list):
+        for item in schema:
+            _strict_schema(item)
+    return schema
+
+
+def analyze_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise OpenAIAnalysisError("OPENAI_API_KEY is not configured")
+
+    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     payload = {
-        "model": OPENAI_MODEL,
-        "input": json.dumps(prompt, ensure_ascii=False),
-        "temperature": 0.2,
+        "model": model,
+        "instructions": _analysis_instructions(),
+        "input": json.dumps(context, ensure_ascii=False, separators=(",", ":")),
+        "max_output_tokens": 2500,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "stock_analysis",
+                "strict": True,
+                "schema": _strict_schema(StockAnalysis.model_json_schema()),
+            }
+        },
     }
     request = urllib_request.Request(
         "https://api.openai.com/v1/responses",
         data=json.dumps(payload).encode("utf-8"),
         headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
         method="POST",
     )
 
     try:
-        with urllib_request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS) as response:
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+        with urllib_request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS, context=ssl_context) as response:
             raw = json.loads(response.read().decode("utf-8"))
-    except (urllib_error.URLError, TimeoutError, ValueError):
-        return None
+    except urllib_error.HTTPError as exc:
+        raise OpenAIAnalysisError(f"OpenAI returned HTTP {exc.code}") from exc
+    except urllib_error.URLError as exc:
+        reason = str(getattr(exc, "reason", exc))
+        raise OpenAIAnalysisError(f"OpenAI analysis request failed: {reason}") from exc
+    except TimeoutError as exc:
+        raise OpenAIAnalysisError("OpenAI analysis request timed out") from exc
+    except ValueError as exc:
+        raise OpenAIAnalysisError("OpenAI returned an unreadable response") from exc
 
     text = extract_openai_text(raw)
-    if not text:
-        return None
-
-    parsed = parse_json_fragment(text)
+    parsed = parse_json_fragment(text or "")
     if not parsed:
-        return None
+        raise OpenAIAnalysisError("OpenAI returned no structured analysis")
 
-    return normalize_analysis(parsed, bundle, strategy, raw_text=text)
+    try:
+        result = StockAnalysis.model_validate(parsed)
+    except ValidationError as exc:
+        raise OpenAIAnalysisError("OpenAI returned an invalid analysis shape") from exc
+    if [score.label for score in result.scores] != EXPECTED_SCORE_LABELS:
+        raise OpenAIAnalysisError("OpenAI returned an invalid scorecard order")
+
+    return {**result.model_dump(), "source": "openai", "model": model}
 
 
 def extract_openai_text(payload: dict[str, Any]) -> str | None:
@@ -92,3 +113,24 @@ def extract_openai_text(payload: dict[str, Any]) -> str | None:
                 if isinstance(content.get(key), str) and content[key].strip():
                     chunks.append(content[key].strip())
     return "\n".join(chunks) if chunks else None
+
+
+def _analysis_instructions() -> str:
+    return """
+You are Alpha Wolf's senior equity analyst. Analyze only the supplied live research data.
+Do not invent missing facts, future prices, analyst opinions, dates, or industry ranks.
+Clearly distinguish Yahoo/Wall Street consensus from your own evidence-based conclusion.
+Judge the stock for the selected investment strategy and explain the decision to a beginner.
+Use BUY NOW, WAIT, HOLD, or PASS language in signal and make uncertainty explicit.
+Base confidence and every score on cited numerical evidence from the supplied context.
+Compare performance with the supplied regional benchmark and industry leader.
+Evaluate valuation, financial health, growth quality, dividend safety, technical timing,
+industry position, material news, earnings/calendar risk, and historical DCA timing.
+You must return a targetPrice object. Use supplied current price and any supported valuation
+or analyst target evidence from the context. If the data is not strong enough for a precise
+target, still provide a cautious target range midpoint and say that explicitly in basis.
+The scores must appear exactly in this order: Value, Financial health, Dividend safety,
+Growth, Timing. For DCA timing, say when to place the recurring buy; use the historical
+post-dividend pattern only when the supplied sample supports it. Keep the result concise,
+specific, and suitable for an investment decision, while noting it is not financial advice.
+""".strip()

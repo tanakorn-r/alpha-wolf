@@ -2,3 +2,5 @@ fastapi
 uvicorn[standard]
 yfinance
 pandas
+certifi
+python-dotenv

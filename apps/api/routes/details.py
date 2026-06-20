@@ -4,8 +4,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials
+from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials, get_market_comparison
 from internal.market.scoring import StrategyKey
+from models import MarketComparison
 
 router = APIRouter()
 
@@ -35,3 +36,11 @@ def details_insights(symbol: str) -> dict[str, Any]:
     if not insights:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
     return insights
+
+
+@router.get("/api/details/{symbol}/market-comparison", response_model=MarketComparison)
+def details_market_comparison(symbol: str) -> MarketComparison:
+    comparison = get_market_comparison(symbol)
+    if not comparison:
+        raise HTTPException(status_code=503, detail=f"Market comparison for {symbol.upper()} is unavailable")
+    return MarketComparison.model_validate(comparison)

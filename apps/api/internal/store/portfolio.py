@@ -60,6 +60,14 @@ def delete_dca_order(order_id: int) -> None:
         db.commit()
 
 
+def update_dca_order_amount(order_id: int, amount: float) -> DcaOrder:
+    with connect() as db:
+        db.execute("UPDATE dca_orders SET amount = ? WHERE id = ?", (max(amount, 0), order_id))
+        row = db.execute("SELECT * FROM dca_orders WHERE id = ?", (order_id,)).fetchone()
+        db.commit()
+    return _order(row)
+
+
 def _holding(row) -> Holding:
     return Holding(id=row["id"], symbol=row["symbol"], shares=row["shares"], averageCost=row["average_cost"], strategy=row["strategy"], monthlyDca=row["monthly_dca"], createdAt=row["created_at"])
 

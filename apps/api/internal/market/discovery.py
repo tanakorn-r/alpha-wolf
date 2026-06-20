@@ -3,20 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 from internal.store.cache import cache_get, cache_set
-from internal.store.db import load_snapshot_records
 from internal.store.presets import list_market_presets
-from internal.store.utils import as_float, percent_value, string_or_none
+from internal.market.universe import get_live_records
+from internal.store.utils import as_float, string_or_none
 from models import DiscoveryKind, LookupItem, LookupResponse, LookupSection
 
 
-def lookup_discovery(query: str, kind: DiscoveryKind, limit: int, ttl_seconds: int) -> LookupResponse:
-    cache_key = f"{kind.value}:{limit}:{query.lower()}"
+def lookup_discovery(query: str, kind: DiscoveryKind, limit: int, ttl_seconds: int, region: str | None = None) -> LookupResponse:
+    cache_key = f"{kind.value}:{region or 'all'}:{limit}:{query.lower()}"
     cached = cache_get("lookup", cache_key)
     if isinstance(cached, dict):
         return LookupResponse.model_validate(cached)
 
-    presets = list_market_presets(kind=None if kind is DiscoveryKind.all else kind.value)
-    records = {str(record.get("symbol") or "").upper(): record for record in load_snapshot_records()}
+    presets = list_market_presets(kind=None if kind is DiscoveryKind.all else kind.value, region=region)
+    records = {str(record.get("symbol") or "").upper(): record for record in get_live_records()}
     if not presets or not records:
         result = LookupResponse(query=query, kind=kind)
         cache_set("lookup", cache_key, result.model_dump(), ttl_seconds)
@@ -64,7 +64,7 @@ def build_lookup_item(record: dict[str, Any], kind: str, query: str) -> LookupIt
         industry=string_or_none(record.get("industry") or record.get("industryDisp")),
         currency=string_or_none(record.get("currency") or record.get("currencyCode")),
         price=as_float(record.get("price") or record.get("regularMarketPrice") or record.get("currentPrice")),
-        changePct=percent_value(record.get("changePct") or record.get("regularMarketChangePercent") or record.get("changePercent")),
+        changePct=as_float(record.get("changePct") or record.get("regularMarketChangePercent") or record.get("changePercent")),
         marketCap=as_float(record.get("marketCap")),
     )
 

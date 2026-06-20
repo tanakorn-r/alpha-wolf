@@ -4,7 +4,7 @@ import math
 from typing import Any
 
 from internal.store.cache import cache_get, cache_set
-from internal.store.db import count_snapshots, load_snapshot_records
+from internal.market.catalog import get_market_catalog
 from models import UniverseEntry
 
 LIVE_RECORDS_TTL_SECONDS = 60
@@ -23,7 +23,7 @@ def get_live_universe_entries() -> list[UniverseEntry]:
             sector=str(record.get("sector") or "Unknown"),
             indexes=tuple(sorted(str(index) for index in record.get("indexes", []) if str(index).strip())),
         )
-        for record in load_snapshot_records()
+        for record in get_market_catalog()
         if str(record.get("symbol") or "").strip()
     ]
 
@@ -40,7 +40,7 @@ def get_live_records() -> list[dict[str, Any]]:
     if cached is not None:
         return cached
 
-    records = load_snapshot_records()
+    records = get_market_catalog()
     if records:
         cache_set("live_records", "all", records, LIVE_RECORDS_TTL_SECONDS)
         return records
@@ -57,9 +57,14 @@ def paginate_records(records: list[dict[str, Any]], page: int, limit: int) -> tu
     return records[start:end], total_pages
 
 
-def build_market_page(*, page: int, limit: int) -> tuple[list[dict[str, Any]], int, int]:
-    offset = (max(page, 1) - 1) * max(limit, 1)
-    page_items = load_snapshot_records(limit=limit, offset=offset)
-    total = count_snapshots()
-    total_pages = max(1, math.ceil(total / max(limit, 1)))
-    return page_items, total_pages, total
+def build_market_page(*, page: int, limit: int, strategy: str | None = None, region: str = "all", query: str = "") -> tuple[list[dict[str, Any]], int, int]:
+    records = get_market_catalog()
+    if region in {"us", "th"}:
+        records = [record for record in records if region in record.get("indexes", [])]
+    term = query.strip().lower()
+    if term:
+        records = [record for record in records if term in str(record.get("symbol") or "").lower() or term in str(record.get("name") or "").lower()]
+    if strategy:
+        records = sorted(records, key=lambda record: (record.get("strategyScores", {}).get(strategy, 0), record.get("marketCap") or 0), reverse=True)
+    page_items, total_pages = paginate_records(records, page, limit)
+    return page_items, total_pages, len(records)

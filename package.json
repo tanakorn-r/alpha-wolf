@@ -9,7 +9,7 @@
     "dev": "npm run dev:api & npm run dev:web",
     "build": "nx build web",
     "dev:web": "nx serve web",
-    "dev:api": "cd apps/api && python3 -m uvicorn main:app --reload --host 127.0.0.1 --port 8000",
+    "dev:api": "cd apps/api && python3 -m uvicorn main:app --reload --env-file .env --host 127.0.0.1 --port 8000",
     "format": "nx format:write"
   },
   "devDependencies": {
@@ -28,9 +28,11 @@
     "vite": "^5.4.8"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.101.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-router-dom": "^6.28.0",
+    "recharts": "^3.8.1",
     "zustand": "^5.0.2"
   }
 }

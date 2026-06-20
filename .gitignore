@@ -8,3 +8,5 @@ apps/api/*.db
 __pycache__/
 *.pyc
 .nx/
+.env
+apps/api/.env

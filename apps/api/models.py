@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DiscoveryKind(str, Enum):
@@ -51,6 +52,9 @@ class DiscoverResponse(BaseModel):
     query: str = ""
     kind: DiscoveryKind = DiscoveryKind.all
     limit: int = 0
+    page: int = 1
+    total: int = 0
+    totalPages: int = 1
     count: int = 0
     sections: list[LookupSection] = Field(default_factory=list)
     items: list[LookupItem] = Field(default_factory=list)
@@ -72,7 +76,7 @@ class TickerPreset(BaseModel):
     sortOrder: int = 0
     enabled: bool = True
     symbols: list[str] = Field(default_factory=list)
-    source: str = "snapshots"
+    source: str = "yfinance-screen-24h-cache"
 
 
 class HoldingInput(BaseModel):
@@ -144,3 +148,76 @@ class MarketSnapshot(BaseModel):
     market: str
     status: dict[str, object] = Field(default_factory=dict)
     summary: dict[str, object] = Field(default_factory=dict)
+
+
+class MarketComparisonPoint(BaseModel):
+    date: str
+    stock: float
+    benchmark: float
+    peer: float
+
+
+class MarketComparisonAsset(BaseModel):
+    symbol: str
+    name: str
+    returnPct: float
+
+
+class MarketComparison(BaseModel):
+    stock: MarketComparisonAsset
+    benchmark: MarketComparisonAsset
+    peer: MarketComparisonAsset
+    points: list[MarketComparisonPoint] = Field(default_factory=list)
+
+
+class StockAnalysisScore(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: Literal["Value", "Financial health", "Dividend safety", "Growth", "Timing"]
+    score: int = Field(ge=0, le=100)
+    why: str
+
+
+class StockAnalysisTargetPrice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    currentPrice: float | None = None
+    targetPrice: float | None = None
+    impliedUpsidePct: float | None = None
+    timeHorizon: str
+    basis: str
+
+
+class StockAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal: str
+    headline: str
+    tone: Literal["good", "warn", "bad"]
+    confidence: int = Field(ge=0, le=100)
+    summary: str
+    targetPrice: StockAnalysisTargetPrice
+    scores: list[StockAnalysisScore] = Field(min_length=5, max_length=5)
+    bullets: list[str] = Field(min_length=2, max_length=4)
+    dcaTiming: str
+
+
+class StockAnalysisResponse(StockAnalysis):
+    source: Literal["openai"]
+    model: str
+
+
+class MarketUniverseCache(BaseModel):
+    region: str
+    records: list[dict[str, object]] = Field(default_factory=list)
+    fetchedAt: str
+    expiresAt: str
+
+
+class MarketCatalogStatus(BaseModel):
+    source: str = "yfinance-screen"
+    cacheHit: bool
+    ttlSeconds: int
+    counts: dict[str, int] = Field(default_factory=dict)
+    fetchedAt: dict[str, str] = Field(default_factory=dict)
+    expiresAt: dict[str, str] = Field(default_factory=dict)

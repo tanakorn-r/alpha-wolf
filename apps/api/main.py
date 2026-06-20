@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from internal.store.db import migrate
-from internal.store.presets import ensure_market_presets
 from routes.router import register_routes
 
 app = FastAPI(title="Alpha Wolf API", version="1.0.0")
@@ -20,7 +25,6 @@ app.add_middleware(
 @app.on_event("startup")
 def _startup() -> None:
     migrate()
-    ensure_market_presets()
 
 
 @app.get("/health")

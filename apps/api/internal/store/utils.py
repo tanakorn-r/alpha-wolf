@@ -53,7 +53,9 @@ def safe_dataframe_records(frame: Any) -> list[dict[str, Any]]:
 
 
 def json_safe(value: Any) -> Any:
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if value is None or isinstance(value, (str, int, bool)):
         return value
     if isinstance(value, (datetime, date)):
         return value.isoformat()

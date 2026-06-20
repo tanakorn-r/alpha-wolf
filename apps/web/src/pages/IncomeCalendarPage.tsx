@@ -1,15 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { formatMoney } from "../lib/format";
-import { loadPortfolio, type PortfolioDashboard } from "../lib/api";
+import { loadPortfolio } from "../lib/api";
 import { useWolfStore } from "../store/useWolfStore";
 
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export function IncomeCalendarPage() {
   const openDetail = useWolfStore((state) => state.openDetail);
-  const [portfolio, setPortfolio] = useState<PortfolioDashboard | null>(null);
+  const portfolioQuery = useQuery({ queryKey: ["portfolio"], queryFn: loadPortfolio });
+  const portfolio = portfolioQuery.data;
   const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
-  useEffect(() => { loadPortfolio().then(setPortfolio); }, []);
   const cells = useMemo(() => calendarCells(month), [month]);
   const events = [...(portfolio?.incomeEvents ?? []).map((event) => ({ ...event, label: event.kind })), ...(portfolio?.dcaOrders ?? []).map((order) => ({ date: order.scheduledFor, symbol: order.symbol, kind: "dca", label: `DCA ${formatMoney(order.amount)}`, amount: -order.amount }))];
   const monthEvents = events.filter((event) => sameMonth(event.date, month));

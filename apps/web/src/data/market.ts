@@ -4,6 +4,10 @@ export type StockRecord = {
   symbol: string;
   name: string;
   sector: string;
+  industry?: string;
+  exchange?: string;
+  currency?: string;
+  marketCap?: number;
   indexes: string[];
   price: number;
   changePct: number;

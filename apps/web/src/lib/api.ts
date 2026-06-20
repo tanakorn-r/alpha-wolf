@@ -2,6 +2,21 @@ import type { StockRecord } from "../data/market";
 
 const API_BASE = "/api";
 
+export type MarketCatalogStatus = {
+  source: string;
+  cacheHit: boolean;
+  ttlSeconds: number;
+  counts: Record<string, number>;
+  fetchedAt: Record<string, string>;
+  expiresAt: Record<string, string>;
+};
+
+export async function ensureMarketCatalog(): Promise<MarketCatalogStatus> {
+  const response = await fetch(`${API_BASE}/catalog`);
+  if (!response.ok) throw new Error(`Failed to initialize market catalog: ${response.status}`);
+  return (await response.json()) as MarketCatalogStatus;
+}
+
 export type StockTechnicals = {
   rsi14?: number;
   macd?: number;
@@ -90,6 +105,7 @@ export type StockDetailResponse = {
   };
   peerRank?: {
     sector?: string;
+    industry?: string;
     count?: number;
     rank?: number;
     isNo1?: boolean;
@@ -155,17 +171,19 @@ export type StockResearchResponse = {
   dividends?: Array<Record<string, unknown>>;
 };
 
+export type StockAnalysisScore = { label: string; score: number; why: string };
+
 export type StockAnalysisResponse = {
-  score: number;
-  recommendation: string;
+  signal: string;
+  headline: string;
+  tone: "good" | "warn" | "bad";
+  confidence: number;
   summary: string;
-  reasons: string[];
-  future?: string;
-  confidence?: string;
-  technicalNotes?: string[];
-  newsNotes?: string[];
+  scores: StockAnalysisScore[];
+  bullets: string[];
   dcaTiming?: string;
-  raw?: string;
+  source?: "openai";
+  model?: string;
 };
 
 export type PortfolioHolding = StockRecord & {
@@ -203,6 +221,13 @@ export type PortfolioDashboard = {
 };
 
 export type MarketSnapshot = { market: string; status: Record<string, unknown>; summary: Record<string, unknown> };
+
+export type MarketComparisonResponse = {
+  stock: { symbol: string; name: string; returnPct: number };
+  benchmark: { symbol: string; name: string; returnPct: number };
+  peer: { symbol: string; name: string; returnPct: number };
+  points: Array<{ date: string; stock: number; benchmark: number; peer: number }>;
+};
 
 export type PaginatedStocksResponse = {
   stocks?: StockRecord[];
@@ -248,6 +273,9 @@ export type DiscoveryResponse = {
   query: string;
   kind: string;
   limit: number;
+  page: number;
+  total: number;
+  totalPages: number;
   count: number;
   items: DiscoveryItem[];
   sections: DiscoverySection[];
@@ -269,8 +297,9 @@ export type IndustryInsightResponse = {
   topGrowthCompanies?: Array<Record<string, unknown>>;
 };
 
-export async function loadStockDetail(symbol: string): Promise<StockDetailResponse> {
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}`);
+export async function loadStockDetail(symbol: string, strategy?: string): Promise<StockDetailResponse> {
+  const query = strategy ? `?strategy=${encodeURIComponent(strategy)}` : "";
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}${query}`);
   if (!response.ok) {
     throw new Error(`Failed to load stock detail: ${response.status}`);
   }
@@ -288,6 +317,12 @@ export async function loadMarketSnapshot(market: string): Promise<MarketSnapshot
   const response = await fetch(`${API_BASE}/market/${encodeURIComponent(market)}`);
   if (!response.ok) throw new Error(`Failed to load market: ${response.status}`);
   return (await response.json()) as MarketSnapshot;
+}
+
+export async function loadMarketComparison(symbol: string): Promise<MarketComparisonResponse> {
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/market-comparison`);
+  if (!response.ok) throw new Error(`Failed to load market comparison: ${response.status}`);
+  return (await response.json()) as MarketComparisonResponse;
 }
 
 export async function summarizeStock(symbol: string, strategy?: string): Promise<StockAnalysisResponse> {
@@ -320,6 +355,18 @@ export async function saveHolding(value: { symbol: string; shares: number; avera
 export async function saveDcaOrder(value: { symbol: string; amount: number; scheduledFor: string; strategy: string }) {
   const response = await fetch(`${API_BASE}/portfolio/dca-orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(`Failed to save DCA order: ${response.status}`);
+  return (await response.json()) as DcaOrder;
+}
+
+export async function updateDcaOrderAmount(orderId: number, amount: number) {
+  const response = await fetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }) });
+  if (!response.ok) throw new Error(`Failed to update DCA order: ${response.status}`);
+  return (await response.json()) as DcaOrder;
+}
+
+export async function deleteDcaOrder(orderId: number) {
+  const response = await fetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`Failed to delete DCA order: ${response.status}`);
 }
 
 export async function loadStocks(params?: {
@@ -355,6 +402,9 @@ export async function loadStocks(params?: {
 export async function loadDiscoveries(params?: {
   q?: string;
   kind?: string;
+  strategy?: string;
+  region?: "all" | "us" | "th";
+  page?: number;
   limit?: number;
 }): Promise<DiscoveryResponse> {
   const query = new URLSearchParams();
@@ -364,6 +414,9 @@ export async function loadDiscoveries(params?: {
   if (params?.kind) {
     query.set("kind", params.kind);
   }
+  if (params?.strategy) query.set("strategy", params.strategy);
+  if (params?.region) query.set("region", params.region);
+  if (typeof params?.page === "number") query.set("page", String(params.page));
   if (typeof params?.limit === "number") {
     query.set("limit", String(params.limit));
   }

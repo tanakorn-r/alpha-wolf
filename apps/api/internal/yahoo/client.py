@@ -101,13 +101,17 @@ def build_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
 
     summary_profile = {
         "sector": flat.get("sector"),
+        "sectorKey": flat.get("sectorKey"),
         "industry": flat.get("industry"),
+        "industryKey": flat.get("industryKey"),
         "longBusinessSummary": flat.get("longBusinessSummary"),
     }
 
     asset_profile = {
         "sector": flat.get("sector"),
+        "sectorKey": flat.get("sectorKey"),
         "industry": flat.get("industry"),
+        "industryKey": flat.get("industryKey"),
         "longBusinessSummary": flat.get("longBusinessSummary"),
     }
 
@@ -130,6 +134,7 @@ def build_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
         "symbol": symbol,
         "quoteType": flat.get("quoteType"),
         "exchange": flat.get("exchange"),
+        "market": flat.get("market"),
         "currency": flat.get("currency"),
     }
 

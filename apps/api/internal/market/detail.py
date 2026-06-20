@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-
+import warnings
 import pandas as pd
 
 from internal.market.scoring import StrategyKey, confidence_from_score
@@ -14,7 +14,7 @@ from internal.market.technicals import (
     return_over_window,
     year_to_date_return,
 )
-from internal.market.universe import get_live_records
+from internal.market.catalog import get_industry_peers
 from internal.store.cache import cache_get, cache_set
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
 from internal.yahoo.client import fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
@@ -56,7 +56,7 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     technicals = build_technicals(history)
     business = build_business_profile(modules, history, stock)
     performance = build_performance_profile(history)
-    peers = build_peer_profile(stock, strategy, get_live_records())
+    peers = build_peer_profile(stock, business, strategy)
     verdict = build_verdict(stock, business, performance, peers, strategy)
     outlook = build_outlook(business, performance, peers)
     dividend_pattern = build_dividend_dip_pattern(history, dividends)
@@ -79,20 +79,47 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
 
 
 def get_financials(symbol: str) -> dict[str, Any] | None:
-    """Lazy counterpart to the financials field build_detail_bundle used to
-    always compute - fetched only when routes/details.py's /financials
-    endpoint is actually requested."""
     normalized = symbol.upper().strip()
     if not normalized:
         return None
+        
     cache_key = f"financials:{normalized}"
     cached = cache_get("detail_bundle", cache_key)
     if cached is not None:
         return cached
-    result = build_financial_snapshot(make_ticker(normalized))
+
+    # 1. Mute the Deprecation warning completely
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        
+        ticker = make_ticker(normalized)
+        try:
+            # Try your standard snapshot construction first
+            result = build_financial_snapshot(ticker)
+        except Exception:
+            # 2. Hard Root Cause Intercept: Yahoo API doesn't have BBL.BK snapshot modules.
+            # Instead of crashing or passing dummy data, pull the raw Income Statement table.
+            try:
+                # Fallback to direct financial statements parsing if summary endpoint returns 404
+                income_stmt = ticker.income_stmt
+                balance_sheet = ticker.balance_sheet
+                
+                # Dynamically construct metrics directly out of the statement dataframes
+                result = {
+                    "peRatio": ticker.info.get("trailingPE") if hasattr(ticker, "info") else None,
+                    "profitMargin": (income_stmt.loc["Net Income Loss"].iloc[0] / income_stmt.loc["Total Revenue"].iloc[0] * 100) if "Net Income Loss" in income_stmt.index else None,
+                    "revenueGrowth": None, # Non-US tickers might miss structural growth estimates
+                    "debtToEquity": (balance_sheet.loc["Total Debt"].iloc[0] / balance_sheet.loc["Stockholders Equity"].iloc[0] * 100) if "Total Debt" in balance_sheet.index else None,
+                    "currentRatio": (balance_sheet.loc["Current Assets"].iloc[0] / balance_sheet.loc["Current Liabilities"].iloc[0]) if "Current Assets" in balance_sheet.index else None,
+                    "source": "raw_statement_fallback"
+                }
+            except Exception:
+                # If even the raw spreadsheets do not exist on Yahoo for this asset, 
+                # we must return None cleanly so OpenAI knows there are no fundamentals.
+                result = None
+
     cache_set("detail_bundle", cache_key, result, DETAIL_TTL_SECONDS)
     return result
-
 
 def get_domain_insights(symbol: str) -> dict[str, Any] | None:
     """Lazy counterpart to sectorInsight/industryInsight."""
@@ -109,6 +136,62 @@ def get_domain_insights(symbol: str) -> dict[str, Any] | None:
     return {"sectorInsight": sector_insight, "industryInsight": industry_insight}
 
 
+def get_market_comparison(symbol: str) -> dict[str, Any] | None:
+    normalized = symbol.upper().strip()
+    cache_key = f"market_comparison:v4:{normalized}"
+    cached = cache_get("detail_bundle", cache_key)
+    if cached is not None:
+        return cached
+    stock = fetch_symbol_record(normalized)
+    if not stock:
+        return None
+    from internal.market.records import merge_ticker_info
+    info = merge_ticker_info(load_ticker_modules(make_ticker(normalized), normalized), normalized)
+    region = "th" if normalized.endswith(".BK") else "us"
+    industry = str(info.get("industry") or "")
+    candidates = get_industry_peers(region, industry)
+    candidates.sort(key=lambda item: str(item.get("symbol") or ""))
+    candidates.sort(
+        key=lambda item: item.get("oneYearReturn") if item.get("oneYearReturn") is not None else float("-inf"),
+        reverse=True,
+    )
+    peer_candidates = candidates[:1]
+    if not peer_candidates:
+        return None
+    benchmark_symbol = "^SET.BK" if region == "th" else "^GSPC"
+    benchmark_name = "SET Index" if region == "th" else "S&P 500"
+    symbols = [normalized, benchmark_symbol, *(str(item["symbol"]) for item in peer_candidates)]
+    with ThreadPoolExecutor(max_workers=min(8, len(symbols))) as pool:
+        frames = list(pool.map(lambda ticker_symbol: fetch_history(make_ticker(ticker_symbol), period="1y"), symbols))
+    series = [_monthly_rebased(frame) for frame in frames]
+    peer_index = max(range(2, len(series)), key=lambda index: list(series[index].values())[-1] if series[index] else float("-inf"))
+    peer = peer_candidates[peer_index - 2]
+    peer_series = series[peer_index]
+    common_dates = sorted(set(series[0]) & set(series[1]) & set(peer_series))
+    if not common_dates:
+        return None
+    points = [{"date": date, "stock": series[0][date], "benchmark": series[1][date], "peer": peer_series[date]} for date in common_dates]
+    result = {
+        "stock": {"symbol": normalized, "name": stock.get("name") or normalized, "returnPct": round(points[-1]["stock"] - 100, 2)},
+        "benchmark": {"symbol": benchmark_symbol, "name": benchmark_name, "returnPct": round(points[-1]["benchmark"] - 100, 2)},
+        "peer": {"symbol": peer["symbol"], "name": peer.get("name") or peer["symbol"], "returnPct": round(points[-1]["peer"] - 100, 2)},
+        "points": points,
+    }
+    cache_set("detail_bundle", cache_key, result, DOMAIN_TTL_SECONDS)
+    return result
+
+
+def _monthly_rebased(history: pd.DataFrame) -> dict[str, float]:
+    closes = extract_closes(history)
+    if closes.empty:
+        return {}
+    monthly = closes.resample("ME").last().dropna()
+    if monthly.empty or not float(monthly.iloc[0]):
+        return {}
+    base = float(monthly.iloc[0])
+    return {index.strftime("%Y-%m"): round(float(value) / base * 100, 2) for index, value in monthly.items()}
+
+
 def build_business_profile(modules: dict[str, Any], history: pd.DataFrame, stock: dict[str, Any]) -> dict[str, Any]:
     from internal.market.records import merge_ticker_info
 
@@ -123,6 +206,9 @@ def build_business_profile(modules: dict[str, Any], history: pd.DataFrame, stock
     return {
         "sector": info.get("sector") or stock.get("sector") or "Unknown",
         "industry": info.get("industry") or info.get("sector") or stock.get("sector") or "Unknown",
+        "sectorKey": info.get("sectorKey"),
+        "industryKey": info.get("industryKey"),
+        "market": info.get("market"),
         "marketCap": as_float(info.get("marketCap")),
         "enterpriseValue": as_float(info.get("enterpriseValue")),
         "peRatio": as_float(info.get("trailingPE") or info.get("forwardPE")),
@@ -204,9 +290,13 @@ def build_performance_profile(history: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def build_peer_profile(stock: dict[str, Any], strategy: StrategyKey, live_records: list[dict[str, Any]]) -> dict[str, Any]:
-    sector = (stock.get("sector") or "Unknown").lower()
-    live_records = [item for item in live_records if (item.get("sector") or "").lower() == sector]
+def build_peer_profile(stock: dict[str, Any], business: dict[str, Any], strategy: StrategyKey) -> dict[str, Any]:
+    region = "th" if str(stock.get("symbol") or "").endswith(".BK") else "us"
+    industry = str(business.get("industry") or "")
+    try:
+        live_records = get_industry_peers(region, industry) if industry and industry != "Unknown" else []
+    except Exception:
+        live_records = []
     scored = sorted(
         (
             {
@@ -219,14 +309,15 @@ def build_peer_profile(stock: dict[str, Any], strategy: StrategyKey, live_record
         key=lambda item: (item["score"], item["symbol"]),
         reverse=True,
     )
-    rank = next((index + 1 for index, item in enumerate(scored) if item["symbol"] == stock["symbol"]), 1)
+    rank = next((index + 1 for index, item in enumerate(scored) if item["symbol"] == stock["symbol"]), None)
     return {
-        "sector": stock.get("sector") or "Unknown",
+        "sector": business.get("sector") or stock.get("sector") or "Unknown",
+        "industry": industry or "Unknown",
         "count": len(live_records),
         "rank": rank,
-        "isNo1": rank == 1,
-        "leader": scored[0]["symbol"] if scored else stock["symbol"],
-        "leaderScore": scored[0]["score"] if scored else float(stock["strategyScores"].get(strategy, 0)),
+        "isNo1": rank == 1 if rank is not None else False,
+        "leader": scored[0]["symbol"] if scored else None,
+        "leaderScore": scored[0]["score"] if scored else None,
     }
 
 
@@ -355,27 +446,40 @@ def fetch_industry_insight(key: str) -> dict[str, Any] | None:
     return None
 
 
+from typing import Any, Dict
+import pandas as pd
+
+import pandas as pd
+from typing import Any, Dict
+
 def build_financial_snapshot(ticker) -> dict[str, Any]:
+    # 1. Fetch stable financial reports (These always work for BBL.BK)
     dividends = safe_call(ticker.get_dividends, period="5y")
-    return {
-        "incomeStatement": statement_bundle(safe_call(ticker.get_income_stmt, pretty=True, freq="yearly")),
+    annual_income = safe_call(ticker.get_income_stmt, pretty=True, freq="yearly")
+    
+    # 2. Build explicit mocked earnings data out of the functional statements array
+    mocked_earnings_records = []
+    if isinstance(annual_income, pd.DataFrame) and not annual_income.empty:
+        try:
+            for date_col in annual_income.columns:
+                year_str = str(date_col.year) if hasattr(date_col, 'year') else str(date_col)
+                mocked_earnings_records.append({
+                    "Year": year_str,
+                    "Net Income": annual_income.loc["Net Income", date_col] if "Net Income" in annual_income.index else None,
+                    "Diluted EPS": annual_income.loc["Diluted EPS", date_col] if "Diluted EPS" in annual_income.index else None
+                })
+        except Exception:
+            pass
+
+    # 3. Base layout dictionary map
+    snapshot = {
+        "incomeStatement": statement_bundle(annual_income),
         "quarterlyIncomeStatement": statement_bundle(safe_call(ticker.get_income_stmt, pretty=True, freq="quarterly")),
         "balanceSheet": statement_bundle(safe_call(ticker.get_balance_sheet, pretty=True, freq="yearly")),
         "quarterlyBalanceSheet": statement_bundle(safe_call(ticker.get_balance_sheet, pretty=True, freq="quarterly")),
         "cashFlow": statement_bundle(safe_call(ticker.get_cash_flow, pretty=True, freq="yearly")),
         "quarterlyCashFlow": statement_bundle(safe_call(ticker.get_cash_flow, pretty=True, freq="quarterly")),
-        "earnings": safe_dataframe_records(safe_call(ticker.get_earnings)),
-        "calendar": safe_dict(safe_call(ticker.get_calendar)),
-        "secFilings": safe_dict(safe_call(ticker.get_sec_filings)),
-        "recommendations": safe_dataframe_records(safe_call(ticker.get_recommendations)),
-        "recommendationsSummary": safe_dataframe_records(safe_call(ticker.get_recommendations_summary)),
-        "analystPriceTargets": safe_dict(safe_call(ticker.get_analyst_price_targets)),
-        "earningsEstimate": safe_dataframe_records(safe_call(ticker.get_earnings_estimate)),
-        "revenueEstimate": safe_dataframe_records(safe_call(ticker.get_revenue_estimate)),
-        "earningsHistory": safe_dataframe_records(safe_call(ticker.get_earnings_history)),
-        "epsTrend": safe_dataframe_records(safe_call(ticker.get_eps_trend)),
-        "epsRevisions": safe_dataframe_records(safe_call(ticker.get_eps_revisions)),
-        "growthEstimates": safe_dataframe_records(safe_call(ticker.get_growth_estimates)),
+        "earnings": mocked_earnings_records,
         "actions": safe_dataframe_records(safe_call(ticker.get_actions, period="5y")),
         "dividends": (
             dividends.rename("amount").reset_index().to_dict(orient="records")
@@ -383,6 +487,43 @@ def build_financial_snapshot(ticker) -> dict[str, Any]:
             else []
         ),
     }
+
+    # 4. Strict explicit Try/Except checks for highly volatile international sub-methods
+    # If Yahoo returns a 404 for these, they resolve to an empty structure instead of breaking the flow
+    try: snapshot["calendar"] = safe_dict(ticker.get_calendar())
+    except Exception: snapshot["calendar"] = {}
+
+    try: snapshot["secFilings"] = safe_dict(ticker.get_sec_filings())
+    except Exception: snapshot["secFilings"] = {}
+
+    try: snapshot["recommendations"] = safe_dataframe_records(ticker.get_recommendations())
+    except Exception: snapshot["recommendations"] = []
+
+    try: snapshot["recommendationsSummary"] = safe_dataframe_records(ticker.get_recommendations_summary())
+    except Exception: snapshot["recommendationsSummary"] = []
+
+    try: snapshot["analystPriceTargets"] = safe_dict(ticker.get_analyst_price_targets())
+    except Exception: snapshot["analystPriceTargets"] = {}
+
+    try: snapshot["earningsEstimate"] = safe_dataframe_records(ticker.get_earnings_estimate())
+    except Exception: snapshot["earningsEstimate"] = []
+
+    try: snapshot["revenueEstimate"] = safe_dataframe_records(ticker.get_revenue_estimate())
+    except Exception: snapshot["revenueEstimate"] = []
+
+    try: snapshot["earningsHistory"] = safe_dataframe_records(ticker.get_earnings_history())
+    except Exception: snapshot["earningsHistory"] = []
+
+    try: snapshot["epsTrend"] = safe_dataframe_records(ticker.get_eps_trend())
+    except Exception: snapshot["epsTrend"] = []
+
+    try: snapshot["epsRevisions"] = safe_dataframe_records(ticker.get_eps_revisions())
+    except Exception: snapshot["epsRevisions"] = []
+
+    try: snapshot["growthEstimates"] = safe_dataframe_records(ticker.get_growth_estimates())
+    except Exception: snapshot["growthEstimates"] = []
+
+    return snapshot
 
 
 def statement_bundle(frame: Any) -> dict[str, Any]:
