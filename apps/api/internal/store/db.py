@@ -13,6 +13,7 @@ DB_PATH = DATA_DIR / "alpha_wolf.sqlite3"
 
 def connect() -> sqlite3.Connection:
     db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
     # WAL lets readers (e.g. preset queries) proceed while a batch write commits,
     # instead of every connection blocking on the same file lock.
     db.execute("PRAGMA journal_mode=WAL")
@@ -28,6 +29,34 @@ def migrate() -> None:
                 symbol TEXT PRIMARY KEY,
                 payload TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS holdings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL UNIQUE,
+                shares REAL NOT NULL,
+                average_cost REAL NOT NULL,
+                strategy TEXT NOT NULL,
+                monthly_dca REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dca_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                amount REAL NOT NULL,
+                scheduled_for TEXT NOT NULL,
+                strategy TEXT NOT NULL,
+                status TEXT NOT NULL,
+                executed_price REAL,
+                shares REAL,
+                created_at TEXT NOT NULL
             )
             """
         )

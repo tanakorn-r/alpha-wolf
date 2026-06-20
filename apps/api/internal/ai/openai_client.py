@@ -22,6 +22,7 @@ def analyze_with_openai(bundle: dict[str, Any], strategy: StrategyKey) -> dict[s
     stock = bundle["stock"]
     technicals = bundle["technicals"]
     news = bundle["news"]
+    dividend_pattern = bundle.get("dividendPattern")
     prompt = {
         "symbol": stock["symbol"],
         "name": stock["name"],
@@ -31,11 +32,15 @@ def analyze_with_openai(bundle: dict[str, Any], strategy: StrategyKey) -> dict[s
         "weeklyTrend": stock.get("weeklyTrend"),
         "strategyScores": stock.get("strategyScores"),
         "technicals": technicals,
+        "dividendDipPattern": dividend_pattern,
         "recentNews": news[:5],
         "instructions": [
             "Return strict JSON only.",
-            "Fields: score (1-100 integer), recommendation (short sentence), summary (2-3 sentences), reasons (array of 3-5 short bullets), future (1-2 sentence forecast), confidence (Low, Medium, High), technicalNotes (array), newsNotes (array).",
+            "Fields: score (1-100 integer), recommendation (short sentence), summary (2-3 sentences), reasons (array of 3-5 short bullets), future (1-2 sentence forecast), confidence (Low, Medium, High), technicalNotes (array), newsNotes (array), dcaTiming (1-2 sentences).",
             "Use the supplied live technicals and news to justify the score.",
+            "For dcaTiming: this is for a DCA investor deciding WHEN in the month to place a recurring buy, not whether to buy at all. "
+            "If dividendDipPattern.hasPattern is true, recommend timing the buy a few days after the next ex-dividend date and cite the historical hit rate / average dip. "
+            "If dividendDipPattern.hasPattern is false or there is no usable pattern, say this stock does not show a reliable post-dividend dip and a flat/scheduled DCA (or a dip-buy based on technicals instead) is more appropriate.",
             "Do not mention that you are an AI model.",
         ],
     }

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import re
+from datetime import date, datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -49,6 +50,25 @@ def safe_dataframe_records(frame: Any) -> list[dict[str, Any]]:
     if not isinstance(frame, pd.DataFrame) or frame.empty:
         return []
     return frame.reset_index().replace({pd.NaT: None}).to_dict(orient="records")
+
+
+def json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, timezone):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [json_safe(item) for item in value]
+    if hasattr(value, "item"):
+        try:
+            return json_safe(value.item())
+        except Exception:
+            pass
+    return str(value)
 
 
 def normalize_statement_key(value: str) -> str:

@@ -7,6 +7,8 @@ type WolfState = {
   detailOpen: boolean;
   searchQuery: string;
   watchlist: StockRecord[];
+  portfolioValue: number;
+  portfolioGainPct: number;
   setStrategy: (strategy: StrategyKey) => void;
   setSelectedSymbol: (symbol: string) => void;
   openDetail: (symbol: string) => void;
@@ -14,6 +16,7 @@ type WolfState = {
   setDetailOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
   setWatchlist: (rows: StockRecord[]) => void;
+  setPortfolioSummary: (value: number, gainPct: number) => void;
 };
 
 export const useWolfStore = create<WolfState>((set) => ({
@@ -22,11 +25,14 @@ export const useWolfStore = create<WolfState>((set) => ({
   detailOpen: false,
   searchQuery: "",
   watchlist: [],
+  portfolioValue: 0,
+  portfolioGainPct: 0,
   setStrategy: (selectedStrategy) => set({ selectedStrategy }),
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
   openDetail: (selectedSymbol) => set({ selectedSymbol, detailOpen: true }),
   closeDetail: () => set({ detailOpen: false }),
   setDetailOpen: (detailOpen) => set({ detailOpen }),
   setSearchQuery: (searchQuery) => set({ searchQuery }),
-  setWatchlist: (watchlist) => set({ watchlist })
+  setWatchlist: (watchlist) => set({ watchlist }),
+  setPortfolioSummary: (portfolioValue, portfolioGainPct) => set({ portfolioValue, portfolioGainPct })
 }));

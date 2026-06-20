@@ -137,6 +137,24 @@ export type StockDetailResponse = {
   ai?: StockAnalysisResponse;
 };
 
+export type StockResearchResponse = {
+  incomeStatement?: { latest?: Record<string, number>; history?: Array<Record<string, number | string | null>> };
+  quarterlyIncomeStatement?: { latest?: Record<string, number>; history?: Array<Record<string, number | string | null>> };
+  balanceSheet?: { latest?: Record<string, number>; history?: Array<Record<string, number | string | null>> };
+  cashFlow?: { latest?: Record<string, number>; history?: Array<Record<string, number | string | null>> };
+  calendar?: Record<string, unknown>;
+  recommendationsSummary?: Array<Record<string, unknown>>;
+  analystPriceTargets?: Record<string, unknown>;
+  earningsEstimate?: Array<Record<string, unknown>>;
+  revenueEstimate?: Array<Record<string, unknown>>;
+  earningsHistory?: Array<Record<string, unknown>>;
+  epsTrend?: Array<Record<string, unknown>>;
+  epsRevisions?: Array<Record<string, unknown>>;
+  growthEstimates?: Array<Record<string, unknown>>;
+  actions?: Array<Record<string, unknown>>;
+  dividends?: Array<Record<string, unknown>>;
+};
+
 export type StockAnalysisResponse = {
   score: number;
   recommendation: string;
@@ -146,8 +164,45 @@ export type StockAnalysisResponse = {
   confidence?: string;
   technicalNotes?: string[];
   newsNotes?: string[];
+  dcaTiming?: string;
   raw?: string;
 };
+
+export type PortfolioHolding = StockRecord & {
+  id: number;
+  shares: number;
+  averageCost: number;
+  strategy: string;
+  monthlyDca: number;
+  createdAt: string;
+  value: number;
+  cost: number;
+  gainLoss: number;
+  gainLossPct: number;
+};
+
+export type DcaOrder = {
+  id: number;
+  symbol: string;
+  amount: number;
+  scheduledFor: string;
+  strategy: string;
+  status: string;
+  executedPrice?: number | null;
+  shares?: number | null;
+  createdAt: string;
+};
+
+export type PortfolioDashboard = {
+  summary: { totalValue: number; invested: number; gainLoss: number; gainLossPct: number; dividendsYtd: number; forwardYield: number };
+  holdings: PortfolioHolding[];
+  dcaOrders: DcaOrder[];
+  chart: Array<{ date: string; value: number; cost: number }>;
+  markers: Array<{ date: string; symbol: string; amount: number }>;
+  incomeEvents: Array<{ date: string; symbol: string; kind: string; amount?: number | null }>;
+};
+
+export type MarketSnapshot = { market: string; status: Record<string, unknown>; summary: Record<string, unknown> };
 
 export type PaginatedStocksResponse = {
   stocks?: StockRecord[];
@@ -223,6 +278,18 @@ export async function loadStockDetail(symbol: string): Promise<StockDetailRespon
   return (await response.json()) as StockDetailResponse;
 }
 
+export async function loadStockResearch(symbol: string): Promise<StockResearchResponse> {
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/financials`);
+  if (!response.ok) throw new Error(`Failed to load stock research: ${response.status}`);
+  return (await response.json()) as StockResearchResponse;
+}
+
+export async function loadMarketSnapshot(market: string): Promise<MarketSnapshot> {
+  const response = await fetch(`${API_BASE}/market/${encodeURIComponent(market)}`);
+  if (!response.ok) throw new Error(`Failed to load market: ${response.status}`);
+  return (await response.json()) as MarketSnapshot;
+}
+
 export async function summarizeStock(symbol: string, strategy?: string): Promise<StockAnalysisResponse> {
   const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}`, {
     method: "POST",
@@ -237,6 +304,22 @@ export async function summarizeStock(symbol: string, strategy?: string): Promise
   }
 
   return (await response.json()) as StockAnalysisResponse;
+}
+
+export async function loadPortfolio(): Promise<PortfolioDashboard> {
+  const response = await fetch(`${API_BASE}/portfolio`);
+  if (!response.ok) throw new Error(`Failed to load portfolio: ${response.status}`);
+  return (await response.json()) as PortfolioDashboard;
+}
+
+export async function saveHolding(value: { symbol: string; shares: number; averageCost: number; strategy: string; monthlyDca: number }) {
+  const response = await fetch(`${API_BASE}/portfolio/holdings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  if (!response.ok) throw new Error(`Failed to save holding: ${response.status}`);
+}
+
+export async function saveDcaOrder(value: { symbol: string; amount: number; scheduledFor: string; strategy: string }) {
+  const response = await fetch(`${API_BASE}/portfolio/dca-orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  if (!response.ok) throw new Error(`Failed to save DCA order: ${response.status}`);
 }
 
 export async function loadStocks(params?: {

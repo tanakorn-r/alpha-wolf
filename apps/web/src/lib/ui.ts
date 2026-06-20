@@ -1,8 +1,8 @@
 // Shared Tailwind class strings - plain constants, not component wrappers,
 // so the markup stays in each page/file but the core "look" stays consistent.
-export const panel = "rounded-[18px] border border-white/70 bg-white/78 p-4 shadow-[0_12px_36px_rgba(91,47,209,0.07)] backdrop-blur-xl";
-export const panelTint = "rounded-[18px] border border-violet-100/70 bg-gradient-to-br from-white/85 via-violet-50/75 to-violet-100/60 p-4 shadow-[0_12px_36px_rgba(124,92,252,0.1)] backdrop-blur-xl";
-export const panelMuted = "rounded-[18px] border border-white/70 bg-white/66 p-4 shadow-[0_12px_36px_rgba(91,47,209,0.06)] backdrop-blur-xl";
+export const panel = "rounded-xl border border-[#2a2a31] bg-[#161619] p-4";
+export const panelTint = "rounded-xl border border-[#285f48] bg-[#173528] p-4";
+export const panelMuted = "rounded-xl border border-[#2a2a31] bg-[#121214] p-4";
 export const pill = "inline-flex items-center rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all";
 export const pillActive = `${pill} bg-gradient-to-r from-violet-600 to-fuchsia-500 text-white shadow-lg shadow-violet-500/25`;
 export const pillInactive = `${pill} bg-white/70 text-slate-600 ring-1 ring-slate-200/70 hover:bg-white hover:text-slate-900`;

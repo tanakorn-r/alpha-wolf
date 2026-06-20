@@ -64,6 +64,9 @@ def merge_ticker_info(modules: dict[str, Any], symbol: str) -> dict[str, Any]:
         ("recommendationMean", (financial_data, summary_detail), ()),
         ("targetMeanPrice", (financial_data, summary_detail), ()),
         ("dividendYield", (summary_detail,), ()),
+        ("dividendRate", (summary_detail,), ()),
+        ("exDividendDate", (summary_detail, calendar_events), ()),
+        ("dividendDate", (summary_detail, calendar_events), ()),
         ("payoutRatio", (summary_detail,), ()),
         ("beta", (price, summary_detail), ()),
         ("beta3Year", (summary_detail,), ()),
@@ -147,9 +150,10 @@ def fetch_record_from_ticker(
     *,
     ticker: yf.Ticker,
     info: dict[str, Any] | None = None,
+    history=None,
 ) -> dict[str, Any]:
     info = safe_dict(info or merge_ticker_info(load_ticker_modules(ticker, entry.symbol), entry.symbol))
-    history = fetch_history(ticker)
+    history = history if history is not None else fetch_history(ticker)
 
     closes = extract_closes(history)
     price = resolve_price(info, closes)

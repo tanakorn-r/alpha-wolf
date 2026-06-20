@@ -17,7 +17,7 @@ from internal.market.technicals import (
 from internal.market.universe import get_live_records
 from internal.store.cache import cache_get, cache_set
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
-from internal.yahoo.client import fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
+from internal.yahoo.client import fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
 
 DETAIL_TTL_SECONDS = 180
 DOMAIN_TTL_SECONDS = 1800
@@ -44,12 +44,14 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     # yfinance.Ticker isn't thread-safe for concurrent attribute access - reusing
     # one instance across these futures made history()/financials silently come
     # back empty under load. Each concurrent call gets its own instance instead.
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=3) as pool:
         history_future = pool.submit(lambda: fetch_history(make_ticker(symbol), period="5y"))
         news_future = pool.submit(lambda: fetch_news(make_ticker(symbol)))
+        dividends_future = pool.submit(lambda: fetch_dividends(make_ticker(symbol), period="5y"))
 
         history = history_future.result()
         news = news_future.result()
+        dividends = dividends_future.result()
 
     technicals = build_technicals(history)
     business = build_business_profile(modules, history, stock)
@@ -57,6 +59,7 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     peers = build_peer_profile(stock, strategy, get_live_records())
     verdict = build_verdict(stock, business, performance, peers, strategy)
     outlook = build_outlook(business, performance, peers)
+    dividend_pattern = build_dividend_dip_pattern(history, dividends)
 
     result = {
         "stock": stock,
@@ -69,6 +72,7 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
         "verdict": verdict,
         "outlook": outlook,
         "strategy": strategy,
+        "dividendPattern": dividend_pattern,
     }
     cache_set("detail_bundle", cache_key, result, DETAIL_TTL_SECONDS)
     return result
@@ -144,6 +148,38 @@ def build_business_profile(modules: dict[str, Any], history: pd.DataFrame, stock
         "targetMeanPrice": as_float(info.get("targetMeanPrice")),
         "currentPrice": stock.get("price"),
         "companySummary": info.get("longBusinessSummary") or info.get("longName") or stock.get("name"),
+    }
+
+
+def build_dividend_dip_pattern(history: pd.DataFrame, dividends: pd.Series) -> dict[str, Any]:
+    """Checks whether price tends to dip in the days after each ex-dividend date -
+    the signal the user wants DCA timing to key off of ("buy the post-dividend dip")
+    instead of just buying on a fixed schedule."""
+    if history.empty or dividends is None or dividends.empty or "Close" not in history.columns:
+        return {"hasPattern": False, "sampleSize": 0, "averageDipPct": None, "hitRate": None}
+
+    closes = history["Close"].dropna()
+    deltas: list[float] = []
+    for ex_date in dividends.index:
+        before = closes[closes.index <= ex_date]
+        after = closes[(closes.index > ex_date) & (closes.index <= ex_date + pd.Timedelta(days=10))]
+        if before.empty or after.empty:
+            continue
+        pre_price = float(before.iloc[-1])
+        post_low = float(after.min())
+        if pre_price:
+            deltas.append((post_low - pre_price) / pre_price * 100.0)
+
+    if not deltas:
+        return {"hasPattern": False, "sampleSize": 0, "averageDipPct": None, "hitRate": None}
+
+    average_dip = sum(deltas) / len(deltas)
+    hit_rate = sum(1 for delta in deltas if delta < 0) / len(deltas) * 100.0
+    return {
+        "hasPattern": average_dip < -0.3 and hit_rate >= 55,
+        "sampleSize": len(deltas),
+        "averageDipPct": round(average_dip, 2),
+        "hitRate": round(hit_rate, 1),
     }
 
 
@@ -320,6 +356,7 @@ def fetch_industry_insight(key: str) -> dict[str, Any] | None:
 
 
 def build_financial_snapshot(ticker) -> dict[str, Any]:
+    dividends = safe_call(ticker.get_dividends, period="5y")
     return {
         "incomeStatement": statement_bundle(safe_call(ticker.get_income_stmt, pretty=True, freq="yearly")),
         "quarterlyIncomeStatement": statement_bundle(safe_call(ticker.get_income_stmt, pretty=True, freq="quarterly")),
@@ -330,6 +367,21 @@ def build_financial_snapshot(ticker) -> dict[str, Any]:
         "earnings": safe_dataframe_records(safe_call(ticker.get_earnings)),
         "calendar": safe_dict(safe_call(ticker.get_calendar)),
         "secFilings": safe_dict(safe_call(ticker.get_sec_filings)),
+        "recommendations": safe_dataframe_records(safe_call(ticker.get_recommendations)),
+        "recommendationsSummary": safe_dataframe_records(safe_call(ticker.get_recommendations_summary)),
+        "analystPriceTargets": safe_dict(safe_call(ticker.get_analyst_price_targets)),
+        "earningsEstimate": safe_dataframe_records(safe_call(ticker.get_earnings_estimate)),
+        "revenueEstimate": safe_dataframe_records(safe_call(ticker.get_revenue_estimate)),
+        "earningsHistory": safe_dataframe_records(safe_call(ticker.get_earnings_history)),
+        "epsTrend": safe_dataframe_records(safe_call(ticker.get_eps_trend)),
+        "epsRevisions": safe_dataframe_records(safe_call(ticker.get_eps_revisions)),
+        "growthEstimates": safe_dataframe_records(safe_call(ticker.get_growth_estimates)),
+        "actions": safe_dataframe_records(safe_call(ticker.get_actions, period="5y")),
+        "dividends": (
+            dividends.rename("amount").reset_index().to_dict(orient="records")
+            if isinstance(dividends, pd.Series) and not dividends.empty
+            else []
+        ),
     }
 
 

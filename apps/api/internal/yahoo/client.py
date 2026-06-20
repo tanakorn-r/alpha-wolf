@@ -90,6 +90,9 @@ def build_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
         "beta": flat.get("beta"),
         "beta3Year": flat.get("beta3Year"),
         "dividendYield": flat.get("dividendYield"),
+        "dividendRate": flat.get("dividendRate"),
+        "exDividendDate": flat.get("exDividendDate"),
+        "dividendDate": flat.get("dividendDate"),
         "payoutRatio": flat.get("payoutRatio"),
         "recommendationKey": flat.get("recommendationKey"),
         "recommendationMean": flat.get("recommendationMean"),
@@ -198,6 +201,14 @@ def fetch_news(t: yf.Ticker) -> list[dict[str, Any]]:
             }
         )
     return news_items
+
+
+def fetch_dividends(t: yf.Ticker, period: str = "ytd") -> pd.Series:
+    try:
+        dividends = t.get_dividends(period=period)
+        return dividends if isinstance(dividends, pd.Series) else pd.Series(dtype="float64")
+    except Exception:
+        return pd.Series(dtype="float64")
 
 
 def safe_call(func: Any, *args: Any, **kwargs: Any) -> Any:

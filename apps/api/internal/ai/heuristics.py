@@ -36,6 +36,7 @@ def analyze_with_heuristics(bundle: dict[str, Any], strategy: StrategyKey) -> di
         "confidence": confidence_from_score(score),
         "technicalNotes": local_technical_notes(technicals),
         "newsNotes": local_news_notes(bundle["news"]),
+        "dcaTiming": local_dca_timing(bundle.get("dividendPattern")),
     }
 
 
@@ -69,8 +70,21 @@ def normalize_analysis(parsed: dict[str, Any], bundle: dict[str, Any], strategy:
         "confidence": str(parsed.get("confidence") or confidence_from_score(score)),
         "technicalNotes": [str(item) for item in technical_notes[:6]],
         "newsNotes": [str(item) for item in news_notes[:6]],
+        "dcaTiming": str(parsed.get("dcaTiming") or local_dca_timing(bundle.get("dividendPattern"))),
         "raw": raw_text,
     }
+
+
+def local_dca_timing(dividend_pattern: dict[str, Any] | None) -> str:
+    if not dividend_pattern or not dividend_pattern.get("sampleSize"):
+        return "No dividend history is available to time the buy, so a flat monthly DCA is the simplest approach."
+    if dividend_pattern.get("hasPattern"):
+        return (
+            f"Across {dividend_pattern['sampleSize']} past payouts the price dipped {abs(dividend_pattern['averageDipPct']):.1f}% on average "
+            f"in the 10 days after the ex-dividend date ({dividend_pattern['hitRate']:.0f}% of the time) — placing the buy a few days after "
+            "the next ex-dividend date has tended to get a better entry than a fixed date."
+        )
+    return "This stock doesn't show a reliable post-dividend dip, so a flat scheduled DCA (or timing off technicals instead) makes more sense."
 
 
 def local_recommendation(stock: dict[str, Any], strategy: StrategyKey, score: int) -> str:

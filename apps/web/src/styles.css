@@ -1,7 +1,39 @@
 @import "tailwindcss";
 
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("./assets/fonts/ibm-plex-sans-400.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/ibm-plex-mono-400.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/ibm-plex-mono-500.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./assets/fonts/ibm-plex-mono-600.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
 @theme {
-  --font-sans: Inter, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  --font-sans: "IBM Plex Sans", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --color-brand-50: #f5f3ff;
   --color-brand-100: #ede9fe;
   --color-brand-200: #ddd6fe;
@@ -24,56 +56,51 @@ body,
 }
 
 body {
-  background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.95) 0%, rgba(255, 255, 255, 0.15) 34%, transparent 62%),
-    radial-gradient(circle at 20% 10%, rgba(194, 161, 255, 0.5) 0%, transparent 32%),
-    radial-gradient(circle at 85% 18%, rgba(227, 204, 255, 0.65) 0%, transparent 26%),
-    linear-gradient(135deg, #e8dbff 0%, #f0e8ff 42%, #f7f5ff 100%);
-  color: #171425;
+  background: #0e0e10;
+  color: #ececee;
   letter-spacing: -0.01em;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
 }
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb { background: #2a2a31; border-radius: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
 
 .aw-app-shell {
   position: relative;
 }
 
 .aw-app-shell::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  background:
-    radial-gradient(circle at 10% 10%, rgba(255, 255, 255, 0.6) 0, transparent 35%),
-    radial-gradient(circle at 90% 0%, rgba(121, 92, 252, 0.16) 0, transparent 28%);
-  pointer-events: none;
+  content: none;
 }
 
 .aw-shell {
   position: relative;
-  min-height: 640px;
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.56) !important;
-  backdrop-filter: blur(24px);
-  box-shadow:
-    0 24px 80px rgba(120, 91, 252, 0.12),
-    0 4px 20px rgba(77, 57, 160, 0.08);
+  background: #0e0e10 !important;
 }
 
 .aw-sidebar {
-  background: rgba(255, 255, 255, 0.88) !important;
-  backdrop-filter: blur(24px);
+  background: #0e0e10 !important;
+  border-color: #2a2a31 !important;
   overflow: hidden;
 }
+.aw-sidebar .text-slate-900 { color: #ececee !important; }
+.aw-sidebar .text-slate-500,
+.aw-sidebar .text-slate-400 { color: #8c8c95 !important; }
+.aw-sidebar .border-slate-100 { border-color: #2a2a31 !important; }
 
 .aw-content {
-  background: rgba(255, 255, 255, 0.45);
+  background: #0e0e10;
 }
 
 .aw-header {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: rgba(255, 255, 255, 0.76);
-  backdrop-filter: blur(18px);
+  background: rgba(14, 14, 16, 0.86);
+  border-color: #2a2a31 !important;
+  backdrop-filter: blur(12px);
 }
 
 .aw-main {
@@ -101,13 +128,27 @@ body {
 }
 
 .aw-overlay {
-  backdrop-filter: blur(8px);
+  background: rgba(6, 6, 8, 0.62) !important;
+  backdrop-filter: blur(3px);
 }
 
 .aw-drawer {
-  background: rgba(248, 246, 255, 0.92) !important;
-  backdrop-filter: blur(28px);
+  background: transparent !important;
+  backdrop-filter: none;
 }
+
+.aw-drawer .bg-white,
+.aw-drawer .bg-slate-50,
+.aw-drawer .bg-slate-100 { background: #161619 !important; }
+.aw-drawer .text-slate-900 { color: #ececee !important; }
+.aw-drawer .text-slate-600,
+.aw-drawer .text-slate-500,
+.aw-drawer .text-slate-400 { color: #8c8c95 !important; }
+.aw-drawer .border-white\/70,
+.aw-drawer .border-slate-100 { border-color: #2a2a31 !important; }
+.aw-drawer .bg-violet-600 { background: #3ecf8e !important; color: #06120c !important; }
+.aw-drawer .text-violet-500,
+.aw-drawer .text-violet-600 { color: #3ecf8e !important; }
 
 @keyframes skeleton-shimmer {
   0% {
@@ -120,7 +161,7 @@ body {
 
 .skeleton-block {
   border-radius: 1rem;
-  background-image: linear-gradient(90deg, #ede9fe 25%, #ddd6fe 37%, #ede9fe 63%);
+  background-image: linear-gradient(90deg, #1c1c20 25%, #2a2a31 37%, #1c1c20 63%);
   background-size: 400% 100%;
   animation: skeleton-shimmer 1.4s ease infinite;
 }
