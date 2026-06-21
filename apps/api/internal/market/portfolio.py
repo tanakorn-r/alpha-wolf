@@ -8,7 +8,7 @@ import pandas as pd
 
 from internal.market.records import build_entry_from_info, fetch_record_from_ticker, merge_ticker_info
 from internal.store.portfolio import list_dca_orders, list_holdings
-from internal.store.utils import as_float
+from internal.store.utils import as_float, coerce_iso_date
 from internal.yahoo.client import fetch_dividends, fetch_history, load_ticker_modules, ticker as make_ticker
 from models import IncomeEvent, PortfolioDashboard, PortfolioMarker, PortfolioPoint, PortfolioSummary
 
@@ -27,8 +27,9 @@ def build_portfolio_dashboard() -> PortfolioDashboard:
     total_value = 0.0
     dividends_ytd = 0.0
     annual_income = 0.0
-    histories: list[tuple[float, pd.Series]] = []
+    histories: list[tuple[float, float, pd.Series]] = []
     income_events: list[IncomeEvent] = []
+    buy_markers: list[PortfolioMarker] = []
 
     for holding, data in zip(holdings, live, strict=True):
         record, history, info, paid_dividends = data
@@ -38,19 +39,22 @@ def build_portfolio_dashboard() -> PortfolioDashboard:
         total_value += value
         dividends_ytd += holding.shares * paid_dividends
         annual_income += holding.shares * (as_float(info.get("dividendRate")) or 0.0)
-        closes = _close_series(history)
+        purchase_date = _iso_date(holding.createdAt)
+        closes = _close_series(history, since=purchase_date, current_price=float(record["price"]) if record.get("price") else None)
         if not closes.empty:
-            histories.append((holding.shares, closes))
+            histories.append((holding.shares, cost, closes))
         rows.append({**holding.model_dump(), **record, "value": round(value, 2), "cost": round(cost, 2), "gainLoss": round(value - cost, 2), "gainLossPct": round(((value - cost) / cost) * 100, 2) if cost else 0})
         income_events.extend(_income_events(holding.symbol, holding.shares, info))
+        if purchase_date:
+            buy_markers.append(PortfolioMarker(date=purchase_date, symbol=holding.symbol, amount=round(cost, 2)))
 
     gain_loss = total_value - invested
     return PortfolioDashboard(
         summary=PortfolioSummary(totalValue=round(total_value, 2), invested=round(invested, 2), gainLoss=round(gain_loss, 2), gainLossPct=round((gain_loss / invested) * 100, 2) if invested else 0, dividendsYtd=round(dividends_ytd, 2), forwardYield=round((annual_income / total_value) * 100, 2) if total_value else 0),
         holdings=rows,
         dcaOrders=orders,
-        chart=_portfolio_chart(histories, invested),
-        markers=[PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
+        chart=_portfolio_chart(histories),
+        markers=buy_markers + [PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
         incomeEvents=sorted(income_events, key=lambda item: item.date),
     )
 
@@ -66,20 +70,42 @@ def _load_holding_market_data(holding):
     return record, history, info, float(dividends.sum()) if not dividends.empty else 0.0
 
 
-def _close_series(history: pd.DataFrame) -> pd.Series:
+def _close_series(history: pd.DataFrame, since: str | None = None, current_price: float | None = None) -> pd.Series:
+    """Daily close prices for a holding, clipped to its own purchase date - a position bought
+    today must not plot a year of price history it was never actually exposed to. If the
+    purchase date has no trading bar yet (bought same-day, before the feed's latest close),
+    fall back to a single live point so a brand-new position still shows a starting dot."""
     if history.empty or "Close" not in history.columns:
         return pd.Series(dtype="float64")
-    return history["Close"].dropna().astype(float)
+    closes = history["Close"].dropna().astype(float)
+    if since:
+        cutoff = datetime.fromisoformat(since).date()
+        filtered = closes[[ts.date() >= cutoff for ts in closes.index]]
+        if filtered.empty and current_price:
+            last_index = closes.index[-1]
+            anchor = pd.Timestamp(cutoff, tz=last_index.tz) if last_index.tz is not None else pd.Timestamp(cutoff)
+            filtered = pd.Series([float(current_price)], index=[anchor])
+        closes = filtered
+    return closes
 
 
-def _portfolio_chart(histories: list[tuple[float, pd.Series]], invested: float) -> list[PortfolioPoint]:
+def _portfolio_chart(histories: list[tuple[float, float, pd.Series]]) -> list[PortfolioPoint]:
     if not histories:
         return []
-    frame = pd.concat([series.rename(str(index)) * shares for index, (shares, series) in enumerate(histories)], axis=1).ffill().dropna()
-    if frame.empty:
+    value_frame = pd.concat([series.rename(str(index)) * shares for index, (shares, _cost, series) in enumerate(histories)], axis=1).sort_index().ffill().fillna(0.0)
+    if value_frame.empty:
         return []
-    sampled = frame.sum(axis=1).iloc[:: max(1, len(frame) // 80)]
-    return [PortfolioPoint(date=index.date().isoformat(), value=round(float(value), 2), cost=round(invested, 2)) for index, value in sampled.items()]
+    value_series = value_frame.sum(axis=1)
+
+    cost_series = pd.Series(0.0, index=value_series.index)
+    for _shares, cost, series in histories:
+        if series.empty:
+            continue
+        start_date = series.index.min().date()
+        cost_series[[ts.date() >= start_date for ts in cost_series.index]] += cost
+
+    sampled_index = value_series.index[:: max(1, len(value_series) // 80)]
+    return [PortfolioPoint(date=index.date().isoformat(), value=round(float(value_series.loc[index]), 2), cost=round(float(cost_series.loc[index]), 2)) for index in sampled_index]
 
 
 def _income_events(symbol: str, shares: float, info: dict[str, Any]) -> list[IncomeEvent]:
@@ -94,13 +120,4 @@ def _income_events(symbol: str, shares: float, info: dict[str, Any]) -> list[Inc
 
 
 def _iso_date(value: Any) -> str | None:
-    if isinstance(value, (datetime, date)):
-        return value.date().isoformat() if isinstance(value, datetime) else value.isoformat()
-    if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=timezone.utc).date().isoformat()
-    if isinstance(value, str):
-        try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).date().isoformat()
-        except ValueError:
-            return None
-    return None
+    return coerce_iso_date(value)

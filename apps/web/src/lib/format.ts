@@ -7,6 +7,17 @@ export function formatMoney(value?: number) {
   }).format(value);
 }
 
+const FX_RATES = { USD: 1, THB: 36.5 } as const;
+const CURRENCY_SYMBOL = { USD: "$", THB: "฿" } as const;
+
+/** value is always in USD; converts and formats for the selected display currency. */
+export function formatMoneyAs(value: number | undefined, currency: "USD" | "THB") {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  const converted = value * FX_RATES[currency];
+  const sign = converted < 0 ? "-" : "";
+  return `${sign}${CURRENCY_SYMBOL[currency]}${Math.abs(Math.round(converted)).toLocaleString("en-US")}`;
+}
+
 export function formatCurrency(value?: number, currency = "USD") {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);

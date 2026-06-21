@@ -81,6 +81,32 @@ def normalize_timestamp(value: Any) -> str | None:
     number = as_float(value)
     if number is None:
         return None
+
+
+def coerce_iso_date(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, (int, float)):
+        number = as_float(value)
+        if number is None:
+            return None
+        if number > 10_000_000_000:
+            number /= 1000.0
+        try:
+            return datetime.fromtimestamp(number, tz=timezone.utc).date().isoformat()
+        except Exception:
+            return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date().isoformat()
+        except ValueError:
+            return None
+    return None
     if number > 10_000_000_000:
         number /= 1000.0
     try:

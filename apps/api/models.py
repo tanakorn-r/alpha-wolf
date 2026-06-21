@@ -126,6 +126,33 @@ class IncomeEvent(BaseModel):
     amount: float | None = None
 
 
+class MarketCalendarEvent(BaseModel):
+    date: str
+    symbol: str
+    name: str
+    kind: Literal["ex-dividend", "payment", "earnings", "dca"]
+    region: Literal["us", "th"]
+    marketLabel: str
+    isHolding: bool = False
+    amount: float | None = None
+    note: str | None = None
+
+
+class MarketCalendarSummary(BaseModel):
+    totalEvents: int = 0
+    holdingEvents: int = 0
+    usEvents: int = 0
+    thEvents: int = 0
+    paymentsTotal: float = 0
+
+
+class MarketCalendarResponse(BaseModel):
+    month: str
+    region: Literal["all", "us", "th"] = "all"
+    summary: MarketCalendarSummary = Field(default_factory=MarketCalendarSummary)
+    events: list[MarketCalendarEvent] = Field(default_factory=list)
+
+
 class PortfolioSummary(BaseModel):
     totalValue: float = 0
     invested: float = 0
@@ -188,6 +215,15 @@ class StockAnalysisTargetPrice(BaseModel):
     basis: str
 
 
+class StockAnalysisEntryPrice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    currentPrice: float | None = None
+    entryPrice: float | None = None
+    distanceFromCurrentPct: float | None = None
+    why: str
+
+
 class StockAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -197,6 +233,7 @@ class StockAnalysis(BaseModel):
     confidence: int = Field(ge=0, le=100)
     summary: str
     targetPrice: StockAnalysisTargetPrice
+    entryPrice: StockAnalysisEntryPrice
     scores: list[StockAnalysisScore] = Field(min_length=5, max_length=5)
     bullets: list[str] = Field(min_length=2, max_length=4)
     dcaTiming: str

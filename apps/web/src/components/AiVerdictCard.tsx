@@ -1,10 +1,69 @@
 import type { StockAnalysisResponse } from "../lib/api";
+import { formatMoney, formatPercent } from "../lib/format";
 import { Ring } from "../lib/ring";
 
 const TONE_COLOR: Record<string, string> = { good: "#3ecf8e", warn: "#f5c451", bad: "#f2575c" };
 const TONE_BG: Record<string, string> = { good: "rgba(62,207,142,0.07)", warn: "rgba(245,196,81,0.07)", bad: "rgba(242,87,92,0.07)" };
 const TONE_BORDER: Record<string, string> = { good: "rgba(62,207,142,0.4)", warn: "rgba(245,196,81,0.4)", bad: "rgba(242,87,92,0.4)" };
 const scoreColor = (score: number) => (score >= 75 ? "#3ecf8e" : score >= 55 ? "#f5c451" : "#f2575c");
+
+function PriceBanner({
+  target,
+  entry,
+  tone,
+}: {
+  target?: StockAnalysisResponse["targetPrice"];
+  entry?: StockAnalysisResponse["entryPrice"];
+  tone: StockAnalysisResponse["tone"];
+}) {
+  const upside = target?.impliedUpsidePct;
+  const upColor = typeof upside === "number" ? (upside >= 0 ? "#3ecf8e" : "#f2575c") : (TONE_COLOR[tone ?? "warn"] ?? "#f5c451");
+  const entryDistance = entry?.distanceFromCurrentPct;
+  const entryColor = typeof entryDistance === "number" ? (entryDistance <= 0 ? "#3ecf8e" : "#f5c451") : "#74a4ff";
+
+  return (
+    <div className="mb-[18px] flex flex-col gap-3.5 rounded-[12px] border border-[#2a2a31] bg-[#0e0e10] px-[18px] py-[14px]">
+      {target ? (
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#1f1f24] pb-3.5">
+          <div className="flex items-center gap-[22px]">
+            <div>
+              <div className="text-[10px] uppercase tracking-[.5px] text-[#8c8c95]">Now</div>
+              <div className="mt-1 font-mono text-xl font-semibold">{formatMoney(target.currentPrice ?? undefined)}</div>
+            </div>
+            <div className="text-lg text-[#5a5a62]">→</div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[.5px] text-[#8c8c95]">AI target · {target.timeHorizon}</div>
+              <div className="mt-1 font-mono text-xl font-semibold" style={{ color: upColor }}>{formatMoney(target.targetPrice ?? undefined)}</div>
+            </div>
+          </div>
+          {typeof upside === "number" ? (
+            <div className="text-right">
+              <div className="font-mono text-2xl font-bold" style={{ color: upColor }}>{formatPercent(upside)}</div>
+              <div className="text-[10px] uppercase tracking-[.5px] text-[#8c8c95]">implied {upside >= 0 ? "upside" : "downside"}</div>
+            </div>
+          ) : null}
+          <p className="w-full text-xs leading-[1.5] text-[#8c8c95]">{target.basis}</p>
+        </div>
+      ) : null}
+
+      {entry ? (
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <div className="text-[10px] uppercase tracking-[.5px] text-[#8c8c95]">Suggested entry price</div>
+            <div className="mt-1 font-mono text-xl font-semibold" style={{ color: entryColor }}>{formatMoney(entry.entryPrice ?? undefined)}</div>
+          </div>
+          {typeof entryDistance === "number" ? (
+            <div className="text-right">
+              <div className="font-mono text-lg font-bold" style={{ color: entryColor }}>{formatPercent(entryDistance)}</div>
+              <div className="text-[10px] uppercase tracking-[.5px] text-[#8c8c95]">vs. current price</div>
+            </div>
+          ) : null}
+          <p className="w-full text-xs leading-[1.5] text-[#8c8c95]"><span className="text-[#8c8c95]">Why: </span>{entry.why}</p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export function AiVerdictCard({
   value,
@@ -23,6 +82,8 @@ export function AiVerdictCard({
       className="rounded-[14px] p-5"
       style={{ border: `1px solid ${TONE_BORDER[value.tone ?? "warn"]}`, background: TONE_BG[value.tone ?? "warn"] }}
     >
+      {value.targetPrice || value.entryPrice ? <PriceBanner target={value.targetPrice} entry={value.entryPrice} tone={value.tone} /> : null}
+
       <div className="flex flex-wrap items-center gap-5">
         {typeof value.confidence === "number" ? (
           <div className="relative flex-none" style={{ width: ringSize, height: ringSize }}>
@@ -46,6 +107,14 @@ export function AiVerdictCard({
           <p className="mt-[7px] text-[13.5px] leading-[1.55] text-[#bcbcc2]">{value.summary}</p>
         </div>
       </div>
+
+      {value.targetPrice ? (
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <TargetCell label="Target price" value={formatPrice(value.targetPrice.targetPrice)} color={color} />
+          <TargetCell label="Implied move" value={formatMove(value.targetPrice.impliedUpsidePct)} color={moveColor(value.targetPrice.impliedUpsidePct)} />
+          <TargetCell label="Time horizon" value={value.targetPrice.timeHorizon} color="#ececee" />
+        </div>
+      ) : null}
 
       {value.scores?.length ? (
         <div className="mt-[18px] flex flex-col gap-[9px]">
@@ -98,4 +167,28 @@ export function AiVerdictCard({
       ) : null}
     </div>
   );
+}
+
+function TargetCell({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] px-3.5 py-3">
+      <div className="text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">{label}</div>
+      <div className="mt-1.5 font-mono text-[18px] font-semibold" style={{ color }}>{value}</div>
+    </div>
+  );
+}
+
+function formatPrice(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
+}
+
+function formatMove(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function moveColor(value?: number | null) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "#ececee";
+  return value >= 0 ? "#3ecf8e" : "#f2575c";
 }

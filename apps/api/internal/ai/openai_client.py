@@ -129,6 +129,12 @@ industry position, material news, earnings/calendar risk, and historical DCA tim
 You must return a targetPrice object. Use supplied current price and any supported valuation
 or analyst target evidence from the context. If the data is not strong enough for a precise
 target, still provide a cautious target range midpoint and say that explicitly in basis.
+You must also return an entryPrice object: a specific price level at which you would actually
+place the next buy (not the same as the 12-month targetPrice, which is where the stock is
+headed - entryPrice is where to buy it). Base it on the supplied support level, moving
+averages, the historical post-dividend dip pattern, or a margin-of-safety discount to fair
+value - cite which one you used in why. If current price already is the entry point, say so
+explicitly in why rather than inventing a lower number.
 The scores must appear exactly in this order: Value, Financial health, Dividend safety,
 Growth, Timing. For DCA timing, say when to place the recurring buy; use the historical
 post-dividend pattern only when the supplied sample supports it. Keep the result concise,

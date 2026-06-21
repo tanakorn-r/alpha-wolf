@@ -5,11 +5,16 @@ import { ChartState } from "./ChartState";
 
 const tooltipStyle = { background: "#1c1c20", border: "1px solid #34343c", borderRadius: 8, color: "#ececee", fontFamily: "IBM Plex Mono" };
 
-export function PortfolioPerformanceChart({ data, loading, error, onRetry }: { data?: PortfolioDashboard; loading: boolean; error: boolean; onRetry: () => void }) {
+function tickMoney(value: number) {
+  if (Math.abs(value) >= 1000) return `$${Math.round(value / 1000)}k`;
+  return `$${Math.round(value)}`;
+}
+
+export function PortfolioPerformanceChart({ data, loading, error, onRetry, children }: { data?: PortfolioDashboard; loading: boolean; error: boolean; onRetry: () => void; children?: React.ReactNode }) {
   if (loading) return <ChartState state="loading" />;
   if (error) return <ChartState state="error" onRetry={onRetry} />;
   if (!data?.chart.length) return <ChartState state="empty" />;
-  return <ResponsiveContainer width="100%" height="100%"><AreaChart data={data.chart} margin={{ top: 20, right: 10, bottom: 0, left: 4 }}><defs><linearGradient id="cadencePortfolio" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3ecf8e" stopOpacity={0.28}/><stop offset="100%" stopColor="#3ecf8e" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#242429" strokeDasharray="3 4" vertical={false}/><XAxis dataKey="date" tick={{ fill: "#5a5a62", fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={48}/><YAxis tickFormatter={(value) => `$${Math.round(value / 1000)}k`} tick={{ fill: "#5a5a62", fontSize: 10 }} axisLine={false} tickLine={false} width={44}/><Tooltip contentStyle={tooltipStyle} formatter={(value) => formatMoney(Number(value))}/><Area type="monotone" dataKey="value" stroke="#3ecf8e" strokeWidth={2} fill="url(#cadencePortfolio)"/><Line type="monotone" dataKey="cost" stroke="#5a5a62" strokeDasharray="5 5" dot={false}/></AreaChart></ResponsiveContainer>;
+  return <ResponsiveContainer width="100%" height="100%"><AreaChart data={data.chart} margin={{ top: 20, right: 10, bottom: 0, left: 4 }}><defs><linearGradient id="cadencePortfolio" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#3ecf8e" stopOpacity={0.28}/><stop offset="100%" stopColor="#3ecf8e" stopOpacity={0}/></linearGradient></defs><CartesianGrid stroke="#242429" strokeDasharray="3 4" vertical={false}/><XAxis dataKey="date" tick={{ fill: "#5a5a62", fontSize: 10 }} axisLine={false} tickLine={false} minTickGap={48}/><YAxis tickFormatter={tickMoney} tick={{ fill: "#5a5a62", fontSize: 10 }} axisLine={false} tickLine={false} width={44}/><Tooltip contentStyle={tooltipStyle} formatter={(value) => formatMoney(Number(value))}/><Area type="monotone" dataKey="value" stroke="#3ecf8e" strokeWidth={2} fill="url(#cadencePortfolio)"/><Line type="monotone" dataKey="cost" stroke="#5a5a62" strokeDasharray="5 5" dot={false}/>{children}</AreaChart></ResponsiveContainer>;
 }
 
 export function DcaPerformanceChart({ data }: { data: PortfolioDashboard }) {

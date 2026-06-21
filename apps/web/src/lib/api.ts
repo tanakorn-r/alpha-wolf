@@ -173,12 +173,29 @@ export type StockResearchResponse = {
 
 export type StockAnalysisScore = { label: string; score: number; why: string };
 
+export type StockAnalysisTargetPrice = {
+  currentPrice?: number | null;
+  targetPrice?: number | null;
+  impliedUpsidePct?: number | null;
+  timeHorizon: string;
+  basis: string;
+};
+
+export type StockAnalysisEntryPrice = {
+  currentPrice?: number | null;
+  entryPrice?: number | null;
+  distanceFromCurrentPct?: number | null;
+  why: string;
+};
+
 export type StockAnalysisResponse = {
   signal: string;
   headline: string;
   tone: "good" | "warn" | "bad";
   confidence: number;
   summary: string;
+  targetPrice?: StockAnalysisTargetPrice;
+  entryPrice?: StockAnalysisEntryPrice;
   scores: StockAnalysisScore[];
   bullets: string[];
   dcaTiming?: string;
@@ -218,6 +235,31 @@ export type PortfolioDashboard = {
   chart: Array<{ date: string; value: number; cost: number }>;
   markers: Array<{ date: string; symbol: string; amount: number }>;
   incomeEvents: Array<{ date: string; symbol: string; kind: string; amount?: number | null }>;
+};
+
+export type MarketCalendarEvent = {
+  date: string;
+  symbol: string;
+  name: string;
+  kind: "ex-dividend" | "payment" | "earnings" | "dca";
+  region: "us" | "th";
+  marketLabel: string;
+  isHolding: boolean;
+  amount?: number | null;
+  note?: string | null;
+};
+
+export type MarketCalendarResponse = {
+  month: string;
+  region: "all" | "us" | "th";
+  summary: {
+    totalEvents: number;
+    holdingEvents: number;
+    usEvents: number;
+    thEvents: number;
+    paymentsTotal: number;
+  };
+  events: MarketCalendarEvent[];
 };
 
 export type MarketSnapshot = { market: string; status: Record<string, unknown>; summary: Record<string, unknown> };
@@ -319,6 +361,15 @@ export async function loadMarketSnapshot(market: string): Promise<MarketSnapshot
   return (await response.json()) as MarketSnapshot;
 }
 
+export async function loadMarketCalendar(params?: { month?: string; region?: "all" | "us" | "th" }): Promise<MarketCalendarResponse> {
+  const query = new URLSearchParams();
+  if (params?.month) query.set("month", params.month);
+  if (params?.region) query.set("region", params.region);
+  const response = await fetch(`${API_BASE}/calendar${query.toString() ? `?${query}` : ""}`);
+  if (!response.ok) throw new Error(`Failed to load market calendar: ${response.status}`);
+  return (await response.json()) as MarketCalendarResponse;
+}
+
 export async function loadMarketComparison(symbol: string): Promise<MarketComparisonResponse> {
   const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/market-comparison`);
   if (!response.ok) throw new Error(`Failed to load market comparison: ${response.status}`);
@@ -350,6 +401,11 @@ export async function loadPortfolio(): Promise<PortfolioDashboard> {
 export async function saveHolding(value: { symbol: string; shares: number; averageCost: number; strategy: string; monthlyDca: number }) {
   const response = await fetch(`${API_BASE}/portfolio/holdings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(`Failed to save holding: ${response.status}`);
+}
+
+export async function deleteHolding(symbol: string) {
+  const response = await fetch(`${API_BASE}/portfolio/holdings/${encodeURIComponent(symbol)}`, { method: "DELETE" });
+  if (!response.ok) throw new Error(`Failed to delete holding: ${response.status}`);
 }
 
 export async function saveDcaOrder(value: { symbol: string; amount: number; scheduledFor: string; strategy: string }) {
