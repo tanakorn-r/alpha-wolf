@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { LoadingSpinner } from "../components/LoadingSpinner";
 import { loadMarketCalendar, type MarketCalendarEvent } from "../lib/api";
 import { formatMoney, formatShortDate } from "../lib/format";
 import { useWolfStore } from "../store/useWolfStore";
@@ -34,36 +35,39 @@ export function IncomeCalendarPage() {
         <div className="border-b border-[#2a2a31] p-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="grid h-9 w-9 place-items-center rounded-lg border border-[#2a2a31] bg-[#0e0e10] text-[#8c8c95] hover:text-[#ececee]">←</button>
+              <button type="button" disabled={calendarQuery.isFetching} onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="grid h-9 w-9 place-items-center rounded-lg border border-[#2a2a31] bg-[#0e0e10] text-[#8c8c95] hover:text-[#ececee] disabled:opacity-60">←</button>
               <div>
                 <div className="text-[11px] uppercase tracking-[0.18em] text-[#5a5a62]">Live stock calendar</div>
                 <h2 className="mt-1 text-lg font-semibold">{month.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</h2>
               </div>
-              <button type="button" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="grid h-9 w-9 place-items-center rounded-lg border border-[#2a2a31] bg-[#0e0e10] text-[#8c8c95] hover:text-[#ececee]">→</button>
+              <button type="button" disabled={calendarQuery.isFetching} onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="grid h-9 w-9 place-items-center rounded-lg border border-[#2a2a31] bg-[#0e0e10] text-[#8c8c95] hover:text-[#ececee] disabled:opacity-60">→</button>
             </div>
             <div className="flex gap-1 rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-1">
               {regionOptions.map((option) => (
                 <button
                   key={option.value}
                   type="button"
+                  disabled={calendarQuery.isFetching}
                   onClick={() => setRegion(option.value)}
-                  className={`rounded-[7px] px-3.5 py-2 text-[13px] font-medium capitalize ${region === option.value ? "bg-[#1c1c20] text-[#ececee]" : "text-[#8c8c95]"}`}
+                  className={`flex items-center gap-2 rounded-[7px] px-3.5 py-2 text-[13px] font-medium capitalize disabled:opacity-60 ${region === option.value ? "bg-[#1c1c20] text-[#ececee]" : "text-[#8c8c95]"}`}
                 >
+                  {calendarQuery.isFetching && region === option.value ? <LoadingSpinner size={12} /> : null}
                   {option.label}
                 </button>
               ))}
             </div>
           </div>
 
+          {calendarQuery.isFetching && !calendarQuery.isPending ? <div className="mt-3 flex items-center gap-2 text-[11px] text-[#8c8c95]"><LoadingSpinner size={12} />Refreshing dividend calendar…</div> : null}
+
           <div className="mt-3 text-[11px] text-[#5a5a62]">
             Calendar opens with one market first to avoid hammering the upstream feed. Switch to `All stocks` only when you want the wider view.
           </div>
 
           <div className="mt-4 flex flex-wrap gap-3 text-xs">
-            <LegendBadge color="bg-[#3ecf8e]" label="Holding event" />
+            <LegendBadge color="bg-[#3ecf8e]" label="Holding dividend" />
             <LegendBadge color="bg-[#f5c451]" label="Ex-dividend" />
             <LegendBadge color="bg-[#74a4ff]" label="Dividend payment" />
-            <LegendBadge color="bg-[#d679ff]" label="Earnings" />
             <LegendBadge color="bg-[#5a5a62]" label="Other market names" />
           </div>
         </div>
@@ -84,7 +88,7 @@ export function IncomeCalendarPage() {
         ) : calendarQuery.isError ? (
           <div className="flex min-h-[620px] flex-col items-center justify-center gap-4 px-6 text-center">
             <div className="text-sm text-[#f2575c]">Calendar service is unavailable right now.</div>
-            <button type="button" onClick={() => calendarQuery.refetch()} className="rounded-lg border border-[#f2575c] px-3 py-2 text-xs text-[#f2575c]">Retry</button>
+            <button type="button" disabled={calendarQuery.isFetching} onClick={() => calendarQuery.refetch()} className="flex items-center gap-2 rounded-lg border border-[#f2575c] px-3 py-2 text-xs text-[#f2575c] disabled:opacity-60">{calendarQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button>
           </div>
         ) : (
           <div className="grid grid-cols-7">
@@ -122,7 +126,7 @@ export function IncomeCalendarPage() {
 
       <aside className="space-y-4">
         <div className="rounded-xl border border-[#285f48] bg-[#173528] p-4">
-          <div className="text-[10px] uppercase tracking-wider text-[#3ecf8e]">Holding events this month</div>
+          <div className="text-[10px] uppercase tracking-wider text-[#3ecf8e]">Holding dividend events</div>
           <div className="mt-2 font-mono text-3xl font-semibold">{summary?.holdingEvents ?? 0}</div>
           <div className="mt-1 text-xs text-[#82b99f]">{formatMoney(summary?.paymentsTotal)} expected from dividend payments on held names</div>
         </div>
@@ -187,26 +191,20 @@ function LegendBadge({ color, label }: { color: string; label: string }) {
 
 function eventLabel(event: MarketCalendarEvent) {
   if (event.kind === "payment" && typeof event.amount === "number") return `Payment ${formatMoney(event.amount)}`;
-  if (event.kind === "dca" && typeof event.amount === "number") return `DCA ${formatMoney(event.amount)}`;
   if (event.kind === "ex-dividend") return "Ex-dividend";
   if (event.kind === "payment") return "Dividend payment";
-  if (event.kind === "earnings") return "Earnings";
   return event.kind;
 }
 
 function eventCellTone(event: MarketCalendarEvent) {
   if (event.isHolding) return "bg-[#3ecf8e] text-[#06120c]";
   if (event.kind === "payment") return "bg-[#254a70] text-[#9bc8ff]";
-  if (event.kind === "earnings") return "bg-[#4e295e] text-[#f0b8ff]";
-  if (event.kind === "dca") return "bg-[#22313f] text-[#b8d3ef]";
   return "bg-[#463c1c] text-[#f5c451]";
 }
 
 function eventDotTone(event: MarketCalendarEvent) {
   if (event.isHolding) return "bg-[#3ecf8e]";
   if (event.kind === "payment") return "bg-[#74a4ff]";
-  if (event.kind === "earnings") return "bg-[#d679ff]";
-  if (event.kind === "dca") return "bg-[#b8d3ef]";
   return "bg-[#f5c451]";
 }
 

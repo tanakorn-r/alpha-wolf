@@ -19,8 +19,15 @@ export type StockRecord = {
 };
 
 export const strategyLabels: Record<StrategyKey, string> = {
-  capitalized: "Capitalized",
-  stable_dca: "Stable DCA",
-  yield: "Yield",
-  momentum: "Momentum"
+  capitalized: "Value Investing",
+  stable_dca: "Dividend Dips",
+  yield: "Dividend Income",
+  momentum: "Day Trade"
+};
+
+export const strategyDescriptions: Record<StrategyKey, string> = {
+  capitalized: "Best for long-term value and business quality.",
+  stable_dca: "Best when you want to buy resets around dividend patterns and calmer pullbacks.",
+  yield: "Best for strong and sustainable dividend income.",
+  momentum: "Best for short-term trend and price action."
 };

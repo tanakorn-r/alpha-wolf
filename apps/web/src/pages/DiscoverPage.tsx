@@ -1,8 +1,11 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { AiVerdictCard } from "../components/AiVerdictCard";
+import { LoadingSpinner } from "../components/LoadingSpinner";
+import { Money } from "../components/Money";
+import { strategyDescriptions, strategyLabels, type StrategyKey } from "../data/market";
 import { loadDiscoveries, loadPortfolio, saveHolding, summarizeStock, type StockAnalysisResponse } from "../lib/api";
-import { formatCurrency, formatMoneyAs, formatPercent } from "../lib/format";
+import { formatCurrency, formatMoney, formatPercent } from "../lib/format";
 import { useWolfStore } from "../store/useWolfStore";
 
 type Market = "all" | "us" | "th";
@@ -14,7 +17,6 @@ export function DiscoverPage() {
   const openDetail = useWolfStore((state) => state.openDetail);
   const strategy = useWolfStore((state) => state.selectedStrategy);
   const setStrategy = useWolfStore((state) => state.setStrategy);
-  const currency = useWolfStore((state) => state.currency);
   const cashReserve = useWolfStore((state) => state.cashReserve);
   const spendCashReserve = useWolfStore((state) => state.spendCashReserve);
   const query = useDeferredValue(globalQuery.trim());
@@ -23,6 +25,7 @@ export function DiscoverPage() {
   const [sortBy, setSortBy] = useState<SortKey>("score");
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analyzingSymbol, setAnalyzingSymbol] = useState("");
   const [top5State, setTop5State] = useState<"idle" | "loading" | "open">("idle");
   const [top5Applied, setTop5Applied] = useState<{ count: number; amount: number } | null>(null);
   const [applyingTop5, setApplyingTop5] = useState(false);
@@ -101,7 +104,8 @@ export function DiscoverPage() {
 
   async function askAi(symbol: string) {
     setAnalyzing(true);
-    try { setAnalysis(await summarizeStock(symbol, strategy)); } finally { setAnalyzing(false); }
+    setAnalyzingSymbol(symbol);
+    try { setAnalysis(await summarizeStock(symbol, strategy)); } finally { setAnalyzing(false); setAnalyzingSymbol(""); }
   }
 
   return (
@@ -125,26 +129,28 @@ export function DiscoverPage() {
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="flex gap-1 rounded-[9px] border border-[#2a2a31] bg-[#161619] p-1">{(["stable_dca", "yield", "capitalized", "momentum"] as const).map((value) => <Tab key={value} active={strategy === value} onClick={() => { setStrategy(value); resetTop5(); }}>{value === "stable_dca" ? "Dividend dips" : value}</Tab>)}</div>
-        <div className="flex items-center gap-3.5">
-          <div className="text-right"><div className="text-[11px] text-[#8c8c95]">Cash to invest</div><div className="font-mono font-semibold">{formatMoneyAs(cashReserve, currency)}</div></div>
+        <div className="flex gap-1 rounded-[9px] border border-[#2a2a31] bg-[#161619] p-1">{(["stable_dca", "yield", "capitalized", "momentum"] as const).map((value) => <Tab key={value} active={strategy === value} onClick={() => { setStrategy(value); resetTop5(); }}>{strategyLabels[value]}</Tab>)}</div>
+      <div className="flex items-center gap-3.5">
+          <div className="text-right"><div className="text-[11px] text-[#8c8c95]">Cash to invest</div><div className="font-mono font-semibold"><Money value={cashReserve} secondaryClassName="text-[11px] font-normal text-[#5a5a62]" /></div></div>
           {top5State === "idle" ? (
             <button type="button" onClick={rankTop5} disabled={!candidates.length} className="flex items-center gap-2 rounded-[9px] border border-[#3ecf8e] bg-[#3ecf8e]/10 px-3.5 py-[9px] text-[13px] font-semibold text-[#3ecf8e] disabled:opacity-40"><Spark />Ask AI for top 5 picks</button>
           ) : null}
         </div>
       </div>
 
+      {discoveryQuery.isFetching && !discoveryQuery.isPending && !discoveryQuery.isFetchingNextPage ? <div className="flex items-center gap-2 rounded-lg border border-[#2a2a31] bg-[#161619] px-3 py-2 text-xs text-[#8c8c95]"><LoadingSpinner size={12} />Updating live results…</div> : null}
+
       {top5State === "loading" ? (
-        <div className="flex items-center gap-3 rounded-xl border border-[#2a2a31] bg-[#161619] p-5 text-[#8c8c95]"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#2a2a31] border-t-[#3ecf8e]" />Ranking your top 5 dividend-dip candidates…</div>
+        <div className="flex items-center gap-3 rounded-xl border border-[#2a2a31] bg-[#161619] p-5 text-[#8c8c95]"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#2a2a31] border-t-[#3ecf8e]" />Ranking Alpha Wolf&apos;s top 5 live candidates…</div>
       ) : null}
 
       {top5State === "open" ? (
         <div className="flex flex-col gap-3 rounded-xl border border-[#3ecf8e]/40 bg-[#3ecf8e]/[.05] p-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold">AlphaWolf's top 5 picks <span className="font-normal text-[#8c8c95]">for {strategy.replace("_", " ")}</span></h3>
+            <h3 className="font-semibold">AlphaWolf&apos;s top 5 picks <span className="font-normal text-[#8c8c95]">for {strategyLabels[strategy]}</span></h3>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={rankTop5} className="rounded-lg border border-[#2a2a31] bg-[#1c1c20] px-3 py-2 text-xs text-[#8c8c95] hover:border-[#3ecf8e] hover:text-[#ececee]">Re-rank</button>
-              <button type="button" onClick={applyTop5} disabled={applyingTop5} className="flex items-center gap-1.5 rounded-lg bg-[#3ecf8e] px-3.5 py-2 text-xs font-bold text-[#06120c] disabled:cursor-not-allowed disabled:opacity-50"><Spark />{applyingTop5 ? "Buying at current prices…" : "Buy all 5 now"}</button>
+              <button type="button" onClick={rankTop5} className="flex items-center gap-2 rounded-lg border border-[#2a2a31] bg-[#1c1c20] px-3 py-2 text-xs text-[#8c8c95] hover:border-[#3ecf8e] hover:text-[#ececee]">Re-rank</button>
+              <button type="button" onClick={applyTop5} disabled={applyingTop5} className="flex items-center gap-1.5 rounded-lg bg-[#3ecf8e] px-3.5 py-2 text-xs font-bold text-[#06120c] disabled:cursor-not-allowed disabled:opacity-50">{applyingTop5 ? <LoadingSpinner size={12} /> : <Spark />}{applyingTop5 ? "Buying at current prices…" : "Buy all 5 now"}</button>
             </div>
           </div>
           <div className="flex flex-col gap-2">
@@ -155,7 +161,7 @@ export function DiscoverPage() {
                   <span className="font-mono font-semibold">{item.symbol}</span> <span className="text-[13px] text-[#8c8c95]">{item.name}</span>
                   <div className="mt-0.5 text-xs text-[#bcbcc2]">{(item.story ?? "").slice(0, 110)}</div>
                 </button>
-                <span className="flex-none text-right font-mono text-sm text-[#3ecf8e]">{formatMoneyAs(amount, currency)}</span>
+                <span className="flex-none text-right font-mono text-sm text-[#3ecf8e]"><Money value={amount} secondaryClassName="block text-[10px] font-normal text-[#5a5a62]" /></span>
               </div>
             ))}
             {!top5.length ? <p className="py-4 text-center text-sm text-[#8c8c95]">No candidates match your current filters.</p> : null}
@@ -166,12 +172,15 @@ export function DiscoverPage() {
 
       {top5Applied ? (
         <div className="flex items-center justify-between rounded-lg border border-[#285f48] bg-[#173528] px-4 py-3 text-sm text-[#3ecf8e]">
-          <span>Bought {formatMoneyAs(top5Applied.amount, currency)} across {top5Applied.count} stocks at today's price — check your Dashboard holdings.</span>
+          <span>Bought {formatMoney(top5Applied.amount)} across {top5Applied.count} stocks at today's price — check your Dashboard holdings.</span>
           <button type="button" onClick={() => setTop5Applied(null)} className="text-xs text-[#82b99f] hover:text-[#ececee]">Dismiss</button>
         </div>
       ) : null}
 
-      <div className="text-xs text-[#5a5a62]">{candidates.length} of {discoveryQuery.data?.pages[0]?.total ?? 0} stocks · sorted by {sortBy === "score" ? "DCA match score" : sortBy === "yield" ? "dividend yield" : sortBy === "change" ? "today's move" : "ticker"}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#5a5a62]">
+        <span>{candidates.length} of {discoveryQuery.data?.pages[0]?.total ?? 0} stocks · sorted by {sortBy === "score" ? `${strategyLabels[strategy]} score` : sortBy === "yield" ? "dividend yield" : sortBy === "change" ? "today's move" : "ticker"}</span>
+        <span>{strategyDescriptions[strategy]}</span>
+      </div>
       {analysis ? <AiResult value={analysis} /> : null}
       {analyzing ? <div className="flex items-center gap-3 rounded-xl border border-[#2a2a31] bg-[#141417] p-5 text-[#8c8c95]"><span className="h-4 w-4 animate-spin rounded-full border-2 border-[#2a2a31] border-t-[#3ecf8e]" />Analyzing…</div> : null}
 
@@ -182,15 +191,15 @@ export function DiscoverPage() {
           return (
             <div key={item.symbol} className={`grid grid-cols-[74px_1fr_auto] items-start gap-[18px] rounded-xl border bg-[#161619] px-[18px] py-4 text-left transition-colors hover:border-[#3ecf8e] ${index === 0 ? "border-[#3ecf8e]" : "border-[#2a2a31]"}`}>
               <button type="button" onClick={() => openDetail(item.symbol)} className="flex w-[74px] flex-col items-center gap-1"><div className="flex h-[66px] w-[66px] flex-col items-center justify-center rounded-full border-2" style={{ borderColor: scoreColor, background: `${scoreColor}18` }}><span className="font-mono text-[23px] font-semibold leading-none" style={{ color: scoreColor }}>{score}</span><span className="text-[9px] text-[#8c8c95]">#{index + 1}</span></div><span className="text-[10px] text-[#8c8c95]">match</span></button>
-              <button type="button" onClick={() => openDetail(item.symbol)} className="text-left"><div className="flex flex-wrap items-center gap-2.5"><span className="font-mono text-base font-semibold">{item.symbol}</span><span className="text-[13px] text-[#8c8c95]">{item.name}</span><Badge>{item.symbol.endsWith(".BK") ? "Thai SET" : "US"}</Badge><Badge>{item.sector && item.sector !== "Unknown" ? item.sector : item.exchange ?? "Equity"}</Badge></div><p className="my-[9px] max-w-[640px] text-[13px] leading-[1.55] text-[#bcbcc2]">{catalogStory(item.story)}</p><div className="flex flex-wrap gap-[7px]"><Signal good={item.changePct <= 0}>{item.changePct <= 0 ? "Down today" : "Positive today"}</Signal><Signal good={item.strategyScores.yield >= 65}>Yield fit {item.strategyScores.yield}/100</Signal><Signal good={score >= 70}>{strategy.replace("_", " ")} fit {score}/100</Signal></div></button>
-              <div className="flex min-w-[130px] flex-col items-end gap-2 text-right"><strong className="font-mono text-base">{formatCurrency(item.price, item.currency)}</strong><div className={`font-mono text-xs ${item.changePct >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{formatPercent(item.changePct)}</div><button type="button" onClick={() => askAi(item.symbol)} className="mt-1 flex items-center gap-1.5 rounded-lg border border-[#2a2a31] bg-[#1c1c20] px-3 py-[7px] text-xs hover:border-[#3ecf8e]"><Spark />Research</button></div>
-            </div>
-          );
-        })}
+              <button type="button" onClick={() => openDetail(item.symbol)} className="text-left"><div className="flex flex-wrap items-center gap-2.5"><span className="font-mono text-base font-semibold">{item.symbol}</span><span className="text-[13px] text-[#8c8c95]">{item.name}</span><Badge>{item.symbol.endsWith(".BK") ? "Thai SET" : "US"}</Badge><Badge>{item.sector && item.sector !== "Unknown" ? item.sector : item.exchange ?? "Equity"}</Badge></div><p className="my-[9px] max-w-[640px] text-[13px] leading-[1.55] text-[#bcbcc2]">{catalogStory(item.story)}</p><div className="flex flex-wrap gap-[7px]"><Signal good={item.changePct <= 0}>{item.changePct <= 0 ? "Down today" : "Positive today"}</Signal><Signal good={item.strategyScores.yield >= 65}>Dividend income {item.strategyScores.yield}/100</Signal><Signal good={score >= 70}>{strategyLabels[strategy]} {score}/100</Signal></div></button>
+            <div className="flex min-w-[130px] flex-col items-end gap-2 text-right"><strong className="font-mono text-base">{formatCurrency(item.price, item.currency)}</strong><div className={`font-mono text-xs ${item.changePct >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{formatPercent(item.changePct)}</div><button type="button" disabled={analyzingSymbol === item.symbol} onClick={() => askAi(item.symbol)} className="mt-1 flex items-center gap-1.5 rounded-lg border border-[#2a2a31] bg-[#1c1c20] px-3 py-[7px] text-xs hover:border-[#3ecf8e] disabled:opacity-60">{analyzingSymbol === item.symbol ? <LoadingSpinner size={12} /> : <Spark />}Research</button></div>
+          </div>
+        );
+      })}
       </div>
       <div ref={loadMoreRef} className="min-h-8 text-center text-xs text-[#5a5a62]">{discoveryQuery.isFetchingNextPage ? "Loading more live stocks…" : discoveryQuery.hasNextPage ? "Scroll for more" : candidates.length ? "End of ranked results" : ""}</div>
       {discoveryQuery.isPending ? <div className="rounded-xl border border-dashed border-[#2a2a31] bg-[#161619] p-12 text-center text-[#8c8c95]">Scanning live market data…</div> : null}
-      {discoveryQuery.isError ? <div className="rounded-xl border border-[#663438] bg-[#2c1719] p-8 text-center text-[#f2575c]">Scanner data could not be loaded.<button type="button" onClick={() => discoveryQuery.refetch()} className="ml-3 rounded border border-[#f2575c] px-3 py-1.5 text-xs">Retry</button></div> : null}
+      {discoveryQuery.isError ? <div className="rounded-xl border border-[#663438] bg-[#2c1719] p-8 text-center text-[#f2575c]">Scanner data could not be loaded.<button type="button" disabled={discoveryQuery.isFetching} onClick={() => discoveryQuery.refetch()} className="ml-3 inline-flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">{discoveryQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button></div> : null}
       {!discoveryQuery.isPending && !discoveryQuery.isError && !candidates.length ? <div className="rounded-xl border border-dashed border-[#2a2a31] bg-[#161619] p-12 text-center text-[#8c8c95]">No stocks match your search and filters. Try clearing the search box or sector filter.</div> : null}
     </section>
   );

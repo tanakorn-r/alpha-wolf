@@ -21,6 +21,8 @@ def build_analysis_context(
             "business": bundle.get("business"),
             "performance": bundle.get("performance"),
             "technicals": bundle.get("technicals"),
+            "platformVerdict": bundle.get("verdict"),
+            "platformOutlook": bundle.get("outlook"),
             "industryRanking": bundle.get("peerRank"),
             "dividendDipPattern": bundle.get("dividendPattern"),
             "recentNews": bundle.get("news"),

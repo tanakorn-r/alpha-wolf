@@ -83,7 +83,8 @@ body {
 .aw-sidebar {
   background: #0e0e10 !important;
   border-color: #2a2a31 !important;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .aw-sidebar .text-slate-900 { color: #ececee !important; }
 .aw-sidebar .text-slate-500,

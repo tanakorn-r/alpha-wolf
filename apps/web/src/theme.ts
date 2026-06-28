@@ -1,4 +1,4 @@
 export const brandTheme = {
   name: "Alpha Wolf",
-  tagline: "Real wolf for real strategy"
+  tagline: "See the setup. Hunt the edge."
 } as const;

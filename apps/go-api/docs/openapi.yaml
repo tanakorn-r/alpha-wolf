@@ -1,0 +1,106 @@
+openapi: 3.0.3
+info:
+  title: Alpha Wolf Go API POC
+  version: 0.1.0
+  description: |
+    Proof-of-concept Gin API that uses FinFeed to discover Thailand stocks and fetch a live price.
+servers:
+  - url: http://localhost:8080
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+  /api/v1/th/stocks:
+    get:
+      summary: List Thailand stocks
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+          description: Max number of stocks to return.
+      responses:
+        '200':
+          description: Thailand stocks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  country:
+                    type: string
+                  exchangeId:
+                    type: string
+                  count:
+                    type: integer
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Stock'
+        '502':
+          description: Upstream FinFeed error
+  /api/v1/th/stocks/{symbol}/price:
+    get:
+      summary: Get stock price by symbol
+      parameters:
+        - in: path
+          name: symbol
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Live stock price
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  country:
+                    type: string
+                  item:
+                    $ref: '#/components/schemas/Price'
+        '400':
+          description: Missing symbol
+        '502':
+          description: Upstream FinFeed error
+components:
+  schemas:
+    Stock:
+      type: object
+      properties:
+        symbol:
+          type: string
+        name:
+          type: string
+        exchangeId:
+          type: string
+        exchangeCode:
+          type: string
+        market:
+          type: string
+        currency:
+          type: string
+    Price:
+      type: object
+      properties:
+        symbol:
+          type: string
+        name:
+          type: string
+        currency:
+          type: string
+        price:
+          type: number
+        change:
+          type: number
+        changePercent:
+          type: number
+        timestamp:
+          type: string

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -19,8 +18,7 @@ def build_portfolio_dashboard() -> PortfolioDashboard:
     if not holdings:
         return PortfolioDashboard(dcaOrders=orders, markers=[PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders])
 
-    with ThreadPoolExecutor(max_workers=min(4, len(holdings))) as pool:
-        live = list(pool.map(_load_holding_market_data, holdings))
+    live = [_load_holding_market_data(holding) for holding in holdings]
 
     rows: list[dict[str, object]] = []
     invested = 0.0

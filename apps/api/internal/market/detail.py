@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 import warnings
 import pandas as pd
@@ -19,13 +18,19 @@ from internal.store.cache import cache_get, cache_set
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
 from internal.yahoo.client import fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
 
+DETAIL_CACHE_NAMESPACE = "stock_detail"
+FINANCIALS_CACHE_NAMESPACE = "stock_financials"
+INSIGHTS_CACHE_NAMESPACE = "stock_insights"
+MARKET_COMPARISON_CACHE_NAMESPACE = "stock_market_comparison"
+DOMAIN_CACHE_NAMESPACE = "domain"
+
 DETAIL_TTL_SECONDS = 180
 DOMAIN_TTL_SECONDS = 1800
 
 
 def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | None:
     cache_key = f"{symbol.upper()}:{strategy}"
-    cached = cache_get("detail_bundle", cache_key)
+    cached = cache_get(DETAIL_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
 
@@ -36,22 +41,9 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     ticker = make_ticker(symbol)
     modules = load_ticker_modules(ticker, symbol)
 
-    # financials/sectorInsight/industryInsight used to be fetched here too (6
-    # statement calls + 2 network round-trips), but the frontend never renders
-    # them - see routes/details.py for the lazy /financials and /insights
-    # endpoints that fetch them on demand instead.
-    #
-    # yfinance.Ticker isn't thread-safe for concurrent attribute access - reusing
-    # one instance across these futures made history()/financials silently come
-    # back empty under load. Each concurrent call gets its own instance instead.
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        history_future = pool.submit(lambda: fetch_history(make_ticker(symbol), period="5y"))
-        news_future = pool.submit(lambda: fetch_news(make_ticker(symbol)))
-        dividends_future = pool.submit(lambda: fetch_dividends(make_ticker(symbol), period="5y"))
-
-        history = history_future.result()
-        news = news_future.result()
-        dividends = dividends_future.result()
+    history = fetch_history(ticker, period="5y")
+    news = fetch_news(ticker)
+    dividends = fetch_dividends(ticker, period="5y")
 
     technicals = build_technicals(history)
     business = build_business_profile(modules, history, stock)
@@ -74,7 +66,7 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
         "strategy": strategy,
         "dividendPattern": dividend_pattern,
     }
-    cache_set("detail_bundle", cache_key, result, DETAIL_TTL_SECONDS)
+    cache_set(DETAIL_CACHE_NAMESPACE, cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
 
@@ -82,9 +74,9 @@ def get_financials(symbol: str) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
     if not normalized:
         return None
-        
-    cache_key = f"financials:{normalized}"
-    cached = cache_get("detail_bundle", cache_key)
+
+    cache_key = normalized
+    cached = cache_get(FINANCIALS_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
 
@@ -118,28 +110,34 @@ def get_financials(symbol: str) -> dict[str, Any] | None:
                 # we must return None cleanly so OpenAI knows there are no fundamentals.
                 result = None
 
-    cache_set("detail_bundle", cache_key, result, DETAIL_TTL_SECONDS)
+    cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
 def get_domain_insights(symbol: str) -> dict[str, Any] | None:
-    """Lazy counterpart to sectorInsight/industryInsight."""
-    from internal.market.symbol import fetch_symbol_record
-
     normalized = symbol.upper().strip()
     if not normalized:
         return None
+
+    cached = cache_get(INSIGHTS_CACHE_NAMESPACE, normalized)
+    if cached is not None:
+        return cached
+
+    from internal.market.symbol import fetch_symbol_record
+
     stock = fetch_symbol_record(normalized)
     if not stock:
         return None
     sector_insight = fetch_sector_insight(stock.get("sectorKey") or stock.get("sector") or "")
     industry_insight = fetch_industry_insight(stock.get("industryKey") or stock.get("industry") or "")
-    return {"sectorInsight": sector_insight, "industryInsight": industry_insight}
+    result = {"sectorInsight": sector_insight, "industryInsight": industry_insight}
+    cache_set(INSIGHTS_CACHE_NAMESPACE, normalized, result, DOMAIN_TTL_SECONDS)
+    return result
 
 
 def get_market_comparison(symbol: str) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
     cache_key = f"market_comparison:v4:{normalized}"
-    cached = cache_get("detail_bundle", cache_key)
+    cached = cache_get(MARKET_COMPARISON_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
     stock = fetch_symbol_record(normalized)
@@ -161,8 +159,7 @@ def get_market_comparison(symbol: str) -> dict[str, Any] | None:
     benchmark_symbol = "^SET.BK" if region == "th" else "^GSPC"
     benchmark_name = "SET Index" if region == "th" else "S&P 500"
     symbols = [normalized, benchmark_symbol, *(str(item["symbol"]) for item in peer_candidates)]
-    with ThreadPoolExecutor(max_workers=min(8, len(symbols))) as pool:
-        frames = list(pool.map(lambda ticker_symbol: fetch_history(make_ticker(ticker_symbol), period="1y"), symbols))
+    frames = [fetch_history(make_ticker(ticker_symbol), period="1y") for ticker_symbol in symbols]
     series = [_monthly_rebased(frame) for frame in frames]
     peer_index = max(range(2, len(series)), key=lambda index: list(series[index].values())[-1] if series[index] else float("-inf"))
     peer = peer_candidates[peer_index - 2]
@@ -177,7 +174,7 @@ def get_market_comparison(symbol: str) -> dict[str, Any] | None:
         "peer": {"symbol": peer["symbol"], "name": peer.get("name") or peer["symbol"], "returnPct": round(points[-1]["peer"] - 100, 2)},
         "points": points,
     }
-    cache_set("detail_bundle", cache_key, result, DOMAIN_TTL_SECONDS)
+    cache_set(MARKET_COMPARISON_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
     return result
 
 
@@ -397,7 +394,7 @@ def domain_key_candidates(value: str) -> list[str]:
 def fetch_sector_insight(key: str) -> dict[str, Any] | None:
     for candidate in domain_key_candidates(key):
         cache_key = f"sector:{candidate}"
-        cached = cache_get("domain", cache_key)
+        cached = cache_get(DOMAIN_CACHE_NAMESPACE, cache_key)
         if cached is not None:
             return cached
         try:
@@ -413,7 +410,7 @@ def fetch_sector_insight(key: str) -> dict[str, Any] | None:
                 "topEtfs": [{"symbol": symbol, "name": name} for symbol, name in top_etfs.items()],
                 "topMutualFunds": [{"symbol": symbol, "name": name} for symbol, name in top_mutual_funds.items()],
             }
-            cache_set("domain", cache_key, result, DOMAIN_TTL_SECONDS)
+            cache_set(DOMAIN_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
             return result
         except Exception:
             continue
@@ -423,7 +420,7 @@ def fetch_sector_insight(key: str) -> dict[str, Any] | None:
 def fetch_industry_insight(key: str) -> dict[str, Any] | None:
     for candidate in domain_key_candidates(key):
         cache_key = f"industry:{candidate}"
-        cached = cache_get("domain", cache_key)
+        cached = cache_get(DOMAIN_CACHE_NAMESPACE, cache_key)
         if cached is not None:
             return cached
         try:
@@ -439,7 +436,7 @@ def fetch_industry_insight(key: str) -> dict[str, Any] | None:
                 "topPerformingCompanies": top_performing,
                 "topGrowthCompanies": top_growth,
             }
-            cache_set("domain", cache_key, result, DOMAIN_TTL_SECONDS)
+            cache_set(DOMAIN_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
             return result
         except Exception:
             continue

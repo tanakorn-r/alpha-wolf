@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AiVerdictCard } from "../../components/AiVerdictCard";
+import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
 import { buildChartPath } from "../../lib/chart";
 import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate } from "../../lib/format";
@@ -11,6 +12,7 @@ import { useWolfStore } from "../../store/useWolfStore";
 
 const returnWindows = ["ytd", "1y", "2y", "3y", "4y"] as const;
 type ResearchTab = "overview" | "consensus" | "financials" | "calendar" | "market";
+type ReturnWindow = (typeof returnWindows)[number];
 
 export function StockDetailDrawer() {
   const selectedSymbol = useWolfStore((state) => state.selectedSymbol);
@@ -101,11 +103,11 @@ export function StockDetailDrawer() {
           <DrawerHeader detail={detail} symbol={selectedSymbol} onClose={closeDetail} />
           <div className="flex max-h-[calc(100vh-180px)] flex-col gap-4 overflow-y-auto p-[22px]">
             {loading ? <DetailSkeleton symbol={selectedSymbol} /> : null}
-            {detailQuery.isError ? <div className={`${panel} flex items-center justify-between text-sm text-[#f2575c]`}>Unable to load live stock detail.<button type="button" onClick={() => detailQuery.refetch()} className="rounded border border-[#f2575c] px-3 py-1.5 text-xs">Retry</button></div> : null}
+            {detailQuery.isError ? <div className={`${panel} flex items-center justify-between text-sm text-[#f2575c]`}>Unable to load live stock detail.<button type="button" disabled={detailQuery.isFetching} onClick={() => detailQuery.refetch()} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">{detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button></div> : null}
             {error ? <div className={`${panel} text-sm text-rose-600`}>{error}</div> : null}
             {detail && !loading ? <>
               <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} />
-              <div className="flex items-center justify-between gap-3"><div className="text-[12.5px] text-[#8c8c95]">The full picture <strong className="font-normal text-[#ececee]">— live yfinance research with AI only on request.</strong></div><button type="button" disabled={planMutation.isPending} onClick={() => planMutation.mutate()} className={`rounded-lg px-4 py-2 text-xs font-semibold ${planItem ? "border border-[#663438] text-[#f2575c]" : "bg-[#3ecf8e] text-[#06120c]"}`}>{planMutation.isPending ? "Saving…" : planItem ? "Remove from Plan" : "Add to Plan"}</button></div>
+              <div className="flex items-center justify-between gap-3"><div className="text-[12.5px] text-[#8c8c95]">The full picture <strong className="font-normal text-[#ececee]">— live yfinance research with AI only on request.</strong></div><button type="button" disabled={planMutation.isPending} onClick={() => planMutation.mutate()} className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold ${planItem ? "border border-[#663438] text-[#f2575c]" : "bg-[#3ecf8e] text-[#06120c]"}`}>{planMutation.isPending ? <LoadingSpinner size={12} /> : null}{planMutation.isPending ? "Saving…" : planItem ? "Remove from Plan" : "Add to Plan"}</button></div>
               <ResearchTabs ref={tabsRef} active={tab} onSelect={selectTab} />
               {tab === "overview" ? <DetailContent detail={detail} performancePath={performancePath} /> : researchLoading ? <DetailSkeleton symbol={selectedSymbol} /> : tab === "market" ? <MarketResearch market={market} analyzing={analyzing} onAnalyze={analyze} /> : <ResearchContent tab={tab} research={research} detail={detail} />}
             </> : null}
@@ -134,7 +136,7 @@ function MarketResearch({ market, analyzing, onAnalyze }: { market: MarketCompar
   const beating = gap >= 0;
   return <div className="flex flex-col gap-[14px]">
     <div className={`${panel} p-[18px]`}>
-      <div className="flex items-start justify-between gap-5"><div><h3 className={`text-lg font-bold ${beating ? "text-[#3ecf8e]" : "text-[#f5c451]"}`}>{market.stock.symbol} is {beating ? "beating" : "lagging"} the market</h3><p className="mt-1 text-[13px] text-[#8c8c95]">Total return, last 12 months · every series rebased to 100</p></div><button type="button" onClick={onAnalyze} disabled={analyzing} className="flex-none rounded-[10px] border border-[#3ecf8e] bg-[#3ecf8e]/5 px-4 py-2.5 text-[13px] font-semibold text-[#3ecf8e]">✦ {analyzing ? "Analyzing…" : "Ask AI: can it beat the market?"}</button></div>
+      <div className="flex items-start justify-between gap-5"><div><h3 className={`text-lg font-bold ${beating ? "text-[#3ecf8e]" : "text-[#f5c451]"}`}>{market.stock.symbol} is {beating ? "beating" : "lagging"} the market</h3><p className="mt-1 text-[13px] text-[#8c8c95]">Total return, last 12 months · every series rebased to 100</p></div><button type="button" onClick={onAnalyze} disabled={analyzing} className="flex flex-none items-center gap-2 rounded-[10px] border border-[#3ecf8e] bg-[#3ecf8e]/5 px-4 py-2.5 text-[13px] font-semibold text-[#3ecf8e]">{analyzing ? <LoadingSpinner size={12} /> : null}✦ {analyzing ? "Analyzing…" : "Ask AI: can it beat the market?"}</button></div>
       <div className="mt-4 h-[310px]"><ResponsiveContainer width="100%" height="100%"><LineChart data={market.points} margin={{ top: 10, right: 8, bottom: 2, left: 0 }}><CartesianGrid stroke="#2a2a31" strokeDasharray="2 7" vertical={false}/><XAxis dataKey="date" hide/><YAxis domain={["auto", "auto"]} hide/><Tooltip contentStyle={{ background: "#1c1c20", border: "1px solid #34343c", borderRadius: 8, color: "#ececee" }} formatter={(value) => `${Number(value).toFixed(1)}`}/><Line type="monotone" dataKey="stock" name={`${market.stock.symbol} · this stock`} stroke="#3ecf8e" strokeWidth={2.5} dot={false}/><Line type="monotone" dataKey="peer" name={`${market.peer.symbol} · industry leader`} stroke="#f5c451" strokeWidth={2} dot={false}/><Line type="monotone" dataKey="benchmark" name={market.benchmark.name} stroke="#676771" strokeWidth={2} strokeDasharray="6 5" dot={false}/></LineChart></ResponsiveContainer></div>
       <div className="mt-1 flex flex-wrap gap-6 text-[12px] text-[#8c8c95]"><LegendLine color="#3ecf8e" label={`${market.stock.symbol} · this stock`}/><LegendLine color="#f5c451" label={`${market.peer.symbol} · industry leader`}/><LegendLine color="#676771" label={market.benchmark.name} dashed/></div>
     </div>
@@ -164,14 +166,32 @@ function AnalystSection({ research, detail }: { research: StockResearchResponse;
   const curPct = Math.min(100, Math.max(0, ((current - low) / range) * 100));
   const meanPct = Math.min(100, Math.max(0, ((mean - low) / range) * 100));
   const upside = current ? ((mean - current) / current) * 100 : 0;
+  const bullish = (summary.strongBuy ?? 0) + (summary.buy ?? 0);
+  const neutral = summary.hold ?? 0;
+  const bearish = (summary.sell ?? 0) + (summary.strongSell ?? 0);
+  const consensusLabel = describeConsensus(detail.business?.analystScore, bullish, neutral, bearish);
 
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
         <div className={panel}>
-          <div className="flex items-baseline justify-between"><div className="font-semibold">Analyst recommendations</div><span className="font-mono font-semibold text-[#3ecf8e]">{detail.business?.analystRating ?? "Hold"} · {formatNumber(detail.business?.analystScore)}</span></div>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="font-semibold">Analyst recommendations</div>
+              <div className="mt-1 text-[12.5px] text-[#8c8c95]">{consensusLabel}</div>
+            </div>
+            <div className="text-right">
+              <div className={`font-mono text-lg font-semibold ${analystScoreTone(detail.business?.analystScore)}`}>{detail.business?.analystRating ?? "Hold"}</div>
+              <div className="mt-0.5 font-mono text-[12px] text-[#8c8c95]">{formatNumber(detail.business?.analystScore)} / 5.00</div>
+            </div>
+          </div>
           <div className="my-3.5 flex h-3 overflow-hidden rounded-md bg-[#0e0e10]">
             {REC_SEGMENTS.map((segment) => <div key={segment.key} style={{ width: total ? `${((summary[segment.key] ?? 0) / total) * 100}%` : 0, background: segment.color }} />)}
+          </div>
+          <div className="mb-3 grid grid-cols-3 gap-2">
+            <ConsensusStat label="Bullish" value={bullish} tone="good" />
+            <ConsensusStat label="Neutral" value={neutral} tone="neutral" />
+            <ConsensusStat label="Bearish" value={bearish} tone="bad" />
           </div>
           <div className="flex flex-col gap-[7px]">{REC_SEGMENTS.map((segment) => <div key={segment.key} className="flex justify-between text-[12.5px]"><span className="text-[#bcbcc2]">{segment.label}</span><span className="font-mono text-[#8c8c95]">{summary[segment.key] ?? 0}</span></div>)}</div>
         </div>
@@ -190,11 +210,11 @@ function AnalystSection({ research, detail }: { research: StockResearchResponse;
         <div className={panel}>
           <div className="mb-3 font-semibold">Earnings estimate <span className="font-mono text-xs font-normal text-[#5a5a62]">EPS</span></div>
           <div className="grid grid-cols-[1.5fr_1fr_1fr_1fr_0.6fr] pb-[7px] text-[10.5px] uppercase tracking-[.4px] text-[#5a5a62]"><span>Period</span><span className="text-right">Avg</span><span className="text-right">Low</span><span className="text-right">High</span><span className="text-right">#</span></div>
-          {(research.earningsEstimate ?? []).map((row, index) => <div key={index} className="grid grid-cols-[1.5fr_1fr_1fr_1fr_0.6fr] border-t border-[#1f1f24] py-2 font-mono text-[12.5px]"><span className="font-sans text-[#bcbcc2]">{String(row.period)}</span><span className="text-right">{formatNumber(row.avg as number)}</span><span className="text-right text-[#8c8c95]">{formatNumber(row.low as number)}</span><span className="text-right text-[#8c8c95]">{formatNumber(row.high as number)}</span><span className="text-right text-[#5a5a62]">{String(row.numberOfAnalysts ?? "—")}</span></div>)}
+          {(research.earningsEstimate ?? []).map((row, index) => <div key={index} className="grid grid-cols-[1.5fr_1fr_1fr_1fr_0.6fr] border-t border-[#1f1f24] py-2 font-mono text-[12.5px]"><span className="font-sans text-[#bcbcc2]">{formatEstimatePeriod(String(row.period ?? ""))}</span><span className="text-right">{formatNumber(row.avg as number)}</span><span className="text-right text-[#8c8c95]">{formatNumber(row.low as number)}</span><span className="text-right text-[#8c8c95]">{formatNumber(row.high as number)}</span><span className="text-right text-[#5a5a62]">{String(row.numberOfAnalysts ?? "—")}</span></div>)}
         </div>
         <div className={panel}>
           <div className="mb-3 font-semibold">Growth estimates <span className="font-mono text-xs font-normal text-[#5a5a62]">vs. index</span></div>
-          <div className="flex flex-col gap-[9px]">{(research.growthEstimates ?? []).map((row, index) => { const value = (row.stockTrend ?? row.indexTrend) as number | null; const pct = Math.min(100, Math.max(0, ((value ?? 0) + 0.3) / 0.6 * 100)); return <div key={index} className="flex items-center gap-3"><span className="w-[60px] flex-none text-[12.5px] text-[#bcbcc2]">{String(row.period)}</span><div className="h-1.5 flex-1 overflow-hidden rounded-[3px] bg-[#0e0e10]"><div className="h-full rounded-[3px] bg-[#3ecf8e]" style={{ width: `${pct}%` }} /></div><span className="w-[54px] flex-none text-right font-mono text-[12.5px] text-[#3ecf8e]">{value != null ? formatPercent(value * 100) : "—"}</span></div>; })}</div>
+          <div className="flex flex-col gap-[9px]">{(research.growthEstimates ?? []).map((row, index) => { const value = (row.stockTrend ?? row.indexTrend) as number | null; const pct = Math.min(100, Math.max(0, ((value ?? 0) + 0.3) / 0.6 * 100)); return <div key={index} className="flex items-center gap-3"><span className="w-[92px] flex-none text-[12.5px] text-[#bcbcc2]">{formatEstimatePeriod(String(row.period ?? ""))}</span><div className="h-1.5 flex-1 overflow-hidden rounded-[3px] bg-[#0e0e10]"><div className="h-full rounded-[3px] bg-[#3ecf8e]" style={{ width: `${pct}%` }} /></div><span className="w-[72px] flex-none text-right font-mono text-[12.5px] text-[#3ecf8e]">{value != null ? formatPercent(value * 100) : "—"}</span></div>; })}</div>
         </div>
       </div>
     </>
@@ -308,12 +328,16 @@ function IndustryRankBadge({ detail }: { detail: StockDetailResponse }) {
 function AiGate({ symbol, analysis, analyzing, onAnalyze }: { symbol: string; analysis: StockAnalysisResponse | null; analyzing: boolean; onAnalyze: () => void }) {
   if (analyzing) return <div className="flex items-center justify-center gap-3.5 rounded-[14px] border border-[#2a2a31] bg-[#141417] p-[34px] text-[#8c8c95]"><span className="h-5 w-5 animate-spin rounded-full border-2 border-[#2a2a31] border-t-[#3ecf8e]" />Scoring {symbol} across value, income, growth &amp; timing…</div>;
   if (analysis) return <AiVerdictCard value={analysis} onRerun={onAnalyze} size="modal" />;
-  return <div className="flex flex-col items-center gap-3.5 rounded-[14px] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="grid h-[52px] w-[52px] place-items-center rounded-[14px] bg-[#3ecf8e]/10"><svg viewBox="0 0 16 16" className="h-[26px] w-[26px] fill-[#3ecf8e]"><path d="m8 1.5 1.6 4.3L14 7 9.6 8.2 8 12.5 6.4 8.2 2 7l4.4-1.2L8 1.5Z"/></svg></div><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask AI to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">OpenAI will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><button type="button" onClick={onAnalyze} className="rounded-[10px] bg-[#3ecf8e] px-[22px] py-3 text-sm font-bold text-[#06120c]">Analyze {symbol}</button></div>;
+  return <div className="flex flex-col items-center gap-3.5 rounded-[14px] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="grid h-[52px] w-[52px] place-items-center rounded-[14px] bg-[#3ecf8e]/10"><svg viewBox="0 0 16 16" className="h-[26px] w-[26px] fill-[#3ecf8e]"><path d="m8 1.5 1.6 4.3L14 7 9.6 8.2 8 12.5 6.4 8.2 2 7l4.4-1.2L8 1.5Z"/></svg></div><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask AI to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">OpenAI will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><button type="button" onClick={onAnalyze} className="flex items-center gap-2 rounded-[10px] bg-[#3ecf8e] px-[22px] py-3 text-sm font-bold text-[#06120c]">Analyze {symbol}</button></div>;
 }
 
 function DetailContent({ detail, performancePath }: { detail: StockDetailResponse; performancePath: string }) {
   const score = detail.verdict?.score ?? 0;
   const returns = detail.performance?.returns ?? {};
+  const returnSeries = buildReturnSeries(returns);
+  const positiveWindows = returnSeries.filter((item) => item.value > 0).length;
+  const oneYearReturn = returnSeries.find((item) => item.key === "1y")?.value ?? 0;
+  const longTermRead = describeReturnPattern(returnSeries);
   const metrics = [
     ["PE", formatMultiple(detail.business?.peRatio)], ["PBV", formatMultiple(detail.business?.priceToBook)],
     ["ROE", formatPercent(detail.business?.roe)], ["ROA", formatPercent(detail.business?.roa)],
@@ -335,11 +359,38 @@ function DetailContent({ detail, performancePath }: { detail: StockDetailRespons
         <div className={panel}><PanelHeader title="Decision" /><div className="text-2xl font-extrabold text-[#ececee]">{detail.verdict?.action ?? "WAIT"}</div><div className="mt-1 text-sm text-[#8c8c95]">{detail.verdict?.headline}</div><div className="mt-5 text-3xl font-extrabold text-[#3ecf8e]">{score}/100</div></div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4"><div className={panel}><PanelHeader title="DCA suitability" description="Strategy fit from live price and fundamental signals" /><div className="font-mono text-3xl font-semibold text-[#3ecf8e]">{dcaScore}/100</div></div><div className={panel}><PanelHeader title="Risk score" description="Observed volatility; lower is calmer" /><div className={`font-mono text-3xl font-semibold ${riskScore > 65 ? negative : riskScore > 35 ? "text-[#f5c451]" : positive}`}>{riskScore}/100</div></div></div>
+      <div className="grid grid-cols-2 gap-4"><div className={panel}><PanelHeader title="Strategy fit" description="Live fit for the current buy style and setup quality" /><div className="font-mono text-3xl font-semibold text-[#3ecf8e]">{dcaScore}/100</div></div><div className={panel}><PanelHeader title="Risk score" description="Observed volatility; lower is calmer" /><div className={`font-mono text-3xl font-semibold ${riskScore > 65 ? negative : riskScore > 35 ? "text-[#f5c451]" : positive}`}>{riskScore}/100</div></div></div>
 
       <div className="grid grid-cols-2 gap-4">
         <div className={panel}><PanelHeader title="Business snapshot" description={detail.business?.sector ?? detail.stock.sector} /><div className="grid grid-cols-4 gap-2">{metrics.map(([label, value]) => <Metric key={label} label={label} value={value} />)}</div></div>
-        <div className={panel}><PanelHeader title="Performance" description="Returns by time window" /><svg viewBox="0 0 100 100" className="h-20 w-full"><path d={`${performancePath} L 100 90 L 0 90 Z`} fill="rgba(62,207,142,.09)"/><path d={performancePath} fill="none" stroke="#3ecf8e" strokeWidth="2"/></svg><div className="mt-2 grid grid-cols-5 gap-1">{returnWindows.map((window) => <Metric key={window} label={window.toUpperCase()} value={formatPercent(returns[window])} />)}</div></div>
+        <div className={panel}>
+          <PanelHeader title="Performance" description="Return profile across your main holding windows" />
+          <div className="mt-3 grid gap-3 md:grid-cols-[1fr_180px]">
+            <div className="h-[170px] rounded-xl border border-[#23232a] bg-[#101114] p-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={returnSeries} margin={{ top: 12, right: 10, bottom: 8, left: 0 }}>
+                  <defs>
+                    <linearGradient id="returnProfileFill" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3ecf8e" stopOpacity={0.24} />
+                      <stop offset="100%" stopColor="#3ecf8e" stopOpacity={0.02} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid stroke="#23232a" strokeDasharray="3 6" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: "#6d6d76", fontSize: 11 }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fill: "#6d6d76", fontSize: 11 }} axisLine={false} tickLine={false} width={44} tickFormatter={(value) => `${Number(value).toFixed(0)}%`} />
+                  <Tooltip contentStyle={{ background: "#1c1c20", border: "1px solid #34343c", borderRadius: 8, color: "#ececee" }} formatter={(value) => formatPercent(Number(value))} />
+                  <Area type="monotone" dataKey="value" stroke="#3ecf8e" strokeWidth={2.5} fill="url(#returnProfileFill)" activeDot={{ r: 4, fill: "#3ecf8e" }} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="grid gap-2">
+              <InsightPill label="Trend read" value={longTermRead} tone={positiveWindows >= 3 ? "good" : positiveWindows >= 2 ? "neutral" : "bad"} />
+              <InsightPill label="Winning windows" value={`${positiveWindows}/${returnSeries.length}`} tone={positiveWindows >= 3 ? "good" : positiveWindows >= 2 ? "neutral" : "bad"} />
+              <InsightPill label="1Y return" value={formatPercent(oneYearReturn)} tone={oneYearReturn >= 0 ? "good" : "bad"} />
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-5 gap-1">{returnWindows.map((window) => <Metric key={window} label={window.toUpperCase()} value={formatPercent(returns[window])} />)}</div>
+        </div>
       </div>
 
       <div className={panel}><PanelHeader title="Technical analysis" description={detail.technicals?.signal ?? "Neutral"} /><div className="grid grid-cols-6 gap-2">{technicals.map(([label, value]) => <Metric key={label} label={label} value={value} />)}</div></div>
@@ -355,6 +406,70 @@ function Metric({ label, value }: { label: string; value: string }) {
 
 function PanelHeader({ title, description }: { title: string; description?: string }) {
   return <div className="mb-4"><div className="text-sm font-bold text-[#ececee]">{title}</div>{description ? <div className="mt-1 text-xs text-[#8c8c95]">{description}</div> : null}</div>;
+}
+
+function formatEstimatePeriod(period: string) {
+  const normalized = period.trim().toLowerCase();
+  if (normalized === "0q") return "Current quarter";
+  if (normalized === "+1q") return "Next quarter";
+  if (normalized === "0y") return "Current year";
+  if (normalized === "+1y") return "Next year";
+  if (normalized === "ltg") return "Long-term growth";
+  return period || "—";
+}
+
+function buildReturnSeries(returns: Partial<Record<ReturnWindow, number | undefined>>) {
+  return returnWindows.map((key) => ({
+    key,
+    label: key.toUpperCase(),
+    value: returns[key] ?? 0,
+  }));
+}
+
+function describeReturnPattern(series: Array<{ value: number }>) {
+  const positiveCount = series.filter((item) => item.value > 0).length;
+  if (positiveCount >= 4) return "Broadly positive";
+  if (positiveCount >= 3) return "Mostly positive";
+  if (positiveCount >= 2) return "Mixed";
+  return "Weak follow-through";
+}
+
+function describeConsensus(score: number | undefined, bullish: number, neutral: number, bearish: number) {
+  if (!score) return "No clear analyst consensus yet.";
+  const total = bullish + neutral + bearish;
+  const leaning = score <= 1.8 ? "Strong bullish consensus" : score <= 2.4 ? "Bullish consensus" : score <= 3.2 ? "Mostly hold / wait" : score <= 4 ? "Bearish leaning" : "Strong bearish consensus";
+  return `${leaning} · ${bullish} bullish, ${neutral} neutral, ${bearish} bearish${total ? ` across ${total} analysts` : ""}.`;
+}
+
+function analystScoreTone(score?: number) {
+  if (!score) return "text-[#8c8c95]";
+  if (score <= 2.4) return "text-[#3ecf8e]";
+  if (score <= 3.2) return "text-[#f5c451]";
+  return "text-[#f2575c]";
+}
+
+function ConsensusStat({ label, value, tone }: { label: string; value: number; tone: "good" | "neutral" | "bad" }) {
+  const color = tone === "good" ? "text-[#3ecf8e]" : tone === "bad" ? "text-[#f2575c]" : "text-[#f5c451]";
+  return (
+    <div className="rounded-lg border border-[#23232a] bg-[#101114] px-3 py-2">
+      <div className="text-[10px] uppercase tracking-[.08em] text-[#6d6d76]">{label}</div>
+      <div className={`mt-1 font-mono text-base font-semibold ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+function InsightPill({ label, value, tone }: { label: string; value: string; tone: "good" | "neutral" | "bad" }) {
+  const tones = tone === "good"
+    ? "border-[#285f48] bg-[#133025] text-[#3ecf8e]"
+    : tone === "bad"
+      ? "border-[#663438] bg-[#2a1719] text-[#f2575c]"
+      : "border-[#6d5522] bg-[#251d10] text-[#f5c451]";
+  return (
+    <div className={`rounded-xl border px-3 py-2.5 ${tones}`}>
+      <div className="text-[10px] uppercase tracking-[.08em] opacity-75">{label}</div>
+      <div className="mt-1 text-sm font-semibold">{value}</div>
+    </div>
+  );
 }
 
 function DetailSkeleton({ symbol }: { symbol: string | null }) {

@@ -1,10 +1,6 @@
 import { create } from "zustand";
 import type { StockRecord, StrategyKey } from "../data/market";
 
-export type Currency = "USD" | "THB";
-export const FX_RATES: Record<Currency, number> = { USD: 1, THB: 36.5 };
-export const CURRENCY_SYMBOL: Record<Currency, string> = { USD: "$", THB: "฿" };
-
 const RESERVE_STORAGE_KEY = "aw_cash_reserve";
 
 type WolfState = {
@@ -15,7 +11,6 @@ type WolfState = {
   watchlist: StockRecord[];
   portfolioValue: number;
   portfolioGainPct: number;
-  currency: Currency;
   cashReserve: number;
   setStrategy: (strategy: StrategyKey) => void;
   setSelectedSymbol: (symbol: string) => void;
@@ -25,7 +20,6 @@ type WolfState = {
   setSearchQuery: (query: string) => void;
   setWatchlist: (rows: StockRecord[]) => void;
   setPortfolioSummary: (value: number, gainPct: number) => void;
-  setCurrency: (currency: Currency) => void;
   addCashReserve: (usdAmount: number) => void;
   spendCashReserve: (usdAmount: number) => void;
 };
@@ -48,7 +42,6 @@ export const useWolfStore = create<WolfState>((set, get) => ({
   watchlist: [],
   portfolioValue: 0,
   portfolioGainPct: 0,
-  currency: "USD",
   cashReserve: loadReserve(),
   setStrategy: (selectedStrategy) => set({ selectedStrategy }),
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
@@ -58,7 +51,6 @@ export const useWolfStore = create<WolfState>((set, get) => ({
   setSearchQuery: (searchQuery) => set({ searchQuery }),
   setWatchlist: (watchlist) => set({ watchlist }),
   setPortfolioSummary: (portfolioValue, portfolioGainPct) => set({ portfolioValue, portfolioGainPct }),
-  setCurrency: (currency) => set({ currency }),
   addCashReserve: (usdAmount) => {
     const next = get().cashReserve + usdAmount;
     persistReserve(next);

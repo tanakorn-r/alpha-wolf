@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -63,8 +62,7 @@ def get_market_catalog() -> list[dict[str, Any]]:
         now = datetime.now(timezone.utc)
         if all(value and datetime.fromisoformat(value.expiresAt) > now for value in cached):
             return [record for value in cached if value for record in _sanitize_cached_records(value)]
-        with ThreadPoolExecutor(max_workers=len(CATALOG_REGIONS)) as pool:
-            refreshed = list(pool.map(_refresh_region, CATALOG_REGIONS))
+        refreshed = [_refresh_region(region) for region in CATALOG_REGIONS]
         return [record for value in refreshed for record in value.records]
 
 

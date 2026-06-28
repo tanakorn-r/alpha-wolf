@@ -1,12 +1,13 @@
 import { NavLink } from "react-router-dom";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
-import { formatMoneyAs, formatPercent } from "../../lib/format";
+import { Money } from "../Money";
+import { formatPercent } from "../../lib/format";
 import { useWolfStore } from "../../store/useWolfStore";
 import { NavIcon, type NavIconKind } from "./NavIcon";
 
 const items: Array<{ to: string; label: string; kind: NavIconKind }> = [
   { to: "/", label: "Dashboard", kind: "dashboard" },
-  { to: "/scanner", label: "DCA Scanner", kind: "search" },
+  { to: "/scanner", label: "Strategy Scanner", kind: "search" },
   { to: "/analyst", label: "AI Analyst", kind: "analyst" },
   { to: "/calendar", label: "Income Calendar", kind: "discover" }
 ];
@@ -14,17 +15,16 @@ const items: Array<{ to: string; label: string; kind: NavIconKind }> = [
 export function AppSidebar() {
   const portfolioValue = useWolfStore((state) => state.portfolioValue);
   const portfolioGainPct = useWolfStore((state) => state.portfolioGainPct);
-  const currency = useWolfStore((state) => state.currency);
 
   return (
-    <aside className="aw-sidebar sticky top-0 flex h-screen w-[236px] flex-none flex-col border-r border-[#2a2a31] px-4 py-5">
+    <aside className="aw-sidebar fixed inset-y-0 left-0 z-20 flex h-screen w-[236px] flex-none flex-col border-r border-[#2a2a31] px-4 py-5 max-[900px]:w-[76px]">
       <div className="flex items-center gap-2.5 px-2 pb-[22px] pt-1">
         <div className="grid h-10 w-10 place-items-center overflow-hidden rounded-[10px] border border-[#2a2a31] bg-[#08090b]">
           <img src={alphaWolfIcon} alt="Alpha Wolf" className="h-full w-full object-cover" />
         </div>
         <div>
           <div className="text-base font-bold tracking-[-0.2px]"><span className="text-[#3ecf8e]">Alpha</span><span className="text-[#ececee]">Wolf</span></div>
-          <div className="text-[11px] uppercase tracking-[0.16em] text-[#5a5a62]">strategy desk</div>
+          <div className="text-[11px] uppercase tracking-[0.16em] text-[#5a5a62]">wolf strategy desk</div>
         </div>
       </div>
 
@@ -40,15 +40,15 @@ export function AppSidebar() {
           </NavLink>
         ))}
       </nav>
-      <p className="mt-[9px] px-[11px] text-[10.5px] leading-[1.5] text-[#5a5a62]">Tap any stock anywhere to open its Deep Research card.</p>
+      <p className="mt-[9px] px-[11px] text-[10.5px] leading-[1.5] text-[#5a5a62]">Wolf rule: open any stock to see the full research stack before you commit cash.</p>
 
       <div className="mt-auto flex flex-col gap-3">
         <div className="rounded-[10px] border border-[#2a2a31] bg-[#161619] px-3.5 py-[13px]">
           <div className="mb-[5px] text-[11px] uppercase tracking-[0.6px] text-[#8c8c95]">Portfolio</div>
-          <div className="font-mono text-[21px] font-semibold tracking-[-0.5px] text-[#ececee]">{formatMoneyAs(portfolioValue, currency)}</div>
+          <div className="font-mono text-[21px] font-semibold tracking-[-0.5px] text-[#ececee]"><Money value={portfolioValue} secondaryClassName="text-[10px] font-normal text-[#5a5a62]" /></div>
           <div className={`mt-0.5 font-mono text-xs ${portfolioGainPct >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{formatPercent(portfolioGainPct)}</div>
         </div>
-        <div className="flex items-center gap-2 px-1.5 text-xs text-[#8c8c95]"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#3ecf8e]" />AI runs only when you ask</div>
+        <div className="flex items-center gap-2 px-1.5 text-xs text-[#8c8c95]"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#3ecf8e]" />Wolf AI wakes only on command</div>
       </div>
     </aside>
   );

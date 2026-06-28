@@ -203,6 +203,46 @@ export type StockAnalysisResponse = {
   model?: string;
 };
 
+export type QuantPerspectiveCheck = {
+  label: string;
+  value: string;
+  status: "good" | "warn" | "bad";
+  insight: string;
+};
+
+export type QuantPerspectiveResponse = {
+  signal: string;
+  tone: "good" | "warn" | "bad";
+  buyScore: number;
+  investability: "FAVORABLE" | "WATCH" | "AVOID";
+  hook: string;
+  nextActionWindow: string;
+  buyPlan: string;
+  summary: string;
+  setup: string;
+  trigger: string;
+  risk: string;
+  checks: QuantPerspectiveCheck[];
+  tradingViewFocus: string[];
+  source?: "openai";
+  model?: string;
+};
+
+export type TodayPerformanceResponse = {
+  signal: string;
+  tone: "good" | "warn" | "bad";
+  buyScore: number;
+  headline: string;
+  summary: string;
+  sessionRead: string;
+  whatChangedToday: string;
+  keyLevel: string;
+  action: string;
+  risk: string;
+  source?: "openai";
+  model?: string;
+};
+
 export type PortfolioHolding = StockRecord & {
   id: number;
   shares: number;
@@ -241,7 +281,7 @@ export type MarketCalendarEvent = {
   date: string;
   symbol: string;
   name: string;
-  kind: "ex-dividend" | "payment" | "earnings" | "dca";
+  kind: "ex-dividend" | "payment";
   region: "us" | "th";
   marketLabel: string;
   isHolding: boolean;
@@ -390,6 +430,38 @@ export async function summarizeStock(symbol: string, strategy?: string): Promise
   }
 
   return (await response.json()) as StockAnalysisResponse;
+}
+
+export async function loadQuantPerspective(symbol: string, strategy?: string): Promise<QuantPerspectiveResponse> {
+  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/quant`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ strategy })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load quant perspective: ${response.status}`);
+  }
+
+  return (await response.json()) as QuantPerspectiveResponse;
+}
+
+export async function loadTodayPerformance(symbol: string, strategy?: string): Promise<TodayPerformanceResponse> {
+  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/today`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ strategy })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load today performance: ${response.status}`);
+  }
+
+  return (await response.json()) as TodayPerformanceResponse;
 }
 
 export async function loadPortfolio(): Promise<PortfolioDashboard> {

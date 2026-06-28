@@ -10,6 +10,7 @@
     "build": "nx build web",
     "dev:web": "nx serve web",
     "dev:api": "cd apps/api && python3 -m uvicorn main:app --reload --env-file .env --host 127.0.0.1 --port 8000",
+    "dev:go-api": "cd apps/go-api && go run .",
     "format": "nx format:write"
   },
   "devDependencies": {

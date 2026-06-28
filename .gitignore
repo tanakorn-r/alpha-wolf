@@ -5,6 +5,7 @@ coverage
 .DS_Store
 apps/api/data/
 apps/api/*.db
+apps/go-api/.env
 __pycache__/
 *.pyc
 .nx/

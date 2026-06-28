@@ -18,6 +18,11 @@ export function formatMoneyAs(value: number | undefined, currency: "USD" | "THB"
   return `${sign}${CURRENCY_SYMBOL[currency]}${Math.abs(Math.round(converted)).toLocaleString("en-US")}`;
 }
 
+/** Primary figure in USD (the site's base currency) plus a THB equivalent for reference. */
+export function formatMoneyDual(value?: number) {
+  return { primary: formatMoneyAs(value, "USD"), secondary: formatMoneyAs(value, "THB") };
+}
+
 export function formatCurrency(value?: number, currency = "USD") {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
   return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);

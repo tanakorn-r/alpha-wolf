@@ -130,7 +130,7 @@ class MarketCalendarEvent(BaseModel):
     date: str
     symbol: str
     name: str
-    kind: Literal["ex-dividend", "payment", "earnings", "dca"]
+    kind: Literal["ex-dividend", "payment"]
     region: Literal["us", "th"]
     marketLabel: str
     isHolding: bool = False
@@ -240,6 +240,55 @@ class StockAnalysis(BaseModel):
 
 
 class StockAnalysisResponse(StockAnalysis):
+    source: Literal["openai"]
+    model: str
+
+
+class QuantCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    value: str
+    status: Literal["good", "warn", "bad"]
+    insight: str
+
+
+class QuantPerspective(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal: str
+    tone: Literal["good", "warn", "bad"]
+    buyScore: int = Field(ge=1, le=100)
+    investability: Literal["FAVORABLE", "WATCH", "AVOID"]
+    hook: str
+    nextActionWindow: str
+    buyPlan: str
+    summary: str
+    setup: str
+    trigger: str
+    risk: str
+    checks: list[QuantCheck] = Field(min_length=4, max_length=6)
+    tradingViewFocus: list[str] = Field(min_length=2, max_length=4)
+
+
+class QuantPerspectiveResponse(QuantPerspective):
+    source: Literal["openai"]
+    model: str
+
+
+class TodayPerformanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal: str
+    tone: Literal["good", "warn", "bad"]
+    buyScore: int = Field(ge=1, le=100)
+    headline: str
+    summary: str
+    sessionRead: str
+    whatChangedToday: str
+    keyLevel: str
+    action: str
+    risk: str
     source: Literal["openai"]
     model: str
 
