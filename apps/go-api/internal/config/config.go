@@ -15,7 +15,12 @@ type Config struct {
 	FinFeedExchangesPath string
 	FinFeedSymbolsPath   string
 	FinFeedPricePath     string
-	ThailandExchangeID   string
+	FinFeedCandlesPath   string
+	ThExchangeIDs        string
+	UsExchangeIDs        string
+	DBPath               string
+	OpenAIAPIKey         string
+	OpenAIModel          string
 }
 
 func Load() Config {
@@ -24,11 +29,16 @@ func Load() Config {
 	return Config{
 		Port:                 getEnv("PORT", "8080"),
 		FinFeedAPIKey:        strings.TrimSpace(os.Getenv("FINFEED_API_KEY")),
-		FinFeedBaseURL:       strings.TrimRight(getEnv("FINFEED_BASE_URL", "https://api.finfeedapi.com"), "/"),
+		FinFeedBaseURL:       strings.TrimRight(getEnv("FINFEED_BASE_URL", "https://finfeedapi.com"), "/"),
 		FinFeedExchangesPath: ensureLeadingSlash(getEnv("FINFEED_EXCHANGES_PATH", "/metadata/exchanges")),
 		FinFeedSymbolsPath:   ensureLeadingSlash(getEnv("FINFEED_SYMBOLS_PATH_TEMPLATE", "/metadata/symbols/{exchange_id}")),
 		FinFeedPricePath:     ensureLeadingSlash(getEnv("FINFEED_PRICE_PATH_TEMPLATE", "/price/{symbol}")),
-		ThailandExchangeID:   strings.TrimSpace(os.Getenv("FINFEED_TH_EXCHANGE_ID")),
+		FinFeedCandlesPath:   ensureLeadingSlash(getEnv("FINFEED_CANDLES_PATH_TEMPLATE", "/history/{symbol}")),
+		ThExchangeIDs:        strings.TrimSpace(os.Getenv("FINFEED_TH_EXCHANGE_IDS")),
+		UsExchangeIDs:        strings.TrimSpace(os.Getenv("FINFEED_US_EXCHANGE_IDS")),
+		DBPath:               strings.TrimSpace(os.Getenv("ALPHA_WOLF_DB_PATH")),
+		OpenAIAPIKey:         strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
+		OpenAIModel:          getEnv("OPENAI_MODEL", "gpt-5.4-mini"),
 	}
 }
 

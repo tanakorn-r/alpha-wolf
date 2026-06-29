@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ type Client struct {
 	exchangesPath string
 	symbolsPath   string
 	pricePath     string
+	candlesPath   string
 	httpClient    *http.Client
 }
 
@@ -28,6 +30,7 @@ func NewClient(cfg config.Config) *Client {
 		exchangesPath: cfg.FinFeedExchangesPath,
 		symbolsPath:   cfg.FinFeedSymbolsPath,
 		pricePath:     cfg.FinFeedPricePath,
+		candlesPath:   cfg.FinFeedCandlesPath,
 		httpClient: &http.Client{
 			Timeout: 20 * time.Second,
 		},
@@ -99,6 +102,39 @@ func (c *Client) GetPrice(symbol string) (Price, error) {
 		ChangePercent: firstFloat(item, "changePercent", "change_percentage", "percentChange"),
 		Timestamp:     firstString(item, "timestamp", "updatedAt", "lastUpdated"),
 	}, nil
+}
+
+// GetCandles fetches daily OHLC candles for a symbol, most recent last.
+// The FinFeed history endpoint is configurable (FINFEED_CANDLES_PATH_TEMPLATE)
+// since vendor path/field naming for historical bars varies and may need
+// adjusting without a code change.
+func (c *Client) GetCandles(symbol string, days int) ([]Candle, error) {
+	path := strings.ReplaceAll(c.candlesPath, "{symbol}", url.PathEscape(strings.ToUpper(strings.TrimSpace(symbol))))
+	query := url.Values{}
+	if days > 0 {
+		query.Set("days", strconv.Itoa(days))
+		query.Set("range", strconv.Itoa(days)+"d")
+	}
+
+	payload, err := c.getJSON(path, query)
+	if err != nil {
+		return nil, err
+	}
+
+	rows := readArray(payload)
+	candles := make([]Candle, 0, len(rows))
+	for _, item := range rows {
+		candles = append(candles, Candle{
+			Date:   firstString(item, "date", "timestamp", "time", "t"),
+			Open:   firstFloat(item, "open", "o"),
+			High:   firstFloat(item, "high", "h"),
+			Low:    firstFloat(item, "low", "l"),
+			Close:  firstFloat(item, "close", "c", "price"),
+			Volume: firstFloat(item, "volume", "v"),
+		})
+	}
+
+	return candles, nil
 }
 
 func (c *Client) getJSON(path string, query url.Values) (any, error) {

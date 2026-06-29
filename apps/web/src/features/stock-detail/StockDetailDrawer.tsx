@@ -19,6 +19,7 @@ export function StockDetailDrawer() {
   const selectedStrategy = useWolfStore((state) => state.selectedStrategy);
   const detailOpen = useWolfStore((state) => state.detailOpen);
   const closeDetail = useWolfStore((state) => state.closeDetail);
+  const openDeepAnalysis = useWolfStore((state) => state.openDeepAnalysis);
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
@@ -100,7 +101,7 @@ export function StockDetailDrawer() {
       <button type="button" aria-label="Close stock detail" onClick={closeDetail} className={`aw-overlay fixed inset-0 z-30 bg-slate-900/30 transition-opacity ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} />
       <aside ref={drawerRef} onClick={closeDetail} className={`aw-drawer fixed inset-0 z-40 flex items-start justify-center overflow-y-auto px-6 py-8 transition-opacity ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} aria-label="Stock detail panel">
         <div onClick={(event) => event.stopPropagation()} className="relative w-[940px] max-w-full overflow-hidden rounded-2xl border border-[#2a2a31] bg-[#0e0e10] shadow-[0_30px_90px_rgba(0,0,0,.55)]">
-          <DrawerHeader detail={detail} symbol={selectedSymbol} onClose={closeDetail} />
+          <DrawerHeader detail={detail} symbol={selectedSymbol} onClose={closeDetail} onDeepAnalyze={() => selectedSymbol && openDeepAnalysis(selectedSymbol)} />
           <div className="flex max-h-[calc(100vh-180px)] flex-col gap-4 overflow-y-auto p-[22px]">
             {loading ? <DetailSkeleton symbol={selectedSymbol} /> : null}
             {detailQuery.isError ? <div className={`${panel} flex items-center justify-between text-sm text-[#f2575c]`}>Unable to load live stock detail.<button type="button" disabled={detailQuery.isFetching} onClick={() => detailQuery.refetch()} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">{detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button></div> : null}
@@ -287,12 +288,13 @@ function CalendarSection({ research }: { research: StockResearchResponse }) {
   );
 }
 
-function DrawerHeader({ detail, symbol, onClose }: { detail: StockDetailResponse | null; symbol: string | null; onClose: () => void }) {
+function DrawerHeader({ detail, symbol, onClose, onDeepAnalyze }: { detail: StockDetailResponse | null; symbol: string | null; onClose: () => void; onDeepAnalyze: () => void }) {
   return (
     <div className="flex items-center justify-between gap-4 border-b border-[#2a2a31] bg-[#141417] px-[22px] py-[18px]">
       <div><div className="flex items-center gap-[11px]"><strong className="font-mono text-xl">{detail?.stock.symbol ?? symbol ?? "Live data"}</strong><span className="text-sm text-[#8c8c95]">{detail?.stock.name ?? "Live data panel"}</span><span className="rounded-[5px] border border-[#2a2a31] px-[7px] py-0.5 text-[10px] text-[#8c8c95]">{detail?.stock.symbol.endsWith(".BK") ? "Thai SET" : "US"}</span></div>{detail ? <div className="mt-[3px] flex items-baseline gap-[9px]"><span className="font-mono text-lg font-semibold">{formatCurrency(detail.stock.price, detail.stock.currency)}</span><span className={`font-mono text-[13px] ${detail.stock.changePct >= 0 ? positive : negative}`}>{formatPercent(detail.stock.changePct)}</span></div> : null}</div>
       <div className="flex items-center gap-3">
         {detail ? <IndustryRankBadge detail={detail} /> : null}
+        {detail ? <button type="button" onClick={onDeepAnalyze} className="flex flex-none items-center gap-1.5 rounded-lg bg-gradient-to-r from-[#ff6b6b] to-[#c77dff] px-3 py-2 text-xs font-bold text-white">✦ Deep AI</button> : null}
         <button type="button" onClick={onClose} aria-label="Close detail panel" className="px-2 py-1 text-[22px] leading-none text-[#8c8c95] hover:text-[#ececee]">×</button>
       </div>
     </div>

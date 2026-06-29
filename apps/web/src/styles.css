@@ -166,3 +166,19 @@ body {
   background-size: 400% 100%;
   animation: skeleton-shimmer 1.4s ease infinite;
 }
+
+@keyframes deep-panel-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes deep-rainbow {
+  to { background-position: 200% center; }
+}
+
+.deep-panel-in { animation: deep-panel-in 0.25s ease; }
+.deep-rainbow-bar {
+  background: linear-gradient(90deg, #ff6b6b, #ffd93d, #6bcb77, #4d96ff, #c77dff);
+  background-size: 200% auto;
+  animation: deep-rainbow 3s ease infinite;
+}

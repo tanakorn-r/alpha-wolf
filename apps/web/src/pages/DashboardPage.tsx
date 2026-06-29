@@ -38,6 +38,7 @@ export function DashboardPage() {
   const [sellTarget, setSellTarget] = useState<PortfolioHolding | null>(null);
   const [selling, setSelling] = useState(false);
 
+  const todayKey = new Date().toISOString().slice(0, 10);
   const portfolioQuery = useQuery({ queryKey: ["portfolio"], queryFn: loadPortfolio });
   const portfolio = portfolioQuery.data;
   const refresh = () => { void portfolioQuery.refetch(); };
@@ -122,13 +123,18 @@ export function DashboardPage() {
           <div className="divide-y divide-[#23232a]">
             {portfolio?.holdings.map((holding) => {
               const good = holding.gainLoss >= 0;
+              const nextExDiv = portfolio.incomeEvents
+                .filter((event) => event.symbol === holding.symbol && event.kind === "ex-dividend" && event.date >= todayKey)
+                .sort((a, b) => a.date.localeCompare(b.date))[0];
               return (
-                <div key={holding.symbol} className="grid w-full grid-cols-[1fr_repeat(3,minmax(80px,110px))_70px_auto] items-center gap-3 px-5 py-3 text-left hover:bg-[#1c1c20]">
+                <div key={holding.symbol} className="grid w-full grid-cols-[1fr_70px_repeat(4,minmax(72px,96px))_auto] items-center gap-3 px-5 py-3 text-left hover:bg-[#1c1c20]">
                   <button type="button" onClick={() => openDetail(holding.symbol)} className="min-w-0 text-left"><strong>{holding.symbol}</strong><div className="truncate text-xs text-[#8c8c95]">{holding.name}</div></button>
-                  <Cell label="Value" value={<Money value={holding.value} secondaryClassName="block text-[10px] font-normal text-[#5a5a62]" />} />
-                  <Cell label="Since buy" value={formatPercent(holding.gainLossPct)} good={good} />
-                  <Cell label="Yield" value={holding.story?.match(/[\d.]+% yield/)?.[0] ?? "—"} />
                   <Sparkline values={[holding.averageCost, holding.price]} color={good ? "#3ecf8e" : "#f2575c"} />
+                  <Cell label="Since buy" value={formatPercent(holding.gainLossPct)} good={good} />
+                  <Cell label="Value" value={<Money value={holding.value} secondaryClassName="block text-[10px] font-normal text-[#5a5a62]" />} />
+                  <Cell label="P/L" value={<Money value={holding.gainLoss} secondaryClassName="block text-[10px] font-normal text-[#5a5a62]" />} good={good} />
+                  <Cell label="Yield" value={holding.story?.match(/[\d.]+% yield/)?.[0] ?? "—"} />
+                  <Cell label="Ex-div" value={nextExDiv ? nextExDiv.date.slice(5) : "—"} />
                   <button type="button" onClick={() => setSellTarget(holding)} className="justify-self-end rounded-lg border border-[#2a2a31] px-3 py-1.5 text-xs text-[#8c8c95] hover:border-[#f2575c] hover:text-[#f2575c]">Sell</button>
                 </div>
               );
@@ -238,6 +244,15 @@ function PlanCard({ portfolio, onChanged, onAskAi, onOpenDetail }: { portfolio: 
   const overReserve = items.length > 0 && committed > cashReserve;
   const canApply = items.length > 0 && committed > 0 && committed <= cashReserve;
 
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const planSymbolSet = new Set(items.map((order) => order.symbol));
+  const exDivAnchors = Array.from(new Set(
+    portfolio.incomeEvents
+      .filter((event) => event.kind === "ex-dividend" && event.date >= todayKey && planSymbolSet.has(event.symbol))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .map((event) => event.symbol)
+  )).slice(0, 2);
+
   useEffect(() => { setApplied(null); }, [month]);
 
   const planSymbols = items.map((order) => order.symbol).join(",");
@@ -342,6 +357,7 @@ function PlanCard({ portfolio, onChanged, onAskAi, onOpenDetail }: { portfolio: 
         <h2 className="font-semibold">This month's plan</h2>
         <span className="text-[10px] uppercase tracking-[0.6px] text-[#5a5a62]">This month</span>
       </div>
+      {exDivAnchors.length ? <p className="mt-1 text-[11px] text-[#5a5a62]">Built around {exDivAnchors.join(" + ")} ex-dividend date{exDivAnchors.length > 1 ? "s" : ""}</p> : null}
 
       <div className="mt-3 flex items-center justify-between gap-2.5 rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] px-[14px] py-[13px]">
         <div className="min-w-0">

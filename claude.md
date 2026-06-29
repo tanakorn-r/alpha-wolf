@@ -1,91 +1,172 @@
 # CLAUDE.md
 
-## Project overview
-Internal tool combining git-like admin management with a ChatGPT-style dashboard. The Head Engineer (admin) issues AI-usage tokens to developers; developers call an AI proxy with their token; admin tracks/audits usage per developer. Monorepo with two halves:
-- api-server/ — Go backend (SQLite, JWT admin auth, opaque developer tokens)
-- admin-dashboard/ — React + Vite admin UI (the only client; developers integrate directly against the API, no UI of their own)
+> **Read this entire file before doing anything else in this repo.** It is the
+> single source of truth for how this project is structured, how to write code
+> for it, and what state the work is currently in. Do not re-derive this
+> context by re-scanning the whole tree every session — that's what this file
+> is for. Only fall back to scanning/reading source when this file is silent
+> on something or looks contradicted by what you observe.
 
-## Backend structure (`api-server/`)
-main.go                        entrypoint: wires DB, AI client, router; reads all env config
-internal/
-  store/                       persistence layer — every DB read/write lives here, nowhere else
-    store.go                   DB.Open(), migration runner (go:embed + sorted filename order)
-    migrations/000N_*.sql      one file per schema change, applied in order, every boot
-    developer.go, token.go,    one file per table/aggregate; method receiver is always `*DB`
-    usage.go, dashboard.go,
-    admin.go, seed.go
-  http/                        HTTP layer — one file per resource, mirrors store/ naming
-    router.go                  all routes registered here; `protected` sub-mux wrapped in RequireAuth
-    chat.go, tokens.go,        Handler functions: `XHandler(db *store.DB, ...) http.HandlerFunc`
-    developers.go, usage.go,
-    quota.go, login.go
-    middleware.go              CORS + RequireAuth (JWT) — auth is NOT per-handler, it's mux-level
-  auth/                        bcrypt (admin passwords), JWT (admin sessions), opaque tokens (devs)
-  ai/                          AI provider clients — mock.go (no-op) + openai.go (real), same interface shape
-Conventions:
-- Go 1.22+ net/http method-pattern routing (`mux.HandleFunc("GET /path/{id}", ...)`) — no router framework.
-- Every handler: parse path/body → look up entity (404 if missing) → business logic → writeError or JSON-encode. Never `panic`, never swallow errors.
-- Migrations are idempotent: ALTER TABLE ADD COLUMN errors with "duplicate column name" are tolerated in `store.go`'s migrate() since every boot re-runs every migration file against the same persisted `dev.db`.
-- SQLite via modernc.org/sqlite stores time.Time in Go's native String() format — `date()`/`MAX()` SQL functions silently break on that column. Do date bucketing and "latest row" lookups in Go (`ORDER BY id DESC LIMIT 1`), not SQL.
-- DB file path is anchored via runtime.Caller(0) in `main.go`, not cwd-relative — go run . must be invoked from inside `api-server/`.
+## How to use this file (read first, update last)
 
-## Frontend structure (`admin-dashboard/src/`)
-App.tsx                        BrowserRouter + route table + RequireAuth wrapper
-main.tsx                       React root, imports index.css
-stores/                        Zustand — see "State management" below
-  authStore.ts, dashboardStore.ts, developerStore.ts, tokenStore.ts, usageStore.ts
-lib/apiClient.ts                fetch wrapper: attaches bearer token, 401 → logout, .get/.post/.getArray
-hooks/useEscapeKey.ts          shared behavior hooks (not components)
-components/
-  ui/                           dumb, generic, no business logic: Button, Input, StatCard, ErrorText
-  layout/                       AppLayout (shell), Sidebar (nav), Topbar (breadcrumb + admin menu)
-  dashboard/                    feature components scoped to dashboard/profile views: TeamTable,
-                                 ContributorsHeatmap, StatGauge, QuotaBar, DeveloperProfileCard
-  *.tsx (root of components/)   cross-page modals: RevealTokenModal, CreateTokenModal, CommitDetailModal, Form
-pages/                          one file per route, composes components + stores, owns page-level state
-  Login.tsx, Dashboard.tsx, DevelopersList.tsx, DeveloperDetail.tsx
-Component rule of thumb: ui/ knows nothing about the app's domain (just props in, markup out). dashboard/ components know domain shapes (`DeveloperUsageRow`, `DailyActivityPoint`) but not which page renders them. pages/ is the only place that wires a store to a component tree.
+0. **Mandatory, every session, no exceptions**: read this file (`CLAUDE.md`,
+   the project's `.claudemd`-equivalent) in full at the very start of the
+   session, before reading other source files or writing any code. This is
+   not optional context — it is the required first step of every session.
+1. **On session start**: read `### STANDARDS` and `### STATE & MEMORY` in
+   full before writing any code. They are short by design — that's the token
+   budget this file protects.
+2. **Before acting**: trust `STANDARDS` for how to write code in this repo.
+   Trust `STATE & MEMORY` for what already exists and what's in flight — but
+   if a claim here (a file path, a feature, a "done" status) looks wrong when
+   you actually touch that area, the code wins; fix this file in the same
+   turn.
+3. **After every successful create, modify, or delete of a file** (a fix, a
+   feature, a refactor, a commit — not just at the end of a session): update
+   `### STATE & MEMORY` immediately, in place, **before** considering that
+   task complete. This update is mandatory and autonomous — do it
+   automatically, without asking the user for permission first. Specifically:
+   - Update the relevant bullet in **Current Features** if you touched a
+     feature's behavior.
+   - Rewrite **Last Change** to describe *only* the most recent change (it is
+     a single slot, not a log — overwrite it, don't append).
+   - Rewrite **Next Steps** to reflect what's actually still open. Remove
+     items you just finished; add items you discovered.
+   - Keep entries to one line each. If a bullet needs a paragraph, the detail
+     belongs in a commit message or code comment, not here.
+4. **Never let this file grow.** It should stay roughly this length forever.
+   This is a deliberate token-efficiency device: a few hundred tokens read at
+   the start of every session is far cheaper than re-discovering the repo
+   from scratch or carrying forward a full conversation history. If a section
+   creeps past ~30 lines, prune it — delete resolved items rather than
+   archiving them (git history is the archive).
+5. **Don't duplicate what git already tells you.** No changelogs, no
+   "session N did X" logs, no dates-as-history. `STATE & MEMORY` is a
+   snapshot of *now*, not a diary.
 
-## State management ("Redux-style" Zustand)
-Every store is a single create<State>((set, get) => ({...})) call — state and the actions that mutate it live together, like a Redux slice with built-in dispatch:
-ts
-interface FooState {
-  items: Foo[];
-  loading: boolean;
-  fetchItems: () => Promise<void>;   // action
-}
-export const useFooStore = create<FooState>((set, get) => ({
-  items: [],
-  loading: false,
-  fetchItems: async () => {
-    set({ loading: true });
-    const items = await apiClient.getArray<Foo>('/admin/foo');
-    set({ items, loading: false });
-  },
-}));
-Rules:
-- No component-local useState for anything that survives a re-render of a sibling or a route change — it goes in a store.
-- Async actions live in the store, not in the component (`pages/*.tsx` calls fetchX() in a `useEffect`, never fetch() directly).
-- Cross-entity caches are keyed by id: Record<number, T> or Record<number, T[]> (see `tokensByDeveloperId`, `eventsByDeveloperId`) — never a single flat array that has to be filtered client-side.
-- API boundary is guarded once in apiClient.getArray<T>() (coerces non-array → `[]` with `console.warn`), not with `?.`/`|| []` scattered at every render site.
+---
 
-## Styling
-Tailwind v4, CSS-first config (`index.css` @theme block — no `tailwind.config.js`). Brand tokens: --color-brand (#5955ed), `--color-brand-light`, `--color-muted`. Rounded-2xl white cards on a bg-brand-light page background is the dominant pattern; status pills are rounded-full px-2 py-1 text-xs font-medium with semantic bg/text color pairs (green=active, red=revoked, gray=idle).
+### STANDARDS
 
-## Working style
-- User is a Head Engineer, harsh reviewer, wants fast execution: "think less, just write the code."
-- Default to implementing directly; only ask a clarifying question when genuinely ambiguous (e.g. two divergent technical approaches), and batch multiple questions into one AskUserQuestion call rather than asking serially.
-- When the user gives critical feedback, don't just comply silently — briefly state the tradeoff, then follow their call once made (they want to be convinced, not just obeyed, but they do make the final decision).
+**Monorepo layout** (npm workspaces, no Nx project graph beyond `web`):
+- `apps/web/` — React 19 + Vite + TypeScript frontend. The only real client.
+- `apps/api/` — FastAPI + SQLite backend (Python). The live, primary backend.
+- `apps/go-api/` — Gin-based Go proof-of-concept for a Thailand-stocks feed
+  (FinFeed API). Experimental, not wired into the web app yet. Treat as a
+  separate, early-stage service — don't assume parity with `apps/api/`.
 
-## Code conventions
-- No premature abstraction: a bug fix doesn't need surrounding cleanup, a one-shot operation doesn't need a helper. Prefer 2-3 duplicated lines over a generic wrapper used once.
-- Guard defensive checks at the API/data boundary once (e.g. apiClient.getArray<T>() normalizes non-array responses with a `console.warn`), not scattered as `?.`/`|| []` at every render site.
-- Comments only for non-obvious WHY (hidden constraints, driver quirks, workarounds) — never restate WHAT the code does.
-- Go: stdlib net/http method-pattern routing (no router framework), go:embed for SQL migrations, idempotent migrations (tolerate "duplicate column name" since ALTER TABLE ADD COLUMN reruns on every boot).
-- SQLite via modernc.org/sqlite stores time.Time in Go's native String() format, breaking `date()`/`MAX()` SQL functions on that column — do date bucketing/latest-row lookups in Go instead of SQL.
-- React: Zustand stores (reducer-style), Tailwind v4 CSS-first @theme tokens (no config file), react-router-dom v6.
-- Never commit secrets (API keys) — pass via env var at runtime only, even when the user pastes one in chat.
+**Frontend (`apps/web/src/`)**
+- State: Zustand, one store (`store/useWolfStore.ts`), reducer-style — state
+  and the actions that mutate it live together in a single `create()` call.
+- Data fetching: TanStack Query (`useQuery`/`useInfiniteQuery`) for anything
+  server-derived; Zustand only for client-side/derived/UI state.
+- Routing: `react-router-dom` v6, route table in `App.tsx`.
+- Components: `components/` = generic/reusable (e.g. `Money.tsx`,
+  `Sparkline.tsx`, `LoadingSpinner.tsx`), `components/layout/` = app shell
+  (header/sidebar), `features/<name>/` = feature-scoped components (e.g.
+  `features/stock-detail/`), `pages/` = one file per route, composes the
+  above + stores.
+- Money/currency: USD is always the primary, bold figure; THB is always a
+  small muted secondary "≈฿X" next to it. Use the shared `<Money>` component
+  (`components/Money.tsx`) and `formatMoneyDual` (`lib/format.ts`) for every
+  prominent money value — never reintroduce a currency *toggle*.
+- Charts: Recharts. `PortfolioPerformanceChart` accepts a `children` prop for
+  injecting `ReferenceLine`/`ReferenceDot` markers (e.g. "first buy" dots).
+- Styling: Tailwind v4, utility classes inline; dark theme (`#0c0c0e`-ish
+  background, `#3ecf8e` accent green, `#f2575c` loss red).
 
-## Gotchas
-- go run . must be invoked from within the module directory (api-server/); anchor DB paths with `runtime.Caller(0)`, not cwd-relative, so the database persists regardless of invocation directory.
-- Backend takes ~1.5-2s to bind after `go run .`; check /healthz before firing requests in smoke tests.
+**Backend (`apps/api/`)**
+- FastAPI app (`main.py`) + SQLite (`internal/store/`), live market data via
+  `yfinance` (`internal/yahoo/`), AI summaries via OpenAI
+  (`internal/ai/openai_client.py`, gated by `OPENAI_API_KEY` env var).
+- One route file per resource in `routes/`, registered centrally in
+  `routes/router.py`. Handlers call into `internal/market/*` for business
+  logic and `internal/store/*` for persistence — don't put SQL or business
+  logic directly in route handlers.
+- `internal/store/portfolio.py` owns two architecturally distinct tables:
+  `dca_orders` (planned/intent only) and `holdings` (real owned
+  shares/cost-basis). Never conflate them — "planning a buy" must not by
+  itself change portfolio totals; only an explicit "apply"/"buy" action
+  writes to `holdings`.
+- `upsert_holding`'s `ON CONFLICT` does not update `created_at` — that column
+  is the reliable "first purchase date" anchor for chart start-dates.
+- Portfolio chart series (`internal/market/portfolio.py`) must clip each
+  holding's price history to on/after its own purchase date — never plot
+  price history a position wasn't actually exposed to. Same-day purchases
+  with no historical bar yet fall back to a single synthetic point using the
+  live quote.
+- yfinance data is delayed (~15-20 min); there is no true real-time feed
+  without a paid provider. State this plainly if asked — don't overclaim
+  freshness.
+
+**Cross-cutting conventions**
+- No premature abstraction: prefer 2-3 duplicated lines over a generic
+  wrapper used once. A bug fix doesn't need surrounding cleanup.
+- Comments only for non-obvious WHY (hidden constraints, workarounds,
+  driver/library quirks) — never restate WHAT the code does.
+- Guard defensive checks once at the data boundary (e.g. an API client
+  normalizing a bad response), not scattered as `?.`/`|| []` everywhere.
+- Never commit secrets. `OPENAI_API_KEY`, `FINFEED_API_KEY`, etc. are env-var
+  only, even when pasted into chat — tell the user to rotate it if they paste
+  a real key.
+- Git commits: heredoc-style `git commit -m "$(cat <<'EOF' ... EOF)"` with a
+  `Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>` trailer. Only
+  commit when explicitly asked.
+
+---
+
+### STATE & MEMORY
+
+**Current Features**
+- Dashboard (`pages/DashboardPage.tsx`): portfolio stats, holdings table,
+  performance chart, DCA plan card (add funds, apply plan → real `holdings`
+  writes), sell modal. 5-screen nav: Dashboard, Scanner, Deep AI, Day
+  Trader, Calendar (matches the `~/Downloads/AlphaWolf*/` mockups).
+- Strategy Scanner (`pages/DiscoverPage.tsx`): top5 picks per strategy,
+  "Buy all 5 now" executes real purchases.
+- Deep AI Analysis (`pages/DeepAiPage.tsx`, `/deep-ai`): a shared watchlist
+  (holdings + user-added `deepExtras`, persisted in `useWolfStore`) feeds two
+  tabs — **Daily Signals** (per-symbol swing cards via go-api
+  `loadDeepAnalysis`, reusing `DeepChart`/`OrderCard`/`DecideForMeCard` from
+  `components/DeepAnalysisPanel.tsx`) and **Next 100 ↑** (gated behind a
+  local-only `premium` flag/paywall modal, no real billing). Watchlist chips
+  double as the Next 100 ticker selector (glow green when active on that
+  tab, matching the mockup) — no separate ticker row. A manual "Predict"
+  button burns one unit of a persisted `n100QuotaUsed`/`N100_QUOTA_LIMIT`
+  quota (shown as a `used/100` bar) and fetches up to 100 *real* historical
+  upward moves via `GET /api/details/{symbol}/upward-moves`
+  (`internal/market/patterns.py`) — each move's "confidence" is a real
+  percentile rank within that stock's own historical up-move distribution,
+  not a fabricated prediction. Only 1D/1W timeframes are real (yfinance
+  daily bars); intraday timeframe buttons are shown disabled.
+- Day Trader AI (`pages/DayTraderPage.tsx`, `/day-trader`): watchlist
+  (default SPY/TSLA/NVDA/AAPL + custom add/remove) with real quotes
+  (`loadStockDetail`) and a "Get AI verdict" button wired to the real
+  `summarizeStock` endpoint — no fake/simulated data anywhere on this page.
+- Income Calendar (`pages/IncomeCalendarPage.tsx`): ex-date/payment-date view
+  backed by `internal/market/calendar.py`.
+- Stock detail drawer has a "✦ Deep AI" button opening the slide-over Deep
+  Analysis panel (`components/DeepAnalysisPanel.tsx`) for one symbol.
+- `apps/go-api`: Gin service for FinFeed-backed Deep Analysis swing levels.
+  Requires a real `FINFEED_API_KEY` in `apps/go-api/.env`.
+
+**Last Change**
+- Ported the AlphaWolfV2 mockup's Deep AI Analysis additions
+  (`~/Downloads/AlphaWolfV2/Cadence.dc.html` — plain `text/x-dc` source,
+  diff it against `AlphaWolf Cadence.html`'s decoded bundle to find what's
+  new): shared watchlist with add/remove, a Daily Signals/Next 100 tab
+  split, and a local-only premium paywall. The mockup's "Next 100" was a
+  seeded-PRNG fake-prediction generator; per user direction, replaced it
+  with `internal/market/patterns.py` computing real historical upward-move
+  percentile stats instead — deliberately not 1:1 with the mockup here,
+  because shipping fabricated "AI predictions" against real money decisions
+  would be dishonest even though the mockup itself labeled it "simulated".
+  None of this session's changes are committed yet.
+
+**Next Steps**
+- FinFeed's domain (`finfeedapi.com`) returns a Cloudflare bot-challenge
+  (403) to every automated client tested — Deep AI Analysis page/panel
+  can't be verified against live data from this sandbox. Need the user to
+  confirm the real API base URL/auth/paths from their FinFeed dashboard.
+- Note: port 8080 is sometimes occupied locally by an unrelated process —
+  if `npm run dev:go-api` fails to bind, check for a stray process first.

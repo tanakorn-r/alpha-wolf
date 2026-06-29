@@ -16,6 +16,8 @@ export type StockRecord = {
   recommendation: string;
   story: string;
   strategyScores: Record<StrategyKey, number>;
+  dividendYield?: number | null;
+  exDividendDate?: string | null;
 };
 
 export const strategyLabels: Record<StrategyKey, string> = {

@@ -8,7 +8,8 @@ import { NavIcon, type NavIconKind } from "./NavIcon";
 const items: Array<{ to: string; label: string; kind: NavIconKind }> = [
   { to: "/", label: "Dashboard", kind: "dashboard" },
   { to: "/scanner", label: "Strategy Scanner", kind: "search" },
-  { to: "/analyst", label: "AI Analyst", kind: "analyst" },
+  { to: "/deep-ai", label: "Deep AI Analysis", kind: "analyst" },
+  { to: "/day-trader", label: "Day Trader AI", kind: "daytrader" },
   { to: "/calendar", label: "Income Calendar", kind: "discover" }
 ];
 

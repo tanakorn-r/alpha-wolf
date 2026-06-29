@@ -6,12 +6,14 @@
     "apps/*"
   ],
   "scripts": {
-    "dev": "npm run dev:api & npm run dev:web",
-    "build": "nx build web",
-    "dev:web": "nx serve web",
-    "dev:api": "cd apps/api && python3 -m uvicorn main:app --reload --env-file .env --host 127.0.0.1 --port 8000",
-    "dev:go-api": "cd apps/go-api && go run .",
-    "format": "nx format:write"
+    "dev": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx run-many --target=serve --projects=api,web --parallel=2",
+    "build": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx run-many --target=build --projects=api,web --parallel=2",
+    "dev:web": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve web",
+    "dev:api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve api",
+    "dev:go-api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve go-api",
+    "build:web": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build web",
+    "build:api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build api",
+    "format": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx format:write"
   },
   "devDependencies": {
     "@nx/react": "^19.6.4",

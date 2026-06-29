@@ -395,6 +395,15 @@ export async function loadStockResearch(symbol: string): Promise<StockResearchRe
   return (await response.json()) as StockResearchResponse;
 }
 
+export type UpwardMove = { date: string; movePct: number; confidence: number };
+export type UpwardMovesResponse = { symbol: string; timeframe: "1D" | "1W"; moves: UpwardMove[]; sampleSize: number; averageMovePct: number };
+
+export async function loadUpwardMoves(symbol: string, timeframe: "1D" | "1W"): Promise<UpwardMovesResponse> {
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/upward-moves?timeframe=${timeframe}`);
+  if (!response.ok) throw new Error(`Failed to load upward moves: ${response.status}`);
+  return (await response.json()) as UpwardMovesResponse;
+}
+
 export async function loadMarketSnapshot(market: string): Promise<MarketSnapshot> {
   const response = await fetch(`${API_BASE}/market/${encodeURIComponent(market)}`);
   if (!response.ok) throw new Error(`Failed to load market: ${response.status}`);
@@ -414,6 +423,35 @@ export async function loadMarketComparison(symbol: string): Promise<MarketCompar
   const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/market-comparison`);
   if (!response.ok) throw new Error(`Failed to load market comparison: ${response.status}`);
   return (await response.json()) as MarketComparisonResponse;
+}
+
+const GO_API_BASE = "/api/v1";
+
+export type DeepAnalysisResponse = {
+  symbol: string;
+  name: string;
+  currency: string;
+  price: number;
+  changePercent: number;
+  signal: string;
+  color: string;
+  chart: Array<{ date: string; close: number }>;
+  entry: number;
+  stop: number;
+  target: number;
+  riskReward: number;
+  buyZoneLow: number;
+  buyZoneHigh: number;
+  action: string;
+  bullets: string[];
+  when: string;
+  generatedAt: string;
+};
+
+export async function loadDeepAnalysis(symbol: string): Promise<DeepAnalysisResponse> {
+  const response = await fetch(`${GO_API_BASE}/stocks/${encodeURIComponent(symbol)}/deep`);
+  if (!response.ok) throw new Error(`Failed to load deep analysis: ${response.status}`);
+  return (await response.json()) as DeepAnalysisResponse;
 }
 
 export async function summarizeStock(symbol: string, strategy?: string): Promise<StockAnalysisResponse> {

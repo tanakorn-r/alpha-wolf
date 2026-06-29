@@ -1,0 +1,21 @@
+{
+  "name": "go-api",
+  "projectType": "application",
+  "sourceRoot": "apps/go-api",
+  "targets": {
+    "serve": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/go-api",
+        "command": "env GOCACHE=/Users/dino/Documents/alpha-wolf/.cache/go-build go run ."
+      }
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/go-api",
+        "command": "env GOCACHE=/Users/dino/Documents/alpha-wolf/.cache/go-build go build ./..."
+      }
+    }
+  }
+}

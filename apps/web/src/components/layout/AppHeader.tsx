@@ -3,12 +3,14 @@ import { useLocation } from "react-router-dom";
 export function AppHeader() {
   const location = useLocation();
   const page = location.pathname === "/scanner"
-    ? { title: "Strategy Scanner", subtitle: "Track the market, rank the setup, and find the names worth stalking" }
-    : location.pathname === "/analyst"
-      ? { title: "AI Analyst", subtitle: "Ask Alpha Wolf for a real house view, not a recycled consensus" }
+    ? { title: "DCA Scanner", subtitle: "Search any stock, then tap for an AI buy / wait verdict" }
+    : location.pathname === "/deep-ai"
+      ? { title: "Deep AI Analysis", subtitle: "Daily signals, exact entry zones and position sizing — updated every morning" }
+    : location.pathname === "/day-trader"
+      ? { title: "Day Trader AI", subtitle: "Live chart · AI signals · exact entry, stop and target" }
     : location.pathname === "/calendar"
-      ? { title: "Income Calendar", subtitle: "Track ex-dates, payment dates, and the income rhythm across your book" }
-      : { title: "Strategy Dashboard", subtitle: "Your money, your open plans, and the market context in one wolf view" };
+      ? { title: "Income Calendar", subtitle: "When your dividend money actually lands" }
+      : { title: "Strategy Dashboard", subtitle: "Everything happening with your money, in one view" };
 
   return (
     <header className="aw-header sticky top-0 z-10 flex items-end justify-between gap-4 border-b border-[#2a2a31] px-7 pb-[18px] pt-[22px]">

@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials, get_market_comparison
+from internal.market.patterns import upward_moves
 from internal.market.scoring import StrategyKey
 from models import MarketComparison
 
@@ -44,3 +45,12 @@ def details_market_comparison(symbol: str) -> MarketComparison:
     if not comparison:
         raise HTTPException(status_code=503, detail=f"Market comparison for {symbol.upper()} is unavailable")
     return MarketComparison.model_validate(comparison)
+
+
+@router.get("/api/details/{symbol}/upward-moves")
+def details_upward_moves(symbol: str, timeframe: str = Query("1D", pattern="^(1D|1W)$")) -> dict[str, Any]:
+    normalized = symbol.upper()
+    result = upward_moves(normalized, timeframe)  # type: ignore[arg-type]
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Not enough history for {normalized}")
+    return result
