@@ -4,15 +4,18 @@
   "sourceRoot": "apps/web/src",
   "targets": {
     "serve": {
-      "executor": "@nx/vite:dev-server",
+      "executor": "nx:run-commands",
       "options": {
-        "buildTarget": "web:build"
+        "command": "vite --host 127.0.0.1 --port 4200",
+        "cwd": "apps/web"
       }
     },
     "build": {
-      "executor": "@nx/vite:build",
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/apps/web"],
       "options": {
-        "outputPath": "dist/apps/web"
+        "command": "vite build --outDir ../../dist/apps/web --emptyOutDir",
+        "cwd": "apps/web"
       }
     }
   }

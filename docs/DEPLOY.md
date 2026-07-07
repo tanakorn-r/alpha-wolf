@@ -35,6 +35,7 @@ Cloudflare should build the frontend from git after each commit/push.
 Use these Pages settings:
 
 ```txt
+Framework preset: None
 Build command: npm run build:web:static
 Build output directory: dist/apps/web
 Root directory: /
