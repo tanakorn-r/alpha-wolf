@@ -32,6 +32,8 @@ Cloud Run env vars are built from `.env.production`. Do not commit that file.
 
 Cloudflare should build the frontend from git after each commit/push.
 
+Do not use Wrangler for the frontend deploy. This repo is an Nx workspace, and Wrangler's app detection can fail when it scans the workspace root.
+
 Use these Pages settings:
 
 ```txt
