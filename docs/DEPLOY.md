@@ -8,21 +8,25 @@ Install CLIs and authenticate:
 
 ```sh
 gcloud auth login
-gcloud auth configure-docker asia-southeast1-docker.pkg.dev
+gcloud auth configure-docker asia-southeast3-docker.pkg.dev
 ```
 
 Set deploy variables:
 
 ```sh
-export GCP_PROJECT_ID="alpha-wolf-501716"
-export GCP_REGION="asia-southeast1"
+export GCP_PROJECT="alpha-wolf-501716"
+export GCP_REGION="asia-southeast3"
 export CLOUD_RUN_SERVICE="alpha-wolf-api"
-export ARTIFACT_REPOSITORY="alpha-wolf"
-export LIBSQL_DATABASE_URL="libsql://alpha-wolf-marjod.aws-ap-northeast-1.turso.io"
-export LIBSQL_AUTH_TOKEN="your-turso-auth-token"
+export ARTIFACT_REPOSITORY="alpha-wolf-repo"
 ```
 
-Cloud Run secrets such as `OPENAI_API_KEY` and `LIBSQL_AUTH_TOKEN` should be configured in GCP or exported locally for deploy. Do not commit them.
+Create `.env.production` from the example and fill the real secrets:
+
+```sh
+cp .env.production.example .env.production
+```
+
+Cloud Run env vars are built from `.env.production`. Do not commit that file.
 
 ## Cloudflare Pages
 
@@ -47,12 +51,13 @@ The frontend build uses plain Vite (`npm run build:web:static`) so Cloudflare do
 ## Backend Deploy
 
 ```sh
-./scripts/deploy-all.sh
+./scripts/deploy.sh
 ```
 
-Or:
+Compatibility aliases:
 
 ```sh
+./scripts/deploy-all.sh
 ./scripts/deploy-backend-cloudrun.sh
 ```
 

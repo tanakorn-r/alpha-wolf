@@ -16,6 +16,7 @@ venv/
 .cache/
 .vite/
 .env
+.env.production
 apps/api/.env
 apps/go-api/*.exe
 /go-api

@@ -9,4 +9,4 @@ if [[ "${ALLOW_DIRTY:-0}" != "1" ]] && [[ -n "$(git status --porcelain)" ]]; the
   exit 1
 fi
 
-./scripts/deploy-backend-cloudrun.sh
+./scripts/deploy.sh
