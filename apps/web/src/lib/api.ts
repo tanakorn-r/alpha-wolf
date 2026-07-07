@@ -1,6 +1,6 @@
 import type { StockRecord } from "../data/market";
 
-const API_BASE = "/api";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export type MarketCatalogStatus = {
   source: string;
@@ -113,11 +113,15 @@ export type StockDetailResponse = {
     leaderScore?: number;
   };
   verdict?: {
-    action?: "BUY" | "WAIT" | "PASS";
+    action?: "BUY" | "BUY SETUP" | "WATCH" | "WAIT" | "PASS";
     headline?: string;
     analyst?: string;
     confidence?: string;
     score?: number;
+    setup?: "breakout" | "swing" | "reversal";
+    setupLabel?: string;
+    strategyScore?: number;
+    setupScore?: number;
   };
   outlook?: {
     summary?: string;
@@ -199,6 +203,30 @@ export type StockAnalysisResponse = {
   scores: StockAnalysisScore[];
   bullets: string[];
   dcaTiming?: string;
+  source?: "openai";
+  model?: string;
+};
+
+export type StrategyPick = {
+  ticker: string;
+  name: string;
+  action: string;
+  tone: "good" | "warn" | "bad";
+  subtitle: string;
+  reason: string;
+  entry?: number | null;
+  target?: number | null;
+  stop?: number | null;
+  riskReward?: string | null;
+  upsidePct?: number | null;
+  conviction: number;
+};
+
+export type StrategyPlaybookResponse = {
+  strategy: string;
+  headline: string;
+  marketRead: string;
+  picks: StrategyPick[];
   source?: "openai";
   model?: string;
 };
@@ -379,8 +407,39 @@ export type IndustryInsightResponse = {
   topGrowthCompanies?: Array<Record<string, unknown>>;
 };
 
-export async function loadStockDetail(symbol: string, strategy?: string): Promise<StockDetailResponse> {
-  const query = strategy ? `?strategy=${encodeURIComponent(strategy)}` : "";
+export type LiveTradePreset = "overbought" | "oversold" | "active" | "turning";
+
+export type LiveTradeRow = {
+  symbol: string;
+  name: string;
+  price?: number | null;
+  changePct?: number | null;
+  volume?: number | null;
+  relativeVolume?: number | null;
+  rsi?: number | null;
+  rsi5?: number | null;
+  signal: string;
+};
+
+export type LiveTradeScreenerResponse = {
+  preset: LiveTradePreset;
+  source: string;
+  warning?: string;
+  rows: LiveTradeRow[];
+};
+
+export type LiveTradeQuoteResponse = {
+  symbol: string;
+  source: string;
+  warning?: string;
+  row: LiveTradeRow | null;
+};
+
+export async function loadStockDetail(symbol: string, strategy?: string, mode?: string): Promise<StockDetailResponse> {
+  const params = new URLSearchParams();
+  if (strategy) params.set("strategy", strategy);
+  if (mode) params.set("mode", mode);
+  const query = params.toString() ? `?${params}` : "";
   const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}${query}`);
   if (!response.ok) {
     throw new Error(`Failed to load stock detail: ${response.status}`);
@@ -395,12 +454,55 @@ export async function loadStockResearch(symbol: string): Promise<StockResearchRe
   return (await response.json()) as StockResearchResponse;
 }
 
-export type UpwardMove = { date: string; movePct: number; confidence: number };
-export type UpwardMovesResponse = { symbol: string; timeframe: "1D" | "1W"; moves: UpwardMove[]; sampleSize: number; averageMovePct: number };
+export type UpwardMove = {
+  date: string;
+  movePct: number;
+  direction?: "UP" | "DOWN" | "FLAT";
+  phase?: "impulse" | "pullback" | "base" | "breakout" | "rejection" | "retest" | "continuation" | "mean_reversion" | "distribution" | "accumulation";
+  confidence: number;
+  reason?: string;
+};
+
+export type HistoricalMove = {
+  date: string;
+  fromPrice?: number | null;
+  toPrice?: number | null;
+  movePct: number;
+  direction: "UP" | "DOWN" | "FLAT";
+  confidence: number;
+  reason?: string | null;
+};
+
+export type UpwardMovesResponse = {
+  symbol: string;
+  timeframe: "1D" | "1W";
+  currentPrice: number;
+  pathBias?: "BULLISH_CONTINUATION" | "PULLBACK_THEN_BOUNCE" | "RESISTANCE_REJECTION" | "SIDEWAYS_COMPRESSION" | "BREAKDOWN_RISK" | "VOLATILE_RANGE";
+  directionChanges?: number;
+  headline?: string;
+  thesis?: string;
+  risk?: string;
+  history?: Array<{ date: string; close: number }>;
+  historicalMoves?: HistoricalMove[];
+  moves: UpwardMove[];
+  sampleSize: number;
+  averageMovePct: number;
+  source?: "openai";
+  model?: string;
+};
 
 export async function loadUpwardMoves(symbol: string, timeframe: "1D" | "1W"): Promise<UpwardMovesResponse> {
   const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/upward-moves?timeframe=${timeframe}`);
-  if (!response.ok) throw new Error(`Failed to load upward moves: ${response.status}`);
+  if (!response.ok) {
+    let detail = `Failed to load technical moves: ${response.status}`;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) detail = payload.detail;
+    } catch {
+      // Keep the HTTP status fallback when the backend does not return JSON.
+    }
+    throw new Error(detail);
+  }
   return (await response.json()) as UpwardMovesResponse;
 }
 
@@ -425,8 +527,6 @@ export async function loadMarketComparison(symbol: string): Promise<MarketCompar
   return (await response.json()) as MarketComparisonResponse;
 }
 
-const GO_API_BASE = "/api/v1";
-
 export type DeepAnalysisResponse = {
   symbol: string;
   name: string;
@@ -442,16 +542,98 @@ export type DeepAnalysisResponse = {
   riskReward: number;
   buyZoneLow: number;
   buyZoneHigh: number;
+  support?: number;
+  resistance?: number;
   action: string;
   bullets: string[];
   when: string;
   generatedAt: string;
 };
 
+export type BuyTimingResponse = {
+  symbol: string;
+  name: string;
+  currency: string;
+  price?: number | null;
+  headline: string;
+  summary: string;
+  action: "BUY" | "WAIT" | "TRIM" | "AVOID";
+  narrativeSource: "calculated" | "openai";
+  model?: string | null;
+  nextBuy: { start?: string | null; end?: string | null; opensInDays?: number | null; label?: string | null };
+  nextTrim: { start?: string | null; end?: string | null; opensInDays?: number | null; label?: string | null };
+  entryBand: {
+    low?: number | null;
+    high?: number | null;
+    entry?: number | null;
+    gapPct?: number | null;
+    upsideLeftPct?: number | null;
+    isAtOrBelowEntry?: boolean;
+  };
+  cycle: {
+    nextExDate?: string | null;
+    lastExDate?: string | null;
+    cycleDays?: number | null;
+    positionPct?: number | null;
+    daysToEx?: number | null;
+    isInferred: boolean;
+    confidence?: "measured" | "estimated_annual" | "none";
+  };
+  postExDipPattern: {
+    hasPattern: boolean;
+    sampleSize: number;
+    hitRate?: number | null;
+    averageDipPct?: number | null;
+    averageRandomDipPct?: number | null;
+  };
+  stats: {
+    cyclesTested: number;
+    cyclesHit: number;
+    avgPostExDipPct?: number | null;
+    fullRecoverySessions?: number | null;
+    edgeVsRandomBuyPct?: number | null;
+  };
+  priceContext?: {
+    years?: number | null;
+    samples?: number | null;
+    avgPrice?: number | null;
+    low?: number | null;
+    high?: number | null;
+    currentPct?: number | null;
+    vsAvgPct?: number | null;
+  } | null;
+  timeline?: {
+    start?: string | null;
+    end?: string | null;
+    todayPct?: number | null;
+    nextExPct?: number | null;
+    buyZone: { startPct?: number | null; endPct?: number | null; start?: string | null; end?: string | null; label?: string | null };
+    trimZone: { startPct?: number | null; endPct?: number | null; start?: string | null; end?: string | null; label?: string | null };
+  } | null;
+  seasonality: Array<{ month: string; returnPct: number }>;
+  cheapestMonth?: string | null;
+  peakMonth?: string | null;
+  events: Array<{ exDate: string; amount?: number | null; dipPct: number; recoverySessions?: number | null }>;
+  technicalContext?: {
+    signal?: string | null;
+    entry?: number | null;
+    target?: number | null;
+    stop?: number | null;
+    support?: number | null;
+    resistance?: number | null;
+  };
+};
+
 export async function loadDeepAnalysis(symbol: string): Promise<DeepAnalysisResponse> {
-  const response = await fetch(`${GO_API_BASE}/stocks/${encodeURIComponent(symbol)}/deep`);
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/deep`);
   if (!response.ok) throw new Error(`Failed to load deep analysis: ${response.status}`);
   return (await response.json()) as DeepAnalysisResponse;
+}
+
+export async function loadBuyTiming(symbol: string): Promise<BuyTimingResponse> {
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/buy-timing`);
+  if (!response.ok) throw new Error(`Failed to load buy timing: ${response.status}`);
+  return (await response.json()) as BuyTimingResponse;
 }
 
 export async function summarizeStock(symbol: string, strategy?: string): Promise<StockAnalysisResponse> {
@@ -470,13 +652,13 @@ export async function summarizeStock(symbol: string, strategy?: string): Promise
   return (await response.json()) as StockAnalysisResponse;
 }
 
-export async function loadQuantPerspective(symbol: string, strategy?: string): Promise<QuantPerspectiveResponse> {
+export async function loadQuantPerspective(symbol: string, strategy?: string, mode?: string): Promise<QuantPerspectiveResponse> {
   const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/quant`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ strategy })
+    body: JSON.stringify({ strategy, mode })
   });
 
   if (!response.ok) {
@@ -502,6 +684,27 @@ export async function loadTodayPerformance(symbol: string, strategy?: string): P
   return (await response.json()) as TodayPerformanceResponse;
 }
 
+export async function loadStrategyPlaybook(params: { strategy: string; region?: "all" | "us" | "th"; limit?: number; candidateLimit?: number }): Promise<StrategyPlaybookResponse> {
+  const response = await fetch(`${API_BASE}/strategy/recommendations`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      strategy: params.strategy,
+      region: params.region ?? "all",
+      limit: params.limit ?? 5,
+      candidateLimit: params.candidateLimit ?? 40
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load strategy recommendations: ${response.status}`);
+  }
+
+  return (await response.json()) as StrategyPlaybookResponse;
+}
+
 export async function loadPortfolio(): Promise<PortfolioDashboard> {
   const response = await fetch(`${API_BASE}/portfolio`);
   if (!response.ok) throw new Error(`Failed to load portfolio: ${response.status}`);
@@ -518,14 +721,14 @@ export async function deleteHolding(symbol: string) {
   if (!response.ok) throw new Error(`Failed to delete holding: ${response.status}`);
 }
 
-export async function saveDcaOrder(value: { symbol: string; amount: number; scheduledFor: string; strategy: string }) {
+export async function saveDcaOrder(value: { symbol: string; amount: number; scheduledFor: string; strategy: string; shares?: number }) {
   const response = await fetch(`${API_BASE}/portfolio/dca-orders`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(`Failed to save DCA order: ${response.status}`);
   return (await response.json()) as DcaOrder;
 }
 
-export async function updateDcaOrderAmount(orderId: number, amount: number) {
-  const response = await fetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount }) });
+export async function updateDcaOrderAmount(orderId: number, amount: number, shares?: number) {
+  const response = await fetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount, shares }) });
   if (!response.ok) throw new Error(`Failed to update DCA order: ${response.status}`);
   return (await response.json()) as DcaOrder;
 }
@@ -569,6 +772,8 @@ export async function loadDiscoveries(params?: {
   q?: string;
   kind?: string;
   strategy?: string;
+  mode?: string;
+  sort?: string;
   region?: "all" | "us" | "th";
   page?: number;
   limit?: number;
@@ -581,6 +786,8 @@ export async function loadDiscoveries(params?: {
     query.set("kind", params.kind);
   }
   if (params?.strategy) query.set("strategy", params.strategy);
+  if (params?.mode) query.set("mode", params.mode);
+  if (params?.sort) query.set("sort", params.sort);
   if (params?.region) query.set("region", params.region);
   if (typeof params?.page === "number") query.set("page", String(params.page));
   if (typeof params?.limit === "number") {
@@ -609,4 +816,19 @@ export async function loadIndustryInsight(key: string): Promise<IndustryInsightR
     throw new Error(`Failed to load industry insight: ${response.status}`);
   }
   return (await response.json()) as IndustryInsightResponse;
+}
+
+export async function loadLiveTradeScreener(params?: { preset?: LiveTradePreset; limit?: number }): Promise<LiveTradeScreenerResponse> {
+  const query = new URLSearchParams();
+  if (params?.preset) query.set("preset", params.preset);
+  if (typeof params?.limit === "number") query.set("limit", String(params.limit));
+  const response = await fetch(`${API_BASE}/live-trade/screener${query.toString() ? `?${query}` : ""}`);
+  if (!response.ok) throw new Error(`Failed to load live trade screener: ${response.status}`);
+  return (await response.json()) as LiveTradeScreenerResponse;
+}
+
+export async function loadLiveTradeQuote(symbol: string): Promise<LiveTradeQuoteResponse> {
+  const response = await fetch(`${API_BASE}/live-trade/quote?symbol=${encodeURIComponent(symbol)}`);
+  if (!response.ok) throw new Error(`Failed to load live trade quote: ${response.status}`);
+  return (await response.json()) as LiveTradeQuoteResponse;
 }

@@ -1,6 +1,9 @@
 fastapi
 uvicorn[standard]
 yfinance
+requests
 pandas
 certifi
 python-dotenv
+tradingview-screener
+libsql-client

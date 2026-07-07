@@ -1,14 +1,24 @@
 import { create } from "zustand";
 import type { StockRecord, StrategyKey } from "../data/market";
+import type { UpwardMovesResponse } from "../lib/api";
 
 const RESERVE_STORAGE_KEY = "aw_cash_reserve";
 const PREMIUM_STORAGE_KEY = "aw_premium";
 const DEEP_EXTRAS_STORAGE_KEY = "aw_deep_extras";
 const N100_QUOTA_STORAGE_KEY = "aw_n100_quota_used";
+const N100_REPORT_CACHE_STORAGE_KEY = "aw_n100_report_cache";
 export const N100_QUOTA_LIMIT = 100;
+
+export type Next10ReportCacheEntry = {
+  analyzedAt: string;
+  data: UpwardMovesResponse;
+};
+
+export type DetailMode = "swing" | "day" | "long" | "value" | "fomo";
 
 type WolfState = {
   selectedStrategy: StrategyKey;
+  selectedMode: DetailMode | null;
   selectedSymbol: string;
   detailOpen: boolean;
   deepSymbol: string;
@@ -21,9 +31,11 @@ type WolfState = {
   premium: boolean;
   deepExtras: string[];
   n100QuotaUsed: number;
+  next10ReportCache: Record<string, Next10ReportCacheEntry>;
   setStrategy: (strategy: StrategyKey) => void;
+  setSelectedMode: (mode: DetailMode | null) => void;
   setSelectedSymbol: (symbol: string) => void;
-  openDetail: (symbol: string) => void;
+  openDetail: (symbol: string, mode?: DetailMode | null) => void;
   closeDetail: () => void;
   setDetailOpen: (open: boolean) => void;
   openDeepAnalysis: (symbol: string) => void;
@@ -37,6 +49,8 @@ type WolfState = {
   addDeepExtra: (symbol: string) => void;
   removeDeepExtra: (symbol: string) => void;
   useN100Quota: () => void;
+  setNext10ReportCache: (key: string, entry: Next10ReportCacheEntry) => void;
+  getNext10ReportCache: (key: string) => Next10ReportCacheEntry | undefined;
 };
 
 function loadReserve(): number {
@@ -78,8 +92,24 @@ function persistN100Quota(value: number) {
   if (typeof window !== "undefined") window.localStorage.setItem(N100_QUOTA_STORAGE_KEY, String(value));
 }
 
+function loadNext10ReportCache(): Record<string, Next10ReportCacheEntry> {
+  const raw = typeof window !== "undefined" ? window.localStorage.getItem(N100_REPORT_CACHE_STORAGE_KEY) : null;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, Next10ReportCacheEntry> : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistNext10ReportCache(value: Record<string, Next10ReportCacheEntry>) {
+  if (typeof window !== "undefined") window.localStorage.setItem(N100_REPORT_CACHE_STORAGE_KEY, JSON.stringify(value));
+}
+
 export const useWolfStore = create<WolfState>((set, get) => ({
   selectedStrategy: "stable_dca",
+  selectedMode: null,
   selectedSymbol: "",
   detailOpen: false,
   deepSymbol: "",
@@ -92,9 +122,11 @@ export const useWolfStore = create<WolfState>((set, get) => ({
   premium: loadPremium(),
   deepExtras: loadDeepExtras(),
   n100QuotaUsed: loadN100Quota(),
+  next10ReportCache: loadNext10ReportCache(),
   setStrategy: (selectedStrategy) => set({ selectedStrategy }),
+  setSelectedMode: (selectedMode) => set({ selectedMode }),
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
-  openDetail: (selectedSymbol) => set({ selectedSymbol, detailOpen: true }),
+  openDetail: (selectedSymbol, selectedMode) => set({ selectedSymbol, detailOpen: true, ...(selectedMode !== undefined ? { selectedMode } : {}) }),
   closeDetail: () => set({ detailOpen: false }),
   setDetailOpen: (detailOpen) => set({ detailOpen }),
   openDeepAnalysis: (deepSymbol) => set({ deepSymbol, deepOpen: true }),
@@ -130,5 +162,11 @@ export const useWolfStore = create<WolfState>((set, get) => ({
     const next = Math.min(N100_QUOTA_LIMIT, get().n100QuotaUsed + 1);
     persistN100Quota(next);
     set({ n100QuotaUsed: next });
-  }
+  },
+  setNext10ReportCache: (key, entry) => {
+    const next = { ...get().next10ReportCache, [key]: entry };
+    persistNext10ReportCache(next);
+    set({ next10ReportCache: next });
+  },
+  getNext10ReportCache: (key) => get().next10ReportCache[key]
 }));

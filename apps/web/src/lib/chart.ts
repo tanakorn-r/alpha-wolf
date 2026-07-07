@@ -11,3 +11,18 @@ export function buildChartPath(values: number[]) {
     })
     .join(" ");
 }
+
+export function paddedDomain(values: Array<number | null | undefined>, paddingRatio = 0.16): [number, number] {
+  const clean = values.filter((value): value is number => Number.isFinite(value));
+  if (!clean.length) return [0, 1];
+
+  const min = Math.min(...clean);
+  const max = Math.max(...clean);
+  const center = (min + max) / 2;
+  const naturalRange = max - min;
+  const fallbackRange = Math.max(Math.abs(center) * 0.035, 1);
+  const range = naturalRange > 0 ? naturalRange : fallbackRange;
+  const padding = range * paddingRatio;
+
+  return [min - padding, max + padding];
+}

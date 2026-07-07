@@ -10,6 +10,9 @@ export function formatMoney(value?: number) {
 const FX_RATES = { USD: 1, THB: 36.5 } as const;
 const CURRENCY_SYMBOL = { USD: "$", THB: "฿" } as const;
 
+/** THB per 1 USD — the app stores money in USD base and displays THB by default. */
+export const THB_PER_USD = FX_RATES.THB;
+
 /** value is always in USD; converts and formats for the selected display currency. */
 export function formatMoneyAs(value: number | undefined, currency: "USD" | "THB") {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
@@ -18,9 +21,14 @@ export function formatMoneyAs(value: number | undefined, currency: "USD" | "THB"
   return `${sign}${CURRENCY_SYMBOL[currency]}${Math.abs(Math.round(converted)).toLocaleString("en-US")}`;
 }
 
-/** Primary figure in USD (the site's base currency) plus a THB equivalent for reference. */
+/** value is always in USD base; formats it as the app's default display currency (THB). */
+export function formatMoneyBaht(value?: number) {
+  return formatMoneyAs(value, "THB");
+}
+
+/** Primary figure in THB (the site's default display currency) plus a USD equivalent for reference. */
 export function formatMoneyDual(value?: number) {
-  return { primary: formatMoneyAs(value, "USD"), secondary: formatMoneyAs(value, "THB") };
+  return { primary: formatMoneyAs(value, "THB"), secondary: formatMoneyAs(value, "USD") };
 }
 
 export function formatCurrency(value?: number, currency = "USD") {

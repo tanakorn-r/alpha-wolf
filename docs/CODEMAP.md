@@ -1,0 +1,75 @@
+# CODEMAP — read this instead of scanning the tree
+
+Token-lean directory + pattern map. If a path here is missing on disk, trust
+disk and fix this file. Update the map whenever files are added/moved/deleted.
+
+## Monorepo layout
+
+```
+apps/web   React 19 + Vite + Tailwind v4 + TanStack Query + Zustand (port 4201 via nx)
+apps/api   FastAPI + yfinance (port 8000), proxied at /api from the web dev server
+apps/go-api  Gin POC — NOT on live path, ignore unless asked
+```
+
+Dev servers: `.claude/launch.json` (names: `web`, `api`).
+Checks: `cd apps/web && npx tsc --noEmit && npx vite build`.
+
+## Frontend pattern (THE practice — follow it, don't invent)
+
+Every page = thin composition (<60 lines), zero raw-HTML logic:
+
+```tsx
+export function FooPage() {
+  const foo = useFoo();                 // ALL state/queries/handlers live here
+  return <section><FooBar foo={foo} /><FooTab foo={foo} /></section>;
+}
+```
+
+- State hook: `features/<name>/use<Name>.ts` — returns **grouped objects**
+  (`hunt.watchlist.symbols`, `hunt.strategy.run(mode)`). Components never call
+  useQuery/useState for business state; they receive the one grouped prop.
+- Presentational components: `features/<name>/*.tsx`, single prop
+  `{ hunt: HuntAi }` style. Private sub-components stay unexported in the same file.
+- Pure helpers/constants: `features/<name>/lib.ts`.
+- Shared atoms only in `components/ui/` — don't re-create panels/pills/icons.
+
+## apps/web/src — where things live
+
+| Path | What's inside |
+|---|---|
+| `App.tsx` | Route table. `/` `/daily-brief` `/scanner` `/calendar` `/hunt-ai` (+ redirects `/deep-ai`,`/day-trader`,`/discover`) |
+| `pages/` | Thin pages only: Dashboard, DailyBrief, StockHunt(=/scanner), DividendHunt(=/calendar), HuntAi |
+| `features/daily-brief/` | `useDailyBrief.ts` + DailyBriefView: portfolio movers, open DCA, and holding dividend deadlines |
+| `features/dashboard/` | `useDashboard.ts`, `usePlanCard.ts` + StatsRow, HoldingsTable, PlanCard, SellModal, ChartsRow, AiAdvisor, EmptyPortfolio… |
+| `features/stock-hunt/` | `useStockHunt.ts` + HuntFilters, MatchList/MatchCard, RankBanner, Top5Panel |
+| `features/dividend-hunt/` | `useDividendHunt.ts`, `calendarModel.ts` + CalendarCard, CalendarSide |
+| `features/hunt-ai/` | `useHuntAi.ts` (grouped: watchlist/signals/timing/intraday/next100/strategy/analyst), `lib.ts`, `ui.tsx` (panel const, PremiumLoading…), ChartTooltip + HuntHero, WatchlistBar, HuntTabsBar, SignalsTab(Daily Signals), BuyTimingTab, IntradayTab, Next100Tab(Next 10), Next100Result, StrategyTab, AnalystTab, AnalystPanels |
+| `features/stock-detail/` | `StockDetailDrawer.tsx` (975-line monolith — refactor pending, same pattern) |
+| `components/ui/` | Shared atoms: `panels.tsx` (LoadingPanel/LoadingStrip/EmptyPanel/RetryPanel/ErrorBanner/ErrorCard), `Badge.tsx` (Badge/SignalChip/TagPill), `PillTabs.tsx`, `icons.tsx` (Spark/Search/ArrowUp), `Modal.tsx` |
+| `components/` | Cross-feature: DeepAnalysisPanel, AiVerdictCard, PremiumAiButton, Money, Sparkline, LoadingSpinner, `charts/`, `layout/` (AppLayout/Sidebar/Header) |
+| `lib/api.ts` | ALL backend calls + response types (loadPortfolio, loadStockDetail, loadDeepAnalysis, loadUpwardMoves, summarizeStock, loadStrategyPlaybook, loadDiscoveries…) |
+| `lib/` | `format.ts` (formatCurrency/Percent), `chart.ts` (paddedDomain), `cn.ts`, `symbolColor.ts` |
+| `store/useWolfStore.ts` | Zustand + localStorage: holdings UI state, deepExtras watchlist, premium flag, n100 quota + report cache, openDetail drawer |
+| `data/market.ts` | StockRecord/StrategyKey types, strategy descriptions |
+| `theme.ts`, `styles.css` | Dark Cadence theme; `aw-rainbow-*` classes in styles.css |
+
+## apps/api — where things live
+
+| Path | What's inside |
+|---|---|
+| `main.py` / `routes/router.py` | App entry / route registration |
+| `routes/` | One file per endpoint group: portfolio, details (incl. `/deep`, `/buy-timing`, `/upward-moves`), discover, analysis (AI), calendar, dashboard, market, quote, presets… |
+| `models.py` | Pydantic response models (mirror `lib/api.ts` types) |
+| `internal/market/` | Business logic: detail.py, deep.py (rule-based deep read), buy_timing.py (dividend-cycle timing), patterns.py (upward-moves), discovery, portfolio, scoring, technicals, universe, calendar |
+| `internal/ai/` | openai_client.py, heuristics.py, context.py |
+| `internal/store/` | SQLite/db, cache, portfolio persistence |
+| `internal/yahoo/client.py` | yfinance wrapper (per-ticker quotes, history, news) |
+| `internal/news/kaohoon.py` | Kaohoon International SET feed (WordPress REST); `market_news()` cached, merged into `.BK` detail news by `detail.py::merge_thai_market_news` |
+
+## Conventions that save tokens
+
+- Money: `formatCurrency(value, currency)` — THB uses ฿. USD primary, THB secondary.
+- Colors: green `#3ecf8e`, red `#f2575c`, amber `#f5c451`, blue `#74a4ff`, purple `#c77dff`; panel = `rounded-xl border border-[#2a2a31] bg-[#161619]`.
+- No mock data anywhere — empty/error states instead.
+- AI endpoints run only on explicit user action (button), never on mount.
+- Premium gating is a local `premium` flag in the store; no billing.

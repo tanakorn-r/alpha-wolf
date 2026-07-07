@@ -11,10 +11,10 @@ import certifi
 from pydantic import ValidationError
 
 from internal.store.utils import parse_json_fragment
-from models import QuantPerspective, StockAnalysis, TodayPerformanceResponse
+from models import BuyTimingNarrative, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformanceResponse
 
 OPENAI_TIMEOUT_SECONDS = 45
-DEFAULT_OPENAI_MODEL = "gpt-5.4-mini"
+DEFAULT_OPENAI_MODEL = "gpt-5.5"
 EXPECTED_SCORE_LABELS = ["Value", "Financial health", "Dividend safety", "Growth", "Timing"]
 
 
@@ -40,11 +40,12 @@ def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def analyze_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+    strategy = str(context.get("selectedStrategy") or "").strip().lower()
     result = _run_openai_structured_request(
         context=context,
         schema_model=StockAnalysis,
         schema_name="stock_analysis",
-        instructions=_analysis_instructions(),
+        instructions=_analysis_instructions_for_strategy(strategy),
         max_output_tokens=2500,
     )
     if [score.label for score in result.scores] != EXPECTED_SCORE_LABELS:
@@ -62,8 +63,26 @@ def analyze_quant_with_openai(context: dict[str, Any]) -> dict[str, Any]:
         instructions=_quant_instructions(),
         max_output_tokens=2200,
     )
+    result = _calibrate_quant_result(context, result)
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     return {**result.model_dump(), "source": "openai", "model": model}
+
+
+def _calibrate_quant_result(context: dict[str, Any], result: QuantPerspective) -> QuantPerspective:
+    scorecard = context.get("quantScorecard") or {}
+    anchor = scorecard.get("score")
+    if not isinstance(anchor, int | float):
+        return result
+    anchor_score = max(1, min(100, int(round(anchor))))
+    if abs(result.buyScore - anchor_score) <= 8:
+        return result
+
+    adjusted = result.model_copy(update={"buyScore": anchor_score})
+    if anchor_score >= 75 and adjusted.tone == "bad":
+        adjusted = adjusted.model_copy(update={"tone": "good" if adjusted.investability == "FAVORABLE" else "warn"})
+    if anchor_score <= 40 and adjusted.tone == "good":
+        adjusted = adjusted.model_copy(update={"tone": "bad" if adjusted.investability == "AVOID" else "warn"})
+    return adjusted
 
 
 def analyze_today_with_openai(context: dict[str, Any]) -> dict[str, Any]:
@@ -78,6 +97,55 @@ def analyze_today_with_openai(context: dict[str, Any]) -> dict[str, Any]:
     return {**result.model_dump(), "source": "openai", "model": model}
 
 
+def analyze_buy_timing_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+    result = _run_openai_structured_request(
+        context=context,
+        schema_model=BuyTimingNarrative,
+        schema_name="buy_timing_narrative",
+        instructions=_buy_timing_instructions(),
+        max_output_tokens=900,
+    )
+    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
+    return {**result.model_dump(), "source": "openai", "model": model}
+
+
+def recommend_strategy_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+    result = _run_openai_structured_request(
+        context=context,
+        schema_model=StrategyPlaybook,
+        schema_name="strategy_playbook",
+        instructions=_strategy_recommendations_instructions(),
+        max_output_tokens=2400,
+    )
+    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
+    return {**result.model_dump(), "source": "openai", "model": model}
+
+
+def predict_technical_moves_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+    try:
+        result = _run_openai_structured_request(
+            context=context,
+            schema_model=TechnicalMovesPrediction,
+            schema_name="technical_moves_prediction",
+            instructions=_technical_moves_instructions(),
+            max_output_tokens=3600,
+            tools=[{"type": "web_search"}],
+        )
+    except OpenAIAnalysisError as exc:
+        if "HTTP 400" not in str(exc):
+            raise
+        result = _run_openai_structured_request(
+            context=context,
+            schema_model=TechnicalMovesPrediction,
+            schema_name="technical_moves_prediction",
+            instructions=_technical_moves_instructions(),
+            max_output_tokens=3600,
+            tools=[{"type": "web_search_preview"}],
+        )
+    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
+    return {**result.model_dump(), "source": "openai", "model": model}
+
+
 def _run_openai_structured_request(
     *,
     context: dict[str, Any],
@@ -85,6 +153,7 @@ def _run_openai_structured_request(
     schema_name: str,
     instructions: str,
     max_output_tokens: int,
+    tools: list[dict[str, Any]] | None = None,
 ) -> Any:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
@@ -105,6 +174,8 @@ def _run_openai_structured_request(
             }
         },
     }
+    if tools:
+        payload["tools"] = tools
     request = urllib_request.Request(
         "https://api.openai.com/v1/responses",
         data=json.dumps(payload).encode("utf-8"),
@@ -157,6 +228,33 @@ def extract_openai_text(payload: dict[str, Any]) -> str | None:
     return "\n".join(chunks) if chunks else None
 
 
+def _analysis_instructions_for_strategy(strategy: str) -> str:
+    if strategy == "momentum":
+        return _momentum_analysis_instructions()
+    return _analysis_instructions()
+
+
+def _buy_timing_instructions() -> str:
+    return """
+You write Alpha Wolf's Buy Timing call from supplied calculated market data only.
+Do not invent dates, dividend amounts, hit rates, prices, seasonality, or future events.
+If the supplied dividend history is thin or the next ex-dividend date is inferred, say that plainly.
+Use the calculated buyWindow, trimWindow, postExDipPattern, current cycle position, entry band,
+priceContext (5-year average price, 5-year low/high, and where today's price sits inside that
+range), and technical context to decide BUY, WAIT, TRIM, or AVOID.
+Judge cheap-vs-expensive against the 5-year priceContext, not just the short-term entry band: a
+stock whose price sits in the top of its 5-year range (high currentPct) is NOT cheap even if a
+3-month pullback occurred — prefer WAIT or TRIM there. Favor BUY when price is in the lower part
+of the 5-year range AND at the post-ex reversal dip.
+Never recommend BUY just because the stock is green or running up. BUY only when price is at or
+below the supplied entry zone with target upside remaining and it is not near its 5-year high, or
+when the post-ex dip (reversal) window is open and price has pulled back into the entry zone. If
+price is above entry or near the 5-year high, say WAIT.
+Return concise JSON only. The headline should sound like a direct trading instruction.
+The summary should explain why in 1-2 sentences with the key numbers supplied.
+"""
+
+
 def _analysis_instructions() -> str:
     return """
 You are Alpha Wolf's senior equity analyst. Analyze only the supplied live research data.
@@ -202,58 +300,114 @@ generic broker language. Every sentence should help the investor decide.
 """.strip()
 
 
+def _momentum_analysis_instructions() -> str:
+    return """
+[SYSTEM]
+You are Alpha Wolf's quantitative trading AI agent. Analyze only the supplied live research data.
+Your task is to return a structured, stock-specific trade setup for the selected Momentum strategy.
+Do not apply generic market rules. Interpret technicals, fundamentals, market context, news, and
+historical price behavior through this specific stock's behavior profile as inferred from the
+supplied context.
+
+[ASSET BEHAVIOR PROFILE]
+Infer the asset behavior profile from the supplied stock, business, performance, technicals,
+priceHistory, marketComparison, sectorAndIndustryResearch, dividendDipPattern, financialResearch,
+and recentNews fields.
+Use concrete evidence only. If a behavior profile detail is not supported by supplied data, say
+that it is not proven instead of inventing it.
+Profile dimensions to consider:
+- sector and nature: growth cyclicality, defensive income, commodity sensitivity, financial/bank,
+  ETF/index proxy, high-beta tech, or other evidence-backed profile
+- volatility and beta: normal trading range, volume behavior, drawdown behavior, benchmark-relative
+  movement, and whether RSI/overbought readings usually matter for this asset
+- asset-specific quirks: post-dividend dips, mean reversion near key moving averages, earnings/news
+  sensitivity, resistance behavior, support retests, or trend persistence
+- alternative-data sensitivity: sector, macro, regional, budget/policy, consumption, digital
+  transaction, rate, currency, or commodity sensitivity only when supplied context supports it
+
+[CURRENT MARKET DATA]
+Treat the supplied JSON input as the current market data:
+- current price and daily move from stock
+- technical indicators from technicals and priceHistory
+- fundamentals from business and financialResearch
+- catalysts/news from recentNews
+- market/sector backdrop from marketComparison and sectorAndIndustryResearch
+
+[INSTRUCTIONS]
+1. Cross-reference current market data against the inferred asset behavior profile.
+2. Decide whether the current setup aligns with how this specific stock historically generates
+   tradable momentum alpha.
+3. Calculate practical entryPrice, stop-loss implication, and targetPrice from the stock's normal
+   trading range, support/resistance, moving averages, volatility, recent volume, market backdrop,
+   and business risk. Do not copy Wall Street target blindly.
+4. Return a decisive but honest trade setup. Use BUY NOW, WAIT, PASS, or SELL/AVOID language in
+   signal. If the setup is not clean, prefer WAIT or PASS.
+5. Keep the answer high-signal and numerical. Avoid broker-style filler and generic lines like
+   "momentum is constructive" unless you tie it to exact price behavior and risk.
+
+[OUTPUT CONTRACT]
+Return strictly valid JSON matching the StockAnalysis schema. Do not add extra keys.
+Map the trade setup into the existing schema as follows:
+- signal: one of BUY NOW, WAIT, PASS, or SELL / AVOID when possible
+- confidence: conviction_score from 0-100 for "should buy this now under Momentum?"
+- entryPrice.entryPrice: practical entry target
+- entryPrice.why: explain whether the entry is a pullback zone, breakout trigger, or current-price entry
+- targetPrice.targetPrice: take-profit / 12-month tactical target depending on evidence; basis must say which
+- targetPrice.basis: explain if target is a trade target, 12-month target, or cautious midpoint
+- scores: exactly this order: Value, Financial health, Dividend safety, Growth, Timing
+- summary: short reasoning_summary linking current data to the asset's unique profile
+- bullets: 2 to 4 specific trade checks with exact values when available
+- dcaTiming: if not relevant to momentum, say "Not a DCA timing call; this is a momentum trade setup."
+
+The investor must be able to answer: buy now, wait for exact price X, or pass.
+""".strip()
+
+
 def _quant_instructions() -> str:
     return """
-You are Alpha Wolf's quant trading analyst. Analyze only the supplied live research data.
-Do not invent missing facts, prices, indicators, ranks, or signals.
-This is a separate quant perspective, not a long-form valuation memo, but it still must be
-balanced. Do not behave like a pure chart reader.
-Start from market context and business risk, then refine the decision with technical timing.
-Sound like Alpha Wolf's tactical desk: direct, high-signal, and more useful than a generic
-TradingView recap.
-Focus on:
-- technical structure, momentum, volatility, moving-average alignment, support, resistance,
-  trend quality, benchmark-relative behavior, and entry timing quality
-- plus earnings quality, growth direction, dividend/event timing, sector strength, benchmark
-  behavior, and whether the business backdrop supports or weakens the setup
-Answer the practical question: is this investable right now, should the user wait,
-or should the user avoid it until the setup improves?
-Use investability values exactly: FAVORABLE, WATCH, or AVOID.
-Use signal language that sounds decisive but honest: for example Trend intact, Wait for pullback,
-Setup weak, Momentum improving, or Breakdown risk.
-If the chart looks good but the business, earnings trend, sector backdrop, or event risk looks
-fragile, say so clearly and downgrade the setup. If the business backdrop is solid but timing is
-poor, the answer should lean toward WAIT rather than overreacting to near-term momentum.
-Do not settle for generic insights like "momentum is constructive" unless you immediately explain
-what that changes for the actual trade location, risk, or timing.
-Lead with a hook, not a generic summary. The hook should feel like a sharp trading takeaway:
-for example "RSI is 65.6 and price is sitting at 92.75 just below 93.75 resistance. Momentum
-is constructive, but I would wait for either a breakout through 93.75 on volume or a pullback
-toward 88.4-89.0."
-You must return:
-- buyScore: an integer from 1 to 100 answering "how attractive is this to buy now?"
-100 means excellent buy timing with strong support from business, market, and technical context.
-50 means mixed or average.
-1 means clearly avoid for now.
-Do not anchor on the same number every time. Let the score move meaningfully with the actual setup.
-- hook: a punchy, short setup summary under 220 characters when possible. It must mention the
-current price and at least one concrete technical reference such as RSI, MACD, support,
-resistance, or moving averages. It should sound like a trader's takeaway, not a memo.
-- nextActionWindow: only use a specific timing phrase when the setup truly depends on it; do not
-default to "next 2-3 sessions". Use short phrases like "near-term", "this week", or "on breakout"
-when that is more accurate.
-- buyPlan: the concrete buy instruction, including price area or breakout condition. Use plain
-language for a beginner. Avoid jargon like "reclaim", "scale in", "risk tight", "fade", or
-"chase strength". Prefer wording like "buy only if price closes above X and volume is at least
-Y shares or Yx average" or "wait and buy closer to X-Y if price pulls back". Keep it under 35
-words when possible. When context includes average volume or volume ratio, use explicit numbers
-instead of saying only "stronger volume".
-The checks array must contain 4 to 6 concrete items with exact values pulled from context
-when available, and each item must explain why it matters. At least one check should reflect
-business or financial context when the supplied data supports it, not only chart indicators.
-The tradingViewFocus list must tell the user exactly what to inspect next on the chart.
-Keep the result concise, tactical, and useful for a person deciding whether to deploy cash now.
-If there is no real edge, say so plainly instead of manufacturing excitement.
+You are Alpha Wolf's real-money investing agent. Analyze only the supplied live research data.
+Do not invent missing facts, prices, indicators, ranks, signals, or news.
+
+Use agentProfile only as the role and decision framework. The UI already supplies section titles;
+you write the actual wording naturally from the data. Do not copy template phrases from the
+prompt, the agent profile, or quantScorecard.
+
+Think privately like a professional investor:
+1. Classify the setup and decide whether it is actionable now.
+2. Judge entry quality, reward/risk, support/resistance, trend, volume, and volatility.
+   For Swing Trade, define a good setup as price near a low/support zone or just turning up
+   from it. An already-extended winner near resistance is FOMO/Momentum, not a Swing buy.
+3. Weigh fundamentals, valuation, dividends, earnings/growth, industry rank, market comparison,
+   sector/industry research, news, and event context.
+4. Decide whether this is BUY, WATCH, or AVOID for the selected strategy.
+
+Do not over-focus on RSI. Mention RSI only if it materially changes the decision, and pair it
+with other evidence. A useful answer should combine multiple evidence families when available:
+price action, volume, support/resistance, business quality, valuation/upside, income/catalysts,
+relative strength, sector/market context, and news.
+
+The input includes quantScorecard. Use it as numeric context, especially componentScores.swingEntry
+for momentum/swing mode, but do not copy its positives/negatives as prose. You may disagree with
+the scorecard if the full evidence supports it.
+
+Return strictly valid JSON matching the QuantPerspective schema:
+- signal: your original short desk call, not a template.
+- tone: good, warn, or bad.
+- buyScore: 1 to 100. Use the full range. For swing mode, 75+ requires a support/low-zone
+  turning-point entry, not merely a winning stock or hot breakout.
+- investability: FAVORABLE, WATCH, or AVOID.
+- hook: one natural, stock-specific takeaway under 220 characters when possible.
+- nextActionWindow: a concise timing phrase.
+- buyPlan: the exact practical entry/wait/pass instruction with numbers when justified.
+- summary: a concise thesis in your own words.
+- setup: setup classification plus whether it is actionable now.
+- trigger: the condition that would improve or invalidate the idea.
+- risk: the main investor risk.
+- checks: 4 to 6 mixed evidence checks. Do not make them all technical. Include fundamentals,
+  valuation/upside, income/catalyst, sector/market, or news when supplied data supports it.
+- tradingViewFocus: 2 to 4 concrete chart items to inspect next.
+
+Keep it concise, tactical, and specific. If there is no edge, say so plainly.
 """.strip()
 
 
@@ -279,4 +433,119 @@ Return:
 - risk: the main way today's move could be misleading
 Avoid generic lines like "momentum is constructive" unless you also say what changed in the setup.
 If today's move is just noise, say so clearly.
+""".strip()
+
+
+def _strategy_recommendations_instructions() -> str:
+    return """
+You are Alpha Wolf's strategy allocator. Select the best stocks for the user's supplied strategy
+using only the candidate list in the input JSON. Do not invent tickers, prices, company facts,
+news, or rankings outside the supplied candidates.
+
+The backend already pre-ranked a realistic candidate pool from Alpha Wolf's live stock universe.
+Your job is the final top-5 judgment: match the user's strategy intent to the available stocks,
+balance reward against risk, and explain the practical trade or investment case.
+
+Rules:
+- Return only tickers present in candidates.
+- Pick at most requestedLimit stocks. Prefer 5 when there are enough candidates.
+- Rank picks from strongest fit to weakest fit.
+- Use concise house-view language, not generic broker prose.
+- action should be a short command such as BUY SETUP, WATCH, WAIT, INCOME BUY, or PASS.
+- conviction is 0-100 and should reflect fit for this exact strategy, not general quality.
+- entry, target, stop, riskReward, and upsidePct may be null if the supplied candidate data does
+  not justify a number. Do not manufacture precision.
+- For momentum, day trade, swing, or FOMO strategies, prioritize trend, weekly move, change,
+  liquidity proxy, and timing quality.
+- For long-term, value, capital, DCA, dividend, or income strategies, prioritize business quality
+  proxy, market cap, lower volatility proxy, dividend yield, valuation/quality hints, and steadier
+  strategy scores.
+
+Return strictly valid JSON matching the StrategyPlaybook schema. Do not add extra keys.
+The headline should summarize the strategy result. marketRead should say what the candidate set
+currently favors and what risk would invalidate the top picks.
+""".strip()
+
+
+def _technical_moves_instructions() -> str:
+    return """
+You are Alpha Wolf's premium technical forecasting desk. This is the "Next 10 Moves" feature.
+Use the supplied yfinance research context first: price history, technical indicators, volume,
+support/resistance, moving averages, volatility, business context, market comparison, sector
+context, dividend/event timing, recent news, and historical move distribution.
+You may use web search to check fresh news, macro context, budget/policy issues, earnings
+updates, sector catalysts, and material company events. Do not invent facts. If a fresh fact is
+uncertain, keep it out of the numeric path and mention it only as risk.
+
+Predict the next 10 likely technical moves from the current price. These are not entry zones
+and not a forced bullish scenario. They can be up, down, or flat-ish. Think like a technical
+expert watching market structure: trend exhaustion, failed breakout, resistance rejection,
+support retest, volatility compression, momentum divergence, gap fill, mean reversion,
+continuation, distribution, accumulation, or Elliott-wave-style impulse/correction when the
+price structure genuinely supports that read.
+
+This must be a coherent scenario, not random swing noise.
+Before writing the 10 moves, choose exactly one pathBias:
+- BULLISH_CONTINUATION: trend extends with shallow pauses
+- PULLBACK_THEN_BOUNCE: price cools off first, then recovers
+- RESISTANCE_REJECTION: price fails near resistance and drifts lower
+- SIDEWAYS_COMPRESSION: price chops in a tight range while volatility compresses
+- BREAKDOWN_RISK: support fails and downside risk dominates
+- VOLATILE_RANGE: a true range-bound tape with wider two-sided moves
+
+Path discipline rules:
+- directionChanges must count sign changes across the 10 moves and must be 0 to 3.
+- Do not alternate up/down/up/down. That is noise, not a forecast.
+- Most paths should have at least 3 consecutive moves in the same direction before reversing.
+- Use more than 2 direction changes only when volatility, support/resistance distance, or
+  a fresh catalyst clearly supports a volatile range.
+- If the setup is unclear, return SIDEWAYS_COMPRESSION with small moves instead of a zig-zag.
+- Each move starts from the prior predicted price level. The path should visually make sense.
+- Do not over-smooth. If historicalMoveDistribution.volatilityRegime is active or violent,
+  size the forecast from recentAverageAbsMovePct and recentMaxAbsMovePct, not only the long-run
+  averageAbsMovePct. A recent hard-swing tape should not receive tiny +/-0.2% to +/-0.8% moves
+  unless the supplied technicals clearly show volatility compression.
+- In an active or violent regime, at least 4 of the 10 moves should usually be meaningful:
+  roughly 50%-125% of recentAverageAbsMovePct, with one larger retest/rejection move allowed
+  near recentMaxAbsMovePct when price is at support/resistance or after an exhaustion spike.
+- In a quiet regime, small moves are acceptable, but the thesis must explicitly say volatility
+  has compressed.
+- No single move should exceed about 1.25x recentMaxAbsMovePct unless fresh news, event risk,
+  or a break of major support/resistance clearly justifies it.
+- If price is near resistance, do not jump above it and immediately reverse unless the reason
+  explains failed breakout behavior. If price is near support, do not repeatedly break and
+  reclaim it without a clear retest/base phase.
+- If the last 10 historical moves show multiple >2% swings or one >4% swing, the forecast must
+  acknowledge that the stock is currently trading in a hard-swing regime and reflect that in
+  movePct magnitudes, confidence, headline, thesis, and risk.
+
+Return exactly 10 moves.
+Each move must include:
+- date: use "Move #1", "Move #2", ... through "Move #10".
+- movePct: the expected signed percentage move for that step. Positive means price rises;
+  negative means price falls. Keep it realistic for the selected timeframe and this stock's
+  current volatility regime. Do not make every move the same. Avoid timid broker-style paths
+  when recent history proves this ticker is swinging hard.
+- direction: UP, DOWN, or FLAT. It must match movePct: UP for clearly positive, DOWN for
+  clearly negative, FLAT for tiny consolidation moves near zero.
+- phase: one of impulse, pullback, base, breakout, rejection, retest, continuation,
+  mean_reversion, distribution, or accumulation. Use the phase to explain the scenario.
+- confidence: 1 to 100. Confidence should vary with setup quality, catalyst support, trend,
+  sector strength, technical clarity, and risk.
+- reason: one short technical read under 90 characters, such as "RSI fades near resistance",
+  "wave 3 extension risk", "support retest likely", or "MACD momentum rolls over".
+
+The path should compound from currentPrice on the client, so movePct must be the single-step
+expected move, not the cumulative gain.
+Use timeframe exactly as supplied: 1D means daily/swing opportunities; 1W means weekly
+opportunities.
+Use currentPrice exactly from the supplied context.
+sampleSize and averageMovePct should reflect the supplied historical move statistics.
+directionChanges must match the moves you return.
+headline must be a sharp one-line technical house view.
+thesis must summarize why this 10-step path is credible as one scenario, focused mostly on
+technical structure while acknowledging business, news, and market context only when they
+affect the setup.
+risk must state the main technical reason the path could fail in 1 sentence.
+Avoid hype and avoid buy/sell commands. This is a prediction map, not an order ticket.
 """.strip()

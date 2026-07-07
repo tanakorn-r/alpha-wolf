@@ -1,0 +1,104 @@
+import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { ArrowUpIcon } from "../../components/ui/icons";
+import { EmptyPanel, LoadingStrip, RetryPanel } from "../../components/ui/panels";
+import { N100_QUOTA_LIMIT } from "../../store/useWolfStore";
+import { realTimeframes, timeframes, type N100Timeframe } from "./lib";
+import { Next100Result } from "./Next100Result";
+import { PremiumLoading, panel } from "./ui";
+import type { HuntAi } from "./useHuntAi";
+
+export function Next100Tab({ hunt }: { hunt: HuntAi }) {
+  const n100 = hunt.next100;
+  if (!n100.ticker) return <EmptyPanel title="Pick a stock first" body="Next 10 uses the shared Hunt watchlist. Add a stock above to unlock the prediction controls." />;
+
+  if (!hunt.premium) {
+    return (
+      <div className="aw-rainbow-border rounded-2xl p-[2px]">
+        <div className="flex flex-col items-center gap-6 rounded-[14px] bg-[#0a0c0f] px-10 py-14 text-center">
+          <div className="relative flex h-[74px] w-[74px] items-center justify-center rounded-[20px] border border-[#c77dff]/30 bg-gradient-to-br from-[#3ecf8e]/10 to-[#c77dff]/10">
+            <ArrowUpIcon size={34} />
+            <span className="absolute -right-2 -top-2 grid h-[26px] w-[26px] place-items-center rounded-full border border-[#c77dff]/50 bg-[#0a0c0f] text-xs text-[#c77dff]">L</span>
+          </div>
+          <div>
+            <div className="aw-rainbow-text mb-3 text-[26px] font-bold tracking-[-0.02em]">Next 10 ↑</div>
+            <p className="mx-auto max-w-[480px] text-sm leading-[1.7] text-[#8c8c95]">Premium AI forecast for the next 10 technical moves. No mock prediction is shown until the feature is unlocked and the API returns real data.</p>
+          </div>
+          <PremiumAiButton label="Unlock Next 10 ↑" sublabel="Premium · from $29/mo" onClick={hunt.unlockPremium} size="wide" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2.5">
+        <div className={`${panel} flex items-center gap-1.5 rounded-[9px] px-3.5 py-2`}>
+          <span className="text-[11px] text-[#5a5a62]">Stock</span>
+          <span className="font-mono text-[13px] font-bold">{n100.ticker}</span>
+          <span className="text-[10px] text-[#5a5a62]">- pick from watchlist above</span>
+        </div>
+        <div className="flex gap-[3px] rounded-[9px] border border-[#2a2a31] bg-[#161619] p-[3px]">
+          {timeframes.map((tf) => {
+            const enabled = realTimeframes.has(tf);
+            const active = n100.timeframe === tf;
+            return (
+              <button
+                key={tf}
+                type="button"
+                disabled={!enabled}
+                title={enabled ? undefined : "Only 1D and 1W are backed by the current API"}
+                onClick={() => { if (enabled) n100.setTimeframe(tf as N100Timeframe); }}
+                className={`rounded-[7px] px-[11px] py-[7px] font-mono text-xs ${!enabled ? "cursor-not-allowed text-[#3a3a40]" : active ? "bg-[#1c1c20] text-[#ececee]" : "text-[#8c8c95] hover:text-[#ececee]"}`}
+              >
+                {tf}
+              </button>
+            );
+          })}
+        </div>
+        <QuotaPill used={n100.quotaUsed} />
+      </div>
+
+      {!n100.report?.data && !n100.fetching ? (
+        <div className="flex flex-col items-center gap-5 rounded-2xl border border-[#2a2a31] bg-gradient-to-b from-[#0f1116] to-[#0d0f12] px-10 py-[52px] text-center">
+          <div className="grid h-[54px] w-[54px] place-items-center rounded-[15px] border border-[#3ecf8e]/25 bg-[#3ecf8e]/10"><ArrowUpIcon size={26} /></div>
+          <div>
+            <div className="mb-2 text-lg font-bold">Ready · <span className="font-mono text-[#3ecf8e]">{n100.ticker}</span> · <span className="font-mono text-[#74a4ff]">{n100.timeframe}</span></div>
+            <div className="mx-auto max-w-[460px] text-[13.5px] leading-[1.7] text-[#8c8c95]">AI scans momentum, recent history and technical context, then maps the next 10 moves for this ticker/timeframe.</div>
+          </div>
+          <PremiumAiButton
+            label={n100.quotaLeft <= 0 ? "Monthly credits used up" : "Forecast Next 10 ↑"}
+            sublabel="Premium · cached forecast"
+            disabled={n100.quotaLeft <= 0}
+            onClick={n100.run}
+            size="wide"
+          />
+        </div>
+      ) : null}
+      {n100.fetching && !n100.report?.data ? <PremiumLoading title={`Forecasting ${n100.ticker}'s next 10 moves...`} /> : null}
+      {n100.fetching && n100.report?.data ? <LoadingStrip label={`Refreshing cached ${n100.ticker} forecast...`} /> : null}
+      {n100.error ? <RetryPanel label={n100.error} onRetry={n100.run} /> : null}
+      {n100.report?.data ? (
+        <Next100Result
+          report={n100.report.data}
+          timeframe={n100.timeframe}
+          onRerun={n100.run}
+          canRerun={n100.quotaLeft > 0 && !n100.fetching}
+          analyzedAt={n100.report.analyzedAt}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function QuotaPill({ used }: { used: number }) {
+  const pct = (used / N100_QUOTA_LIMIT) * 100;
+  return (
+    <div className="ml-auto flex items-center gap-2.5 rounded-lg border border-[#2a2a31] bg-[#161619] px-3 py-[7px] text-[11.5px] text-[#8c8c95]">
+      <span className="font-mono font-semibold" style={{ color: pct > 80 ? "#f2575c" : "#3ecf8e" }}>{used}</span>
+      <span>/ {N100_QUOTA_LIMIT} used</span>
+      <div className="h-1 w-[54px] overflow-hidden rounded-full bg-[#0e0e10]">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct > 80 ? "#f2575c" : "#3ecf8e" }} />
+      </div>
+    </div>
+  );
+}

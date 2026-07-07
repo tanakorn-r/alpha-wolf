@@ -8,6 +8,11 @@ from internal.yahoo.client import load_ticker_modules, ticker as make_ticker
 
 DETAIL_TTL_SECONDS = 180
 
+# A typed name that isn't a real ticker still hits yfinance, which may 404/raise or
+# resolve to a non-security (a fund/currency/index whose display name reads like a
+# person). Only real tradeable instruments are accepted; everything else → no match.
+_SUPPORTED_QUOTE_TYPES = {"EQUITY", "ETF", "MUTUALFUND", "MUTUAL_FUND"}
+
 
 def fetch_symbol_record(symbol: str) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
@@ -18,14 +23,24 @@ def fetch_symbol_record(symbol: str) -> dict[str, Any] | None:
     if cached is not None:
         return cached
 
-    ticker = make_ticker(normalized)
-    modules = load_ticker_modules(ticker, normalized)
-    info = merge_ticker_info(modules, normalized)
-    if not info:
+    try:
+        ticker = make_ticker(normalized)
+        modules = load_ticker_modules(ticker, normalized)
+        info = merge_ticker_info(modules, normalized)
+        if not info:
+            return None
+
+        quote_type = str(info.get("quoteType") or "").upper()
+        if quote_type and quote_type not in _SUPPORTED_QUOTE_TYPES:
+            return None
+
+        entry = build_entry_from_info(normalized, info)
+        record = fetch_record_from_ticker(entry, ticker=ticker, info=info)
+    except Exception:
+        # yfinance raises (KeyError/ValueError/HTTP) for unknown or delisted symbols;
+        # a search miss must degrade to "no result", never a 500.
         return None
 
-    entry = build_entry_from_info(normalized, info)
-    record = fetch_record_from_ticker(entry, ticker=ticker, info=info)
     cache_set("symbol_record", normalized, record, DETAIL_TTL_SECONDS)
     return record
 

@@ -98,12 +98,12 @@ class DcaOrderInput(BaseModel):
     scheduledFor: str
     strategy: str = "stable_dca"
     status: str = "planned"
+    shares: float | None = Field(default=None, gt=0)
 
 
 class DcaOrder(DcaOrderInput):
     id: int
     executedPrice: float | None = None
-    shares: float | None = None
     createdAt: str
 
 
@@ -244,6 +244,44 @@ class StockAnalysisResponse(StockAnalysis):
     model: str
 
 
+class StrategyPick(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ticker: str
+    name: str
+    action: str
+    tone: Literal["good", "warn", "bad"]
+    subtitle: str
+    reason: str
+    entry: float | None = None
+    target: float | None = None
+    stop: float | None = None
+    riskReward: str | None = None
+    upsidePct: float | None = None
+    conviction: int = Field(ge=0, le=100)
+
+
+class StrategyPlaybook(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: str
+    headline: str
+    marketRead: str
+    picks: list[StrategyPick] = Field(min_length=1, max_length=5)
+
+
+class StrategyPlaybookResponse(StrategyPlaybook):
+    source: Literal["openai"]
+    model: str
+
+
+class StrategyRecommendationRequest(BaseModel):
+    strategy: str = Field(min_length=1, max_length=500)
+    region: Literal["all", "us", "th"] = "all"
+    limit: int = Field(default=5, ge=1, le=5)
+    candidateLimit: int = Field(default=40, ge=5, le=50)
+
+
 class QuantCheck(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -289,6 +327,67 @@ class TodayPerformanceResponse(BaseModel):
     keyLevel: str
     action: str
     risk: str
+    source: Literal["openai"]
+    model: str
+
+
+class BuyTimingNarrative(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    headline: str
+    summary: str
+    action: Literal["BUY", "WAIT", "TRIM", "AVOID"]
+
+
+class PredictedTechnicalMove(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    date: str
+    movePct: float
+    direction: Literal["UP", "DOWN", "FLAT"]
+    phase: Literal["impulse", "pullback", "base", "breakout", "rejection", "retest", "continuation", "mean_reversion", "distribution", "accumulation"]
+    confidence: int = Field(ge=1, le=100)
+    reason: str
+
+
+class HistoricalTechnicalMove(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    date: str
+    fromPrice: float | None = None
+    toPrice: float | None = None
+    movePct: float
+    direction: Literal["UP", "DOWN", "FLAT"]
+    confidence: int = Field(ge=0, le=100)
+    reason: str | None = None
+
+
+class TechnicalHistoryPoint(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    date: str
+    close: float
+
+
+class TechnicalMovesPrediction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    timeframe: Literal["1D", "1W"]
+    currentPrice: float
+    pathBias: Literal["BULLISH_CONTINUATION", "PULLBACK_THEN_BOUNCE", "RESISTANCE_REJECTION", "SIDEWAYS_COMPRESSION", "BREAKDOWN_RISK", "VOLATILE_RANGE"]
+    directionChanges: int = Field(ge=0, le=3)
+    headline: str
+    thesis: str
+    risk: str
+    sampleSize: int = Field(ge=0)
+    averageMovePct: float
+    moves: list[PredictedTechnicalMove] = Field(min_length=10, max_length=10)
+
+
+class TechnicalMovesPredictionResponse(TechnicalMovesPrediction):
+    history: list[TechnicalHistoryPoint] = Field(default_factory=list)
+    historicalMoves: list[HistoricalTechnicalMove] = Field(default_factory=list)
     source: Literal["openai"]
     model: str
 

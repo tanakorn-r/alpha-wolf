@@ -15,7 +15,11 @@
    not optional context — it is the required first step of every session.
 1. **On session start**: read `### STANDARDS` and `### STATE & MEMORY` in
    full before writing any code. They are short by design — that's the token
-   budget this file protects.
+   budget this file protects. Then use `docs/CODEMAP.md` to locate files:
+   it maps every directory, the page→hook→components pattern, and the shared
+   UI atoms, so do NOT re-scan the tree with find/glob/grep to orient
+   yourself. Keep `docs/CODEMAP.md` updated whenever files are added, moved,
+   or deleted.
 2. **Before acting**: trust `STANDARDS` for how to write code in this repo.
    Trust `STATE & MEMORY` for what already exists and what's in flight — but
    if a claim here (a file path, a feature, a "done" status) looks wrong when
@@ -66,10 +70,15 @@
   (header/sidebar), `features/<name>/` = feature-scoped components (e.g.
   `features/stock-detail/`), `pages/` = one file per route, composes the
   above + stores.
-- Money/currency: USD is always the primary, bold figure; THB is always a
-  small muted secondary "≈฿X" next to it. Use the shared `<Money>` component
-  (`components/Money.tsx`) and `formatMoneyDual` (`lib/format.ts`) for every
-  prominent money value — never reintroduce a currency *toggle*.
+- Money/currency: money is stored in **USD base** everywhere, but the app
+  DISPLAYS **THB as the primary, bold figure**; USD is the small muted
+  secondary "≈$X". Use the shared `<Money>` component (`components/Money.tsx`)
+  and `formatMoneyDual` (`lib/format.ts`) for prominent money; `formatMoneyBaht`
+  for single-value app money (DCA/cash/chart). Any user money *input* is entered
+  in THB and divided by `THB_PER_USD` before hitting the USD-base store. Never
+  reintroduce a currency *toggle*. Instrument-native prices (stock quote/target,
+  per-share dividends) use `formatCurrency(value, currency)` and stay in the
+  stock's own trading currency — do NOT convert those.
 - Charts: Recharts. `PortfolioPerformanceChart` accepts a `children` prop for
   injecting `ReferenceLine`/`ReferenceDot` markers (e.g. "first buy" dots).
 - Styling: Tailwind v4, utility classes inline; dark theme (`#0c0c0e`-ish
@@ -118,55 +127,46 @@
 ### STATE & MEMORY
 
 **Current Features**
-- Dashboard (`pages/DashboardPage.tsx`): portfolio stats, holdings table,
-  performance chart, DCA plan card (add funds, apply plan → real `holdings`
-  writes), sell modal. 5-screen nav: Dashboard, Scanner, Deep AI, Day
-  Trader, Calendar (matches the `~/Downloads/AlphaWolf*/` mockups).
-- Strategy Scanner (`pages/DiscoverPage.tsx`): top5 picks per strategy,
-  "Buy all 5 now" executes real purchases.
-- Deep AI Analysis (`pages/DeepAiPage.tsx`, `/deep-ai`): a shared watchlist
-  (holdings + user-added `deepExtras`, persisted in `useWolfStore`) feeds two
-  tabs — **Daily Signals** (per-symbol swing cards via go-api
-  `loadDeepAnalysis`, reusing `DeepChart`/`OrderCard`/`DecideForMeCard` from
-  `components/DeepAnalysisPanel.tsx`) and **Next 100 ↑** (gated behind a
-  local-only `premium` flag/paywall modal, no real billing). Watchlist chips
-  double as the Next 100 ticker selector (glow green when active on that
-  tab, matching the mockup) — no separate ticker row. A manual "Predict"
-  button burns one unit of a persisted `n100QuotaUsed`/`N100_QUOTA_LIMIT`
-  quota (shown as a `used/100` bar) and fetches up to 100 *real* historical
-  upward moves via `GET /api/details/{symbol}/upward-moves`
-  (`internal/market/patterns.py`) — each move's "confidence" is a real
-  percentile rank within that stock's own historical up-move distribution,
-  not a fabricated prediction. Only 1D/1W timeframes are real (yfinance
-  daily bars); intraday timeframe buttons are shown disabled.
-- Day Trader AI (`pages/DayTraderPage.tsx`, `/day-trader`): watchlist
-  (default SPY/TSLA/NVDA/AAPL + custom add/remove) with real quotes
-  (`loadStockDetail`) and a "Get AI verdict" button wired to the real
-  `summarizeStock` endpoint — no fake/simulated data anywhere on this page.
-- Income Calendar (`pages/IncomeCalendarPage.tsx`): ex-date/payment-date view
-  backed by `internal/market/calendar.py`.
-- Stock detail drawer has a "✦ Deep AI" button opening the slide-over Deep
-  Analysis panel (`components/DeepAnalysisPanel.tsx`) for one symbol.
-- `apps/go-api`: Gin service for FinFeed-backed Deep Analysis swing levels.
-  Requires a real `FINFEED_API_KEY` in `apps/go-api/.env`.
+- Architecture: every page is a thin composition (<60 lines) — all state lives
+  in a feature hook (`features/<name>/use<Name>.ts`) created at page level and
+  passed to presentational components as one grouped object (`<Tab hunt={hunt} />`,
+  components read `hunt.strategy.mode` etc.). Shared UI atoms in
+  `components/ui/` (panels, Badge/TagPill, PillTabs, icons, Modal).
+- Daily Brief (`pages/DailyBriefPage.tsx` + `features/daily-brief/*`, `/daily-brief`): portfolio movers, open DCA amount, and holding dividend deadlines in one morning brief.
+- Dashboard (`pages/DashboardPage.tsx` + `features/dashboard/*`): portfolio
+  stats, holdings table, performance chart, DCA plan card (apply plan → real
+  `holdings` writes), sell modal.
+- DCA Scanner (`pages/StockHuntPage.tsx` + `features/stock-hunt/*`, `/scanner`):
+  search/market/sector/sort filters, "In my plan" chip, AI top-5 rank + buy.
+- Income Calendar (`pages/DividendHuntPage.tsx` + `features/dividend-hunt/*`,
+  `/calendar`): ex-date/payment-date month grid + side list.
+- Hunt AI (`pages/HuntAiPage.tsx` + `features/hunt-ai/*`, `/hunt-ai`; `/deep-ai`
+  and `/day-trader` redirect here): shared watchlist (holdings + `deepExtras`)
+  + 6 tabs — **Daily Signals** (V6 recommendation cards: reasons, target entry, AI score),
+  **Buy Timing** (selected-stock timing page backed by `/buy-timing`: plain answer row, month map, real dividend-cycle dips, recovery, edge, seasonality + optional AI narrative),
+  **Live Intraday** (delayed ~15-20min quote/chart + on-demand AI signal),
+  **Next 10 ↑** (quota-metered `upward-moves` forecast, cached per
+  ticker/timeframe, only 1D/1W real), **Strategy** (5 mode cards + optional
+  brief → playbook), **Analyst** (search any ticker → score card + price chart + 6-panel
+  grid). Strategy/Analyst/N100 paywalled behind local-only `premium` flag.
+  All tab state lives in `features/hunt-ai/useHuntAi.ts` (grouped return:
+  `watchlist/signals/timing/intraday/next100/strategy/analyst`); pure helpers in
+  `features/hunt-ai/lib.ts`.
+- Stock detail drawer has a "✦ Deep AI" button → `DeepAnalysisPanel.tsx`.
+- `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Ported the AlphaWolfV2 mockup's Deep AI Analysis additions
-  (`~/Downloads/AlphaWolfV2/Cadence.dc.html` — plain `text/x-dc` source,
-  diff it against `AlphaWolf Cadence.html`'s decoded bundle to find what's
-  new): shared watchlist with add/remove, a Daily Signals/Next 100 tab
-  split, and a local-only premium paywall. The mockup's "Next 100" was a
-  seeded-PRNG fake-prediction generator; per user direction, replaced it
-  with `internal/market/patterns.py` computing real historical upward-move
-  percentile stats instead — deliberately not 1:1 with the mockup here,
-  because shipping fabricated "AI predictions" against real money decisions
-  would be dishonest even though the mockup itself labeled it "simulated".
-  None of this session's changes are committed yet.
+- Redesigned the stock-detail **News tab** (`StockDetailDrawer.tsx` `NewsSection`) to the V6 layout: tone-bordered sentiment banner (from `verdict.action`), news list sorted `publishedAt` DESC with a per-headline sentiment dot (keyword heuristic — no real per-article sentiment source) + right-aligned date, and a **"WHAT'S COMING"** horizontal timeline. The timeline is data-backed only (ex-dividend / next earnings / dividend-pay), reusing the Calendar tab's `estimateNextDate`/`nextFutureDate` so stale reported dates roll forward to the next future occurrence — no invented rows. The timeline is a `sticky bottom-0` footer (negative margins cancel the drawer's `p-[22px]`) so it stays pinned at the bottom while only the news list scrolls above it. News tab now also fetches `/financials` research (dropped from the `selectTab` early-return) to feed the timeline; the news list renders immediately while the timeline shows a loader.
+- Added a second news source: `internal/news/kaohoon.py` pulls the Kaohoon International SET feed via its WordPress REST API (browser UA required; HTML title/excerpt unwrapped) and normalizes to the same `{title,link,publisher,publishedAt,summary}` shape as `yahoo/client.fetch_news`. `market_news()` caches it (15-min TTL, shared cache). `detail.py::merge_thai_market_news` appends it — for `.BK` tickers only — after company news, so every `bundle["news"]` consumer (drawer News tab, Daily Brief lead, Analyst panel, AND the AI `recentNews` context) gets Thai-market headlines. Non-Thai tickers untouched. `requests` added to requirements. Test: `tests/test_kaohoon_news.py` (mocked, offline).
+- Rebuilt Daily Brief to V6 layout (`features/daily-brief/*`): plain-words hero + Portfolio/P&L-vs-entry/To-deploy chips, "Do this today" action list (urgent ex-div captures + open DCA plan entries), "Your positions · vs entry", and a dividend-deadline rail with day countdowns. Position performance is measured against cost basis (`gainLoss`/`gainLossPct`), NOT the stock's raw daily change. Calendar failure is now non-fatal (only portfolio error blanks the page); all money is THB-default and per-share dividend amounts are converted native→USD base (÷36.5 for .BK) before formatting.
+- Dividends YTD now accrues only from purchase: `internal/market/portfolio.py` `_dividends_since` sums dividends whose ex-date is on/after `holding.createdAt`, so a same-day buy reads ฿0 and income counts once an ex-date passes while held (forward yield stays a projection).
+- Fixed a 36.5× FX bug: portfolio value used the holding's NATIVE live price while cost basis is stored USD-base, so THB holdings (e.g. SIRI.BK) showed a phantom ~+3550% gain. `internal/market/portfolio.py` now converts live price, dividends, income, and chart series to USD base via `_to_base`/`_to_base_series` (`_FX_TO_USD={"THB":36.5}`), matching the web client's `stockPriceInBaseCurrency`. (Also removed the useless "Suggested ฿7,300" from DCA Scanner match cards.)
 
 **Next Steps**
-- FinFeed's domain (`finfeedapi.com`) returns a Cloudflare bot-challenge
-  (403) to every automated client tested — Deep AI Analysis page/panel
-  can't be verified against live data from this sandbox. Need the user to
-  confirm the real API base URL/auth/paths from their FinFeed dashboard.
-- Note: port 8080 is sometimes occupied locally by an unrelated process —
-  if `npm run dev:go-api` fails to bind, check for a stray process first.
+- (open) Verify Buy Timing UI visually once the web preview is attachable (data contract + tsc verified; render not yet eyeballed).
+- (open) Do a visual QA pass against AlphaWolfV6 screenshots once seeded holdings exist.
+- (open) Optional: `/api/details/{symbol}/upward-moves` return real currency
+  so Next 10 shows ฿ for THB tickers (only matters for non-USD holdings).
+- (open) Optional: surface the Kaohoon SET feed as a standalone market-news
+  panel (e.g. top of Daily Brief), not just merged per-.BK-ticker.
+- (open) Commit when user is ready.

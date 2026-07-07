@@ -12,6 +12,22 @@ from internal.yahoo.client import fetch_dividends, fetch_history, load_ticker_mo
 from models import IncomeEvent, PortfolioDashboard, PortfolioMarker, PortfolioPoint, PortfolioSummary
 
 
+# The app keeps all portfolio money in USD base; the web client stores holding cost basis
+# already converted (THB price / 36.5). Live prices/dividends come back in the stock's native
+# currency, so they must be converted the same way or a THB holding reads ~36.5x its real value.
+_FX_TO_USD = {"THB": 36.5}
+
+
+def _to_base(value: float, currency: str | None) -> float:
+    rate = _FX_TO_USD.get((currency or "").upper())
+    return value / rate if rate else value
+
+
+def _to_base_series(series: pd.Series, currency: str | None) -> pd.Series:
+    rate = _FX_TO_USD.get((currency or "").upper())
+    return series / rate if rate else series
+
+
 def build_portfolio_dashboard() -> PortfolioDashboard:
     holdings = list_holdings()
     orders = list_dca_orders()
@@ -31,14 +47,19 @@ def build_portfolio_dashboard() -> PortfolioDashboard:
 
     for holding, data in zip(holdings, live, strict=True):
         record, history, info, paid_dividends = data
-        value = holding.shares * float(record["price"])
+        currency = record.get("currency")
+        price_base = _to_base(float(record["price"]), currency) if record.get("price") else 0.0
+        value = holding.shares * price_base
         cost = holding.shares * holding.averageCost
         invested += cost
         total_value += value
-        dividends_ytd += holding.shares * paid_dividends
-        annual_income += holding.shares * (as_float(info.get("dividendRate")) or 0.0)
+        dividends_ytd += holding.shares * _to_base(paid_dividends, currency)
+        annual_income += holding.shares * _to_base(as_float(info.get("dividendRate")) or 0.0, currency)
         purchase_date = _iso_date(holding.createdAt)
-        closes = _close_series(history, since=purchase_date, current_price=float(record["price"]) if record.get("price") else None)
+        closes = _to_base_series(
+            _close_series(history, since=purchase_date, current_price=float(record["price"]) if record.get("price") else None),
+            currency,
+        )
         if not closes.empty:
             histories.append((holding.shares, cost, closes))
         rows.append({**holding.model_dump(), **record, "value": round(value, 2), "cost": round(cost, 2), "gainLoss": round(value - cost, 2), "gainLossPct": round(((value - cost) / cost) * 100, 2) if cost else 0})
@@ -64,8 +85,21 @@ def _load_holding_market_data(holding):
     history = fetch_history(ticker, period="1y")
     entry = build_entry_from_info(holding.symbol, info)
     record = fetch_record_from_ticker(entry, ticker=ticker, info=info, history=history)
+    # Only count dividends whose ex-date fell on/after purchase — a position bought today has
+    # not earned any dividend yet; it accrues once an ex-date passes while the stock is held.
     dividends = fetch_dividends(ticker, period="ytd")
-    return record, history, info, float(dividends.sum()) if not dividends.empty else 0.0
+    accrued = _dividends_since(dividends, _iso_date(holding.createdAt))
+    return record, history, info, accrued
+
+
+def _dividends_since(dividends: pd.Series | None, since_iso: str | None) -> float:
+    if dividends is None or dividends.empty:
+        return 0.0
+    if not since_iso:
+        return float(dividends.sum())
+    since = date.fromisoformat(since_iso)
+    kept = dividends[pd.to_datetime(dividends.index).date >= since]
+    return float(kept.sum()) if not kept.empty else 0.0
 
 
 def _close_series(history: pd.DataFrame, since: str | None = None, current_price: float | None = None) -> pd.Series:

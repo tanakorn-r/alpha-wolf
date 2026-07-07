@@ -45,9 +45,9 @@ def create_dca_order(value: DcaOrderInput) -> DcaOrder:
     created_at = datetime.now(timezone.utc).isoformat()
     with connect() as db:
         cursor = db.execute(
-            """INSERT INTO dca_orders(symbol, amount, scheduled_for, strategy, status, created_at)
-               VALUES(?, ?, ?, ?, ?, ?)""",
-            (value.symbol.strip().upper(), value.amount, value.scheduledFor, value.strategy, value.status, created_at),
+            """INSERT INTO dca_orders(symbol, amount, scheduled_for, strategy, status, shares, created_at)
+               VALUES(?, ?, ?, ?, ?, ?, ?)""",
+            (value.symbol.strip().upper(), value.amount, value.scheduledFor, value.strategy, value.status, value.shares, created_at),
         )
         row = db.execute("SELECT * FROM dca_orders WHERE id = ?", (cursor.lastrowid,)).fetchone()
         db.commit()
@@ -60,9 +60,9 @@ def delete_dca_order(order_id: int) -> None:
         db.commit()
 
 
-def update_dca_order_amount(order_id: int, amount: float) -> DcaOrder:
+def update_dca_order_amount(order_id: int, amount: float, shares: float | None = None) -> DcaOrder:
     with connect() as db:
-        db.execute("UPDATE dca_orders SET amount = ? WHERE id = ?", (max(amount, 0), order_id))
+        db.execute("UPDATE dca_orders SET amount = ?, shares = ? WHERE id = ?", (max(amount, 0), shares, order_id))
         row = db.execute("SELECT * FROM dca_orders WHERE id = ?", (order_id,)).fetchone()
         db.commit()
     return _order(row)

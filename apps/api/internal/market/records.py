@@ -168,6 +168,12 @@ def fetch_record_from_ticker(
     relative_position = relative_position_from_range(price, low_52, high_52)
 
     market_cap = as_float(info.get("marketCap"))
+    one_year_return = percent_value(info.get("fiftyTwoWeekChangePercent"))
+    pe_ratio = as_float(info.get("trailingPE")) or as_float(info.get("forwardPE"))
+    price_to_book = as_float(info.get("priceToBook"))
+    return_on_equity = percent_value(info.get("returnOnEquity"))
+    return_on_assets = percent_value(info.get("returnOnAssets"))
+    profit_margins = percent_value(info.get("profitMargins"))
     revenue_growth = percent_value(info.get("revenueGrowth"))
     operating_margins = percent_value(info.get("operatingMargins"))
     gross_margins = percent_value(info.get("grossMargins"))
@@ -197,6 +203,12 @@ def fetch_record_from_ticker(
         quarterly_trend=quarterly_trend,
         relative_position=relative_position,
         volume_ratio=volume_ratio,
+        one_year_return=one_year_return,
+        pe_ratio=pe_ratio,
+        price_to_book=price_to_book,
+        return_on_equity=return_on_equity,
+        return_on_assets=return_on_assets,
+        profit_margins=profit_margins,
     )
     best_strategy: StrategyKey = max(strategy_scores, key=strategy_scores.get)  # type: ignore[arg-type]
     score = strategy_scores[best_strategy]

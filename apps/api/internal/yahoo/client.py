@@ -193,19 +193,62 @@ def fetch_news(t: yf.Ticker) -> list[dict[str, Any]]:
     for item in raw_news[:8]:
         if not isinstance(item, dict):
             continue
-        title = item.get("title") or item.get("headline")
+        content = safe_dict(item.get("content"))
+        title = _first_text(content.get("title"), item.get("title"), item.get("headline"))
         if not title:
             continue
         news_items.append(
             {
                 "title": title,
-                "link": item.get("link") or item.get("url"),
-                "publisher": item.get("publisher") or item.get("provider") or "Yahoo Finance",
-                "publishedAt": normalize_timestamp(item.get("providerPublishTime") or item.get("pubDate") or item.get("published_at")),
-                "summary": item.get("summary") or item.get("description"),
+                "link": _first_text(
+                    item.get("link"),
+                    item.get("url"),
+                    _url_value(content.get("clickThroughUrl")),
+                    _url_value(content.get("canonicalUrl")),
+                ),
+                "publisher": (
+                    _publisher_name(content.get("provider"))
+                    or _publisher_name(item.get("provider"))
+                    or item.get("publisher")
+                    or "Yahoo Finance"
+                ),
+                "publishedAt": normalize_timestamp(
+                    item.get("providerPublishTime")
+                    or content.get("pubDate")
+                    or content.get("displayTime")
+                    or item.get("pubDate")
+                    or item.get("published_at")
+                ),
+                "summary": _first_text(
+                    content.get("summary"),
+                    item.get("summary"),
+                    content.get("description"),
+                    item.get("description"),
+                ),
             }
         )
     return news_items
+
+
+def _first_text(*values: Any) -> str | None:
+    for value in values:
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return None
+
+
+def _url_value(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return _first_text(value.get("url"))
+    return _first_text(value)
+
+
+def _publisher_name(value: Any) -> str | None:
+    if isinstance(value, dict):
+        return _first_text(value.get("displayName"), value.get("name"), value.get("sourceId"))
+    return _first_text(value)
 
 
 def fetch_dividends(t: yf.Ticker, period: str = "ytd") -> pd.Series:

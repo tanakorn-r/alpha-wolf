@@ -36,4 +36,4 @@ def remove_dca_order(order_id: int) -> Response:
 
 @router.patch("/dca-orders/{order_id}", response_model=DcaOrder)
 def patch_dca_order(order_id: int, payload: dict[str, float] = Body(...)) -> DcaOrder:
-    return update_dca_order_amount(order_id, payload["amount"])
+    return update_dca_order_amount(order_id, payload["amount"], payload.get("shares"))

@@ -4,10 +4,12 @@ export function AppHeader() {
   const location = useLocation();
   const page = location.pathname === "/scanner"
     ? { title: "DCA Scanner", subtitle: "Search any stock, then tap for an AI buy / wait verdict" }
-    : location.pathname === "/deep-ai"
-      ? { title: "Deep AI Analysis", subtitle: "Daily signals, exact entry zones and position sizing — updated every morning" }
-    : location.pathname === "/day-trader"
-      ? { title: "Day Trader AI", subtitle: "Live chart · AI signals · exact entry, stop and target" }
+    : location.pathname === "/daily-brief"
+      ? { title: "Daily Brief", subtitle: "What moved, what pays, what needs action" }
+    : location.pathname === "/live-trade"
+      ? { title: "Live Trade", subtitle: "TradingView chart plus live US screener reads" }
+    : location.pathname === "/hunt-ai"
+      ? { title: "Hunt AI", subtitle: "Buy timing · live intraday · strategy desk · analyst reports · Next 10" }
     : location.pathname === "/calendar"
       ? { title: "Income Calendar", subtitle: "When your dividend money actually lands" }
       : { title: "Strategy Dashboard", subtitle: "Everything happening with your money, in one view" };

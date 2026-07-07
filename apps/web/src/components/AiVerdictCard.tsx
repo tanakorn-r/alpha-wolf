@@ -92,7 +92,7 @@ export function AiVerdictCard({
               <span className="font-mono text-2xl font-semibold leading-none" style={{ color }}>
                 {value.confidence}
               </span>
-              <span className="mt-0.5 text-[9px] text-[#8c8c95]">conviction</span>
+              <span className="mt-0.5 text-[9px] text-[#8c8c95]">AI score</span>
             </div>
           </div>
         ) : null}

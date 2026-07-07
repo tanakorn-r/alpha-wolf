@@ -78,8 +78,27 @@ def normalize_statement_key(value: str) -> str:
 
 
 def normalize_timestamp(value: Any) -> str | None:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).isoformat()
+        except ValueError:
+            pass
+
     number = as_float(value)
     if number is None:
+        return None
+    if number > 10_000_000_000:
+        number /= 1000.0
+    try:
+        return pd.to_datetime(number, unit="s", utc=True).isoformat()
+    except Exception:
         return None
 
 

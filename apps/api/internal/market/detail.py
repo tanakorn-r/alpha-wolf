@@ -4,7 +4,7 @@ from typing import Any
 import warnings
 import pandas as pd
 
-from internal.market.scoring import StrategyKey, confidence_from_score
+from internal.market.scoring import StrategyKey, clamp, confidence_from_score
 from internal.market.symbol import fetch_symbol_record
 from internal.market.technicals import (
     build_sparkline_points,
@@ -16,6 +16,7 @@ from internal.market.technicals import (
 from internal.market.catalog import get_industry_peers
 from internal.store.cache import cache_get, cache_set
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
+from internal.news.kaohoon import market_news as fetch_kaohoon_news
 from internal.yahoo.client import fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
 
 DETAIL_CACHE_NAMESPACE = "stock_detail"
@@ -28,8 +29,9 @@ DETAIL_TTL_SECONDS = 180
 DOMAIN_TTL_SECONDS = 1800
 
 
-def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | None:
-    cache_key = f"{symbol.upper()}:{strategy}"
+def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None = None) -> dict[str, Any] | None:
+    selected_mode = mode if mode in {"swing", "day", "long", "value", "fomo"} else None
+    cache_key = f"{symbol.upper()}:{strategy}:{selected_mode or 'default'}"
     cached = cache_get(DETAIL_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
@@ -42,14 +44,14 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
     modules = load_ticker_modules(ticker, symbol)
 
     history = fetch_history(ticker, period="5y")
-    news = fetch_news(ticker)
+    news = merge_thai_market_news(fetch_news(ticker), symbol)
     dividends = fetch_dividends(ticker, period="5y")
 
     technicals = build_technicals(history)
     business = build_business_profile(modules, history, stock)
     performance = build_performance_profile(history)
     peers = build_peer_profile(stock, business, strategy)
-    verdict = build_verdict(stock, business, performance, peers, strategy)
+    verdict = build_verdict(stock, business, performance, peers, strategy, technicals, history=history, mode=selected_mode)
     outlook = build_outlook(business, performance, peers)
     dividend_pattern = build_dividend_dip_pattern(history, dividends)
 
@@ -64,6 +66,7 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey) -> dict[str, Any] | 
         "verdict": verdict,
         "outlook": outlook,
         "strategy": strategy,
+        "mode": selected_mode,
         "dividendPattern": dividend_pattern,
     }
     cache_set(DETAIL_CACHE_NAMESPACE, cache_key, result, DETAIL_TTL_SECONDS)
@@ -136,7 +139,7 @@ def get_domain_insights(symbol: str) -> dict[str, Any] | None:
 
 def get_market_comparison(symbol: str) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
-    cache_key = f"market_comparison:v4:{normalized}"
+    cache_key = f"market_comparison:v5:{normalized}"
     cached = cache_get(MARKET_COMPARISON_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
@@ -147,7 +150,11 @@ def get_market_comparison(symbol: str) -> dict[str, Any] | None:
     info = merge_ticker_info(load_ticker_modules(make_ticker(normalized), normalized), normalized)
     region = "th" if normalized.endswith(".BK") else "us"
     industry = str(info.get("industry") or "")
-    candidates = get_industry_peers(region, industry)
+    candidates = [
+        item
+        for item in get_industry_peers(region, industry)
+        if not _same_symbol(str(item.get("symbol") or ""), normalized)
+    ]
     candidates.sort(key=lambda item: str(item.get("symbol") or ""))
     candidates.sort(
         key=lambda item: item.get("oneYearReturn") if item.get("oneYearReturn") is not None else float("-inf"),
@@ -156,16 +163,18 @@ def get_market_comparison(symbol: str) -> dict[str, Any] | None:
     peer_candidates = candidates[:1]
     if not peer_candidates:
         return None
-    benchmark_symbol = "^SET.BK" if region == "th" else "^GSPC"
-    benchmark_name = "SET Index" if region == "th" else "S&P 500"
-    symbols = [normalized, benchmark_symbol, *(str(item["symbol"]) for item in peer_candidates)]
-    frames = [fetch_history(make_ticker(ticker_symbol), period="1y") for ticker_symbol in symbols]
-    series = [_monthly_rebased(frame) for frame in frames]
+    stock_series = _monthly_rebased(fetch_history(make_ticker(normalized), period="1y"))
+    benchmark_symbol, benchmark_name, benchmark_series = _best_benchmark_series(region)
+    peer_series_values = [
+        _monthly_rebased(fetch_history(make_ticker(str(item["symbol"])), period="1y"))
+        for item in peer_candidates
+    ]
+    series = [stock_series, benchmark_series, *peer_series_values]
     peer_index = max(range(2, len(series)), key=lambda index: list(series[index].values())[-1] if series[index] else float("-inf"))
     peer = peer_candidates[peer_index - 2]
     peer_series = series[peer_index]
     common_dates = sorted(set(series[0]) & set(series[1]) & set(peer_series))
-    if not common_dates:
+    if len(common_dates) < 2:
         return None
     points = [{"date": date, "stock": series[0][date], "benchmark": series[1][date], "peer": peer_series[date]} for date in common_dates]
     result = {
@@ -187,6 +196,27 @@ def _monthly_rebased(history: pd.DataFrame) -> dict[str, float]:
         return {}
     base = float(monthly.iloc[0])
     return {index.strftime("%Y-%m"): round(float(value) / base * 100, 2) for index, value in monthly.items()}
+
+
+def _same_symbol(left: str, right: str) -> bool:
+    return left.upper().strip() == right.upper().strip()
+
+
+def _best_benchmark_series(region: str) -> tuple[str, str, dict[str, float]]:
+    options = (
+        (("^SET.BK", "SET Index"), ("TDEX.BK", "SET market proxy"))
+        if region == "th"
+        else (("^GSPC", "S&P 500"), ("SPY", "S&P 500 ETF proxy"))
+    )
+    fallback: tuple[str, str, dict[str, float]] | None = None
+    for symbol, name in options:
+        series = _monthly_rebased(fetch_history(make_ticker(symbol), period="1y"))
+        value = (symbol, name, series)
+        if fallback is None:
+            fallback = value
+        if len(series) >= 2:
+            return value
+    return fallback or (options[0][0], options[0][1], {})
 
 
 def build_business_profile(modules: dict[str, Any], history: pd.DataFrame, stock: dict[str, Any]) -> dict[str, Any]:
@@ -324,25 +354,191 @@ def build_verdict(
     performance: dict[str, Any],
     peers: dict[str, Any],
     strategy: StrategyKey,
+    technicals: dict[str, Any],
+    *,
+    history: pd.DataFrame | None = None,
+    mode: str | None = None,
 ) -> dict[str, Any]:
-    score = int(stock["strategyScores"].get(strategy, 0))
+    strategy_score = int(stock["strategyScores"].get(strategy, 0))
     analyst = business.get("analystRating") or "Hold"
-    if score >= 80 and performance["returns"]["1y"] > 0 and peers["isNo1"]:
+    price = as_float(stock.get("price")) or as_float(business.get("currentPrice")) or 0
+    rsi = as_float(technicals.get("rsi14"))
+    macd = as_float(technicals.get("macd"))
+    macd_signal = as_float(technicals.get("macdSignal"))
+    macd_hist = as_float(technicals.get("macdHistogram"))
+    sma20 = as_float(technicals.get("sma20"))
+    sma50 = as_float(technicals.get("sma50"))
+    sma200 = as_float(technicals.get("sma200"))
+    support = as_float(technicals.get("support"))
+    resistance = as_float(technicals.get("resistance"))
+    volume_ratio = as_float(technicals.get("volumeRatio"))
+    volatility = as_float(technicals.get("volatility")) or 0
+    one_year_return = float(performance["returns"].get("1y") or 0)
+    ytd_return = float(performance["returns"].get("ytd") or 0)
+    rank = peers.get("rank")
+    count = peers.get("count")
+    top_quintile = bool(rank and count and (rank / max(count, 1)) <= 0.2)
+
+    above_20 = bool(price and sma20 and price >= sma20)
+    above_50 = bool(price and sma50 and price >= sma50)
+    above_200 = bool(price and sma200 and price >= sma200)
+    macd_crossing_up = bool(macd is not None and macd_signal is not None and macd >= macd_signal)
+    macd_improving = bool(macd_hist is not None and macd_hist >= 0)
+    volume_active = bool(volume_ratio is not None and volume_ratio >= 1.05)
+    range_width = max((resistance or price) - (support or price), 0.01)
+    range_position = clamp(((price - (support or price)) / range_width) * 100) if price and support and resistance else 50
+    rebound = _recent_rebound_context(history, price)
+    from_recent_low = rebound.get("fromRecentLowPct")
+    recent_range_position = rebound.get("recentRangePosition")
+    swing_mode = mode == "swing"
+    extended_rebound = (
+        (from_recent_low is not None and from_recent_low >= 12)
+        or (recent_range_position is not None and recent_range_position >= 72)
+    )
+    very_extended_rebound = (
+        (from_recent_low is not None and from_recent_low >= 18)
+        or (recent_range_position is not None and recent_range_position >= 86)
+    )
+    fresh_turn_score = _fresh_turn_score(from_recent_low, recent_range_position)
+
+    breakout_score = (
+        (22 if above_20 else 0)
+        + (18 if above_50 else 0)
+        + (16 if above_200 else 0)
+        + (14 if macd_crossing_up else 0)
+        + (12 if volume_active else 0)
+        + (10 if one_year_return > 0 else 0)
+        + (8 if top_quintile or peers.get("isNo1") else 0)
+    )
+    if swing_mode:
+        breakout_score = min(breakout_score, 38 if extended_rebound else 48)
+    swing_score = (
+        fresh_turn_score
+        + (18 if range_position <= 35 else 8 if range_position <= 50 else -12 if range_position >= 70 else 0)
+        + (16 if rsi is not None and 38 <= rsi <= 60 else 6 if rsi is not None and 60 < rsi <= 66 else -18 if rsi is not None and rsi > 72 else -8 if rsi is not None and rsi < 32 else 0)
+        + (12 if macd_improving or macd_crossing_up else 0)
+        + (8 if above_50 and not extended_rebound else 2 if above_50 else -8 if not above_50 else 0)
+        + (8 if volume_ratio is None or volume_ratio >= 0.85 else -10)
+        + (6 if ytd_return >= -8 else 0)
+    )
+    if swing_mode and extended_rebound:
+        swing_score = min(swing_score, 46)
+    if swing_mode and very_extended_rebound:
+        swing_score = min(swing_score, 34)
+    reversal_score = (
+        (24 if rsi is not None and rsi <= 35 else 12 if rsi is not None and rsi <= 42 else 0)
+        + (20 if macd_crossing_up or macd_improving else 0)
+        + (16 if range_position <= 35 else 6 if range_position <= 50 else 0)
+        + (12 if volume_active else 0)
+        + (8 if above_200 else 0)
+    )
+    quality_score = (
+        (14 if (as_float(business.get("roe")) or 0) >= 10 else 0)
+        + (12 if (as_float(business.get("profitMargin")) or 0) >= 8 else 0)
+        + (10 if (as_float(business.get("revenueGrowth")) or 0) > 0 else 0)
+        + (8 if (as_float(business.get("dividendYield")) or 0) >= 3 else 0)
+        + (8 if top_quintile else 0)
+    )
+    setup_scores = {
+        "breakout": breakout_score,
+        "swing": swing_score,
+        "reversal": reversal_score,
+    }
+    setup = max(setup_scores, key=setup_scores.get)
+    setup_score = setup_scores[setup]
+    risk_penalty = (
+        (10 if volatility >= 4 else 5 if volatility >= 2.5 else 0)
+        + (8 if rsi is not None and rsi >= 75 and range_position >= 75 else 0)
+        + (8 if price and support and price < support else 0)
+        + (6 if one_year_return < -20 else 0)
+        + (18 if swing_mode and very_extended_rebound else 10 if swing_mode and extended_rebound else 0)
+    )
+    buy_score = int(round(clamp(0.50 * setup_score + 0.28 * strategy_score + 0.22 * quality_score - risk_penalty)))
+
+    if setup == "breakout":
+        setup_label = "Breakout continuation"
+        setup_reason = "trend, momentum, and volume are trying to confirm strength"
+    elif setup == "swing":
+        setup_label = "Swing buy zone"
+        setup_reason = "price is still close enough to the recent low/support area to treat as a fresh turn"
+    else:
+        setup_label = "Reversal watch"
+        setup_reason = "the stock is weaker or oversold, but early momentum is trying to turn"
+
+    if buy_score >= 80 and setup_score >= 62 and risk_penalty <= 10:
         action = "BUY"
-        headline = f"{stock['symbol']} looks like a primary leader in {peers['sector']}."
-    elif score >= 62:
+        headline = f"{stock['symbol']} has a {setup_label.lower()} with enough evidence to consider a buy."
+    elif buy_score >= 72:
+        action = "BUY SETUP"
+        headline = f"{stock['symbol']} is close to actionable: {setup_reason}, but the entry still needs discipline."
+    elif buy_score >= 60:
+        action = "WATCH"
+        headline = f"{stock['symbol']} has a visible {setup_label.lower()}, but the evidence is not strong enough yet."
+    elif buy_score >= 48:
         action = "WAIT"
-        headline = f"{stock['symbol']} is decent, but the setup still needs confirmation."
+        headline = f"{stock['symbol']} needs a cleaner trigger, better price, or stronger confirmation first."
     else:
         action = "PASS"
-        headline = f"{stock['symbol']} still lacks enough conviction for a clean entry."
+        headline = f"{stock['symbol']} does not have enough technical and business alignment for a buy setup."
     return {
         "action": action,
         "headline": headline,
         "analyst": analyst,
-        "confidence": confidence_from_score(score),
-        "score": score,
+        "confidence": confidence_from_score(buy_score),
+        "score": buy_score,
+        "setup": setup,
+        "setupLabel": setup_label,
+        "strategyScore": strategy_score,
+        "setupScore": int(round(setup_score)),
+        "swingContext": rebound,
     }
+
+
+def _recent_rebound_context(history: pd.DataFrame | None, price: float) -> dict[str, Any]:
+    if history is None or history.empty or not price:
+        return {"fromRecentLowPct": None, "recentRangePosition": None, "recentLow": None, "recentHigh": None}
+    closes = extract_closes(history).dropna().tail(63)
+    if closes.empty:
+        return {"fromRecentLowPct": None, "recentRangePosition": None, "recentLow": None, "recentHigh": None}
+    recent_low = float(closes.min())
+    recent_high = float(closes.max())
+    from_low = ((price - recent_low) / recent_low * 100.0) if recent_low > 0 else None
+    range_position = ((price - recent_low) / (recent_high - recent_low) * 100.0) if recent_high > recent_low else None
+    return {
+        "fromRecentLowPct": round(from_low, 2) if from_low is not None else None,
+        "recentRangePosition": round(clamp(range_position), 1) if range_position is not None else None,
+        "recentLow": round(recent_low, 2),
+        "recentHigh": round(recent_high, 2),
+    }
+
+
+def _fresh_turn_score(from_recent_low: float | None, recent_range_position: float | None) -> int:
+    if from_recent_low is None and recent_range_position is None:
+        return 0
+    score = 0
+    if from_recent_low is not None:
+        if 1 <= from_recent_low <= 7:
+            score += 26
+        elif 0 <= from_recent_low < 1:
+            score += 12
+        elif 7 < from_recent_low <= 10:
+            score += 12
+        elif 10 < from_recent_low <= 14:
+            score -= 8
+        else:
+            score -= 22
+    if recent_range_position is not None:
+        if 12 <= recent_range_position <= 45:
+            score += 18
+        elif recent_range_position < 12:
+            score += 6
+        elif recent_range_position <= 60:
+            score += 4
+        elif recent_range_position <= 72:
+            score -= 8
+        else:
+            score -= 20
+    return score
 
 
 def build_outlook(business: dict[str, Any], performance: dict[str, Any], peers: dict[str, Any]) -> dict[str, Any]:
@@ -576,6 +772,22 @@ def normalize_statement_period(value: Any) -> str:
     if hasattr(value, "to_pydatetime"):
         return value.to_pydatetime().date().isoformat()
     return str(value)
+
+
+def merge_thai_market_news(company_news: list[dict[str, Any]], symbol: str) -> list[dict[str, Any]]:
+    """Enrich Thai (.BK) tickers with the shared Kaohoon SET feed.
+
+    Yahoo rarely returns company news for Thai listings, so the market feed both
+    fills the drawer/Daily Brief and gives the AI Thai-market context. Kept
+    company-specific news first; skipped entirely for non-Thai symbols where a
+    Thai market roundup would just be noise.
+    """
+    if not symbol.upper().endswith(".BK"):
+        return company_news
+
+    market = fetch_kaohoon_news(5)
+    seen = {item.get("title") for item in company_news}
+    return company_news + [item for item in market if item.get("title") not in seen]
 
 
 def serialize_history(history: pd.DataFrame) -> list[dict[str, Any]]:

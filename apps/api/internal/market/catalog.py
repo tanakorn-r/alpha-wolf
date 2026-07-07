@@ -11,12 +11,13 @@ from internal.market.scoring import recommendation_from_best_strategy, score_str
 from internal.market.technicals import relative_position_from_range, safe_ratio
 from internal.store.universe_cache import load_market_universe, save_market_universe
 from internal.store.cache import cache_get, cache_set
-from internal.store.utils import as_float, slugify_index
+from internal.store.utils import as_float, coerce_iso_date, percent_value, slugify_index
 from models import MarketCatalogStatus, MarketUniverseCache, UniverseEntry
 
 CATALOG_TTL_SECONDS = 86_400
 CATALOG_PAGE_SIZE = 250
 CATALOG_REGIONS = ("us", "th")
+SCORING_VERSION = 5
 _REFRESH_LOCK = threading.Lock()
 
 
@@ -116,10 +117,68 @@ def _refresh_region(region: str) -> MarketUniverseCache:
 
 def _sanitize_cached_records(value: MarketUniverseCache) -> list[dict[str, Any]]:
     records = [record for record in value.records if _is_supported_quote(record, value.region)]
-    if len(records) != len(value.records):
-        value.records = records
+    changed = len(records) != len(value.records)
+    upgraded: list[dict[str, Any]] = []
+    for record in records:
+        if int(record.get("scoreVersion") or 0) != SCORING_VERSION:
+            upgraded.append(_rescore_cached_record(record, value.region))
+            changed = True
+        else:
+            upgraded.append(record)
+    if changed:
+        value.records = upgraded
         save_market_universe(value)
-    return records
+    return upgraded
+
+
+def _rescore_cached_record(record: dict[str, Any], region: str) -> dict[str, Any]:
+    symbol = str(record.get("symbol") or "").upper()
+    name = str(record.get("name") or symbol)
+    sector = str(record.get("sector") or "Unknown")
+    entry = UniverseEntry(symbol=symbol, name=name, sector=sector, indexes=tuple(record.get("indexes") or ("stock", region)))
+    change_pct = as_float(record.get("changePct")) or 0.0
+    weekly_trend = as_float(record.get("weeklyTrend")) if record.get("weeklyTrend") is not None else change_pct
+    monthly_trend = as_float(record.get("monthlyTrend")) if record.get("monthlyTrend") is not None else change_pct
+    quarterly_trend = as_float(record.get("quarterlyTrend")) if record.get("quarterlyTrend") is not None else as_float(record.get("oneYearReturn")) or 0.0
+    revenue_growth = percent_value(record.get("revenueGrowth"))
+    dividend_yield = as_float(record.get("dividendYield"))
+    scores = score_strategies(
+        entry,
+        market_cap=as_float(record.get("marketCap")),
+        revenue_growth=revenue_growth,
+        operating_margins=percent_value(record.get("operatingMargins")),
+        gross_margins=percent_value(record.get("grossMargins")),
+        free_cashflow=as_float(record.get("freeCashflow")),
+        debt_to_equity=as_float(record.get("debtToEquity")),
+        dividend_yield=dividend_yield,
+        payout_ratio=percent_value(record.get("payoutRatio")),
+        beta=as_float(record.get("beta")),
+        volatility=abs(change_pct),
+        weekly_trend=weekly_trend or 0.0,
+        monthly_trend=monthly_trend or 0.0,
+        quarterly_trend=quarterly_trend or 0.0,
+        relative_position=as_float(record.get("relativePosition")),
+        volume_ratio=as_float(record.get("volumeRatio")),
+        one_year_return=as_float(record.get("oneYearReturn")),
+        pe_ratio=as_float(record.get("peRatio")),
+        price_to_book=as_float(record.get("priceToBook")),
+        return_on_equity=percent_value(record.get("returnOnEquity")),
+        return_on_assets=percent_value(record.get("returnOnAssets")),
+        profit_margins=percent_value(record.get("profitMargins")),
+    )
+    best_strategy = max(scores, key=scores.get)
+    record["strategyScores"] = {key: int(round(value)) for key, value in scores.items()}
+    record["recommendation"] = recommendation_from_best_strategy(best_strategy, scores[best_strategy])
+    record["story"] = story_from_strategy(
+        best_strategy=best_strategy,
+        score=scores[best_strategy],
+        revenue_growth=revenue_growth,
+        dividend_yield=dividend_yield,
+        volatility=abs(change_pct),
+        weekly_trend=weekly_trend or 0.0,
+    ).replace("weekly move", "daily move").replace("daily volatility", "session move")
+    record["scoreVersion"] = SCORING_VERSION
+    return record
 
 
 def _is_supported_symbol(symbol: str, region: str) -> bool:
@@ -151,23 +210,34 @@ def _record_from_quote(quote: dict[str, Any], region: str) -> dict[str, Any]:
     quarterly_trend = percent_change(price, two_hundred_day)
     entry = UniverseEntry(symbol=symbol, name=name, sector=sector, indexes=("stock", region))
     dividend_yield = as_float(quote.get("dividendYield"))
+    one_year_return = as_float(quote.get("fiftyTwoWeekChangePercent"))
+    pe_ratio = as_float(quote.get("trailingPE")) or as_float(quote.get("forwardPE"))
+    price_to_book = as_float(quote.get("priceToBook"))
+    relative_position = relative_position_from_range(price, as_float(quote.get("fiftyTwoWeekLow")), as_float(quote.get("fiftyTwoWeekHigh")))
+    volume_ratio = safe_ratio(as_float(quote.get("regularMarketVolume")), as_float(quote.get("averageDailyVolume3Month")))
     scores = score_strategies(
         entry,
         market_cap=as_float(quote.get("marketCap")),
-        revenue_growth=None,
-        operating_margins=None,
-        gross_margins=None,
-        free_cashflow=None,
-        debt_to_equity=None,
+        revenue_growth=percent_value(quote.get("revenueGrowth")),
+        operating_margins=percent_value(quote.get("operatingMargins")),
+        gross_margins=percent_value(quote.get("grossMargins")),
+        free_cashflow=as_float(quote.get("freeCashflow")),
+        debt_to_equity=as_float(quote.get("debtToEquity")),
         dividend_yield=dividend_yield,
-        payout_ratio=None,
+        payout_ratio=percent_value(quote.get("payoutRatio")),
         beta=as_float(quote.get("beta")),
         volatility=abs(change_pct),
         weekly_trend=change_pct,
         monthly_trend=monthly_trend,
         quarterly_trend=quarterly_trend,
-        relative_position=relative_position_from_range(price, as_float(quote.get("fiftyTwoWeekLow")), as_float(quote.get("fiftyTwoWeekHigh"))),
-        volume_ratio=safe_ratio(as_float(quote.get("regularMarketVolume")), as_float(quote.get("averageDailyVolume3Month"))),
+        relative_position=relative_position,
+        volume_ratio=volume_ratio,
+        one_year_return=one_year_return,
+        pe_ratio=pe_ratio,
+        price_to_book=price_to_book,
+        return_on_equity=percent_value(quote.get("returnOnEquity")),
+        return_on_assets=percent_value(quote.get("returnOnAssets")),
+        profit_margins=percent_value(quote.get("profitMargins")),
     )
     best_strategy = max(scores, key=scores.get)
     story = story_from_strategy(best_strategy=best_strategy, score=scores[best_strategy], revenue_growth=None, dividend_yield=dividend_yield, volatility=abs(change_pct), weekly_trend=change_pct)
@@ -181,7 +251,17 @@ def _record_from_quote(quote: dict[str, Any], region: str) -> dict[str, Any]:
         "quoteType": quote.get("quoteType"),
         "currency": quote.get("currency"),
         "marketCap": as_float(quote.get("marketCap")),
-        "oneYearReturn": as_float(quote.get("fiftyTwoWeekChangePercent")),
+        "oneYearReturn": one_year_return,
+        "dividendDate": coerce_iso_date(quote.get("dividendDate")),
+        "dividendRate": as_float(quote.get("dividendRate") or quote.get("trailingAnnualDividendRate")),
+        "dividendYield": dividend_yield,
+        "beta": as_float(quote.get("beta")),
+        "peRatio": pe_ratio,
+        "priceToBook": price_to_book,
+        "relativePosition": relative_position,
+        "volumeRatio": volume_ratio,
+        "monthlyTrend": round(monthly_trend, 2),
+        "quarterlyTrend": round(quarterly_trend, 2),
         "indexes": ["stock", region],
         "price": round(price, 2),
         "changePct": round(change_pct, 2),
@@ -190,5 +270,6 @@ def _record_from_quote(quote: dict[str, Any], region: str) -> dict[str, Any]:
         "recommendation": recommendation_from_best_strategy(best_strategy, scores[best_strategy]),
         "story": story,
         "strategyScores": {key: int(round(value)) for key, value in scores.items()},
+        "scoreVersion": SCORING_VERSION,
         "updatedAt": datetime.now(timezone.utc).isoformat(),
     }
