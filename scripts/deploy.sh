@@ -16,7 +16,11 @@ GCP_PROJECT="${GCP_PROJECT:-${GCP_PROJECT_ID:-alpha-wolf-501716}}"
 GCP_REGION="${GCP_REGION:-asia-southeast3}"
 REPO="${ARTIFACT_REPOSITORY:-alpha-wolf-be}"
 SERVICE="${CLOUD_RUN_SERVICE:-alpha-wolf-api}"
-IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${REPO}/${SERVICE}:latest"
+
+# GENERATE UNIQUE VERSION TAG (Fixes the Artifact Registry Immutability error)
+TAG=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d-%H%M%S)
+IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${REPO}/${SERVICE}:${TAG}"
+
 ENV_FILE="${ENV_FILE:-.env.production}"
 ENV_YAML="${ENV_YAML:-/tmp/alpha-wolf-cloudrun-env.yaml}"
 TURSO_DB_NAME="${TURSO_DB_NAME:-alpha-wolf-marjod}"
