@@ -22,7 +22,24 @@ def _safe_info(t: yf.Ticker) -> dict[str, Any]:
 
 def _safe_fast_info(t: yf.Ticker) -> dict[str, Any]:
     try:
-        return safe_dict(getattr(t, "fast_info", {}))
+        fast = getattr(t, "fast_info", None)
+        if fast is None:
+            return {}
+        # IMPORTANT: currency, exchange, quote_type, and timezone all call
+        # _get_exchange_metadata() → get_history_metadata() internally, which raises
+        # KeyError('exchangeTimezoneName') for some tickers on recent yfinance versions.
+        # Only read the price/volume properties that use _get_1y_prices() instead.
+        result: dict[str, Any] = {}
+        for key in ("last_price", "market_cap", "previous_close",
+                    "regular_market_previous_close", "last_volume",
+                    "year_high", "year_low"):
+            try:
+                val = getattr(fast, key, None)
+                if val is not None:
+                    result[key] = val
+            except Exception:
+                pass
+        return result
     except Exception:
         return {}
 
@@ -33,14 +50,13 @@ def _build_flat_info(t: yf.Ticker, symbol: str) -> dict[str, Any]:
     flat: dict[str, Any] = dict(info)
 
     if fast:
-        flat.setdefault("currency", fast.get("currency"))
-        flat.setdefault("exchange", fast.get("exchange"))
-        flat.setdefault("quoteType", fast.get("quote_type") or fast.get("quoteType"))
-        flat.setdefault("marketCap", fast.get("market_cap") or fast.get("marketCap"))
-        flat.setdefault("regularMarketPrice", fast.get("last_price") or fast.get("lastPrice"))
+        flat.setdefault("regularMarketPrice", fast.get("last_price"))
         flat.setdefault("currentPrice", flat.get("regularMarketPrice") or fast.get("last_price"))
-        flat.setdefault("regularMarketPreviousClose", fast.get("previous_close") or fast.get("previousClose"))
-        flat.setdefault("regularMarketVolume", fast.get("last_volume") or fast.get("lastVolume"))
+        flat.setdefault("regularMarketPreviousClose", fast.get("regular_market_previous_close") or fast.get("previous_close"))
+        flat.setdefault("regularMarketVolume", fast.get("last_volume"))
+        flat.setdefault("marketCap", fast.get("market_cap"))
+        flat.setdefault("fiftyTwoWeekHigh", fast.get("year_high"))
+        flat.setdefault("fiftyTwoWeekLow", fast.get("year_low"))
 
     flat.setdefault("symbol", symbol)
     flat.setdefault("shortName", flat.get("shortName") or flat.get("longName") or flat.get("name") or symbol)
@@ -158,7 +174,10 @@ def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
 def fetch_history(t: yf.Ticker, period: str = "1y") -> pd.DataFrame:
     try:
         return normalize_history_frame(t.history(period=period, interval="1d"))
-    except Exception:
+    except (KeyError, Exception):
+        # Some tickers raise KeyError('exchangeTimezoneName') inside yfinance when
+        # Yahoo returns incomplete metadata. Fall back to an empty frame so callers
+        # can still produce a partial record using live price from fast_info.
         return pd.DataFrame()
 
 

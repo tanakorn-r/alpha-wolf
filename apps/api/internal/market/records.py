@@ -258,7 +258,9 @@ def resolve_price(info: dict[str, Any], closes) -> float:
             return price
     if not closes.empty:
         return float(closes.iloc[-1])
-    raise ValueError("No live price available")
+    # Last resort: return 0.0 rather than raising so one un-priceable ticker
+    # doesn't crash the whole portfolio dashboard.
+    return 0.0
 
 
 def resolve_previous_close(info: dict[str, Any], closes) -> float | None:
