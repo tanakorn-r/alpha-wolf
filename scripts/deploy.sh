@@ -41,7 +41,8 @@ upsert_env_value() {
     sed -i.bak "s|^${key}=.*|${key}=${value}|" "$ENV_FILE"
     rm -f "${ENV_FILE}.bak"
   else
-    echo "${key}=${value}" >> "$ENV_FILE"
+    # Added a explicit newline print here so it never stitches onto an existing line
+    printf "\n%s=%s" "$key" "$value" >> "$ENV_FILE"
   fi
 }
 
