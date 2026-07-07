@@ -38,9 +38,9 @@ Use these Pages settings:
 
 ```txt
 Framework preset: None
-Build command: npm run build:web:static
-Build output directory: dist/apps/web
-Root directory: /
+Root directory: apps/web
+Build command: npm run build
+Build output directory: dist
 ```
 
 Set this Cloudflare environment variable:
@@ -49,7 +49,7 @@ Set this Cloudflare environment variable:
 VITE_API_BASE=https://YOUR-CLOUD-RUN-URL.a.run.app/api
 ```
 
-The frontend build uses plain Vite (`npm run build:web:static`) so Cloudflare does not need to detect Nx executors like `@nx/vite:build`.
+The frontend build uses the standalone `apps/web/package.json`, so Cloudflare never scans the Nx workspace root.
 
 ## Backend Deploy
 

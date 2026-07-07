@@ -6,6 +6,7 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 [[ "${DEPLOY_DEBUG:-0}" == "1" ]] && set -x
+trap 'status=$?; die "Deploy failed near line ${LINENO}: ${BASH_COMMAND} (exit ${status}). Run with DEPLOY_DEBUG=1 for full trace."' ERR
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -26,7 +27,7 @@ die() { echo "✗ $*" >&2; exit 1; }
 
 read_env_value() {
   local key="$1"
-  grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"' | tr -d "'"
+  awk -F= -v key="$key" '$1 == key { value = substr($0, length(key) + 2) } END { gsub(/^["'\'']|["'\'']$/, "", value); print value }' "$ENV_FILE"
 }
 
 upsert_env_value() {
@@ -57,7 +58,7 @@ log "Env file: $ENV_FILE"
 command -v docker >/dev/null || die "docker not found"
 command -v gcloud >/dev/null || die "gcloud not found"
 docker --version
-gcloud --version | head -1
+gcloud --version
 
 if [[ "${ALLOW_DIRTY:-0}" != "1" ]] && [[ -n "$(git status --porcelain)" ]]; then
   die "Worktree is dirty. Commit first, or rerun with ALLOW_DIRTY=1."
