@@ -13,7 +13,7 @@ cd "$ROOT_DIR"
 # -- Config -----------------------------------------------------------------
 GCP_PROJECT="${GCP_PROJECT:-${GCP_PROJECT_ID:-alpha-wolf-501716}}"
 GCP_REGION="${GCP_REGION:-asia-southeast3}"
-REPO="${ARTIFACT_REPOSITORY:-alpha-wolf-repo}"
+REPO="${ARTIFACT_REPOSITORY:-alpha-wolf-be}"
 SERVICE="${CLOUD_RUN_SERVICE:-alpha-wolf-api}"
 IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${REPO}/${SERVICE}:latest"
 ENV_FILE="${ENV_FILE:-.env.production}"

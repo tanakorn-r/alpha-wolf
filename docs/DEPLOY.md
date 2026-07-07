@@ -17,7 +17,7 @@ Set deploy variables:
 export GCP_PROJECT="alpha-wolf-501716"
 export GCP_REGION="asia-southeast3"
 export CLOUD_RUN_SERVICE="alpha-wolf-api"
-export ARTIFACT_REPOSITORY="alpha-wolf-repo"
+export ARTIFACT_REPOSITORY="alpha-wolf-be"
 ```
 
 Create `.env.production` from the example and fill the real secrets:
