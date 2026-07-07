@@ -12,6 +12,7 @@
     "dev:api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve api",
     "dev:go-api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve go-api",
     "build:web": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build web",
+    "build:web:static": "vite build apps/web --outDir ../../dist/apps/web --emptyOutDir",
     "build:api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build api",
     "format": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx format:write"
   },
