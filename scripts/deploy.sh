@@ -47,18 +47,11 @@ yaml_escape() {
 
 # -- Pre-flight checks -------------------------------------------------------
 log "Starting AlphaWolf API deploy"
-log "Project: $GCP_PROJECT"
-log "Region: $GCP_REGION"
-log "Repository: $REPO"
-log "Service: $SERVICE"
 log "Image: $IMAGE"
-log "Env file: $ENV_FILE"
 
 [[ -f "$ENV_FILE" ]] || die "$ENV_FILE not found. Copy .env.production.example to $ENV_FILE and fill secrets."
 command -v docker >/dev/null || die "docker not found"
 command -v gcloud >/dev/null || die "gcloud not found"
-docker --version
-gcloud --version
 
 if [[ "${ALLOW_DIRTY:-0}" != "1" ]] && [[ -n "$(git status --porcelain)" ]]; then
   die "Worktree is dirty. Commit first, or rerun with ALLOW_DIRTY=1."
@@ -104,7 +97,6 @@ fi
 # -- Build env-vars YAML for Cloud Run --------------------------------------
 log "Building env vars YAML from $ENV_FILE..."
 printf "" > "$ENV_YAML"
-ENV_KEY_COUNT=0
 while IFS= read -r line || [[ -n "$line" ]]; do
   [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
   [[ "$line" != *"="* ]] && continue
@@ -124,20 +116,17 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   [[ "$key" == VITE_* ]] && continue
 
   echo "${key}: \"$(yaml_escape "$value")\"" >> "$ENV_YAML"
-  ENV_KEY_COUNT=$((ENV_KEY_COUNT + 1))
 done < "$ENV_FILE"
-log "Prepared $ENV_KEY_COUNT Cloud Run env vars at $ENV_YAML"
 
 # -- Authenticate Docker with Artifact Registry -----------------------------
 log "Authenticating Docker with Artifact Registry..."
 gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet
 
 # -- Ensure Artifact Registry repo exists -----------------------------------
-log "Checking Artifact Registry repository: $REPO"
 if gcloud artifacts repositories describe "$REPO" \
   --project "$GCP_PROJECT" \
   --location "$GCP_REGION" >/dev/null 2>&1; then
-  log "Artifact Registry repository exists"
+  :
 else
   log "Creating Artifact Registry repository: $REPO"
   gcloud artifacts repositories create "$REPO" \
@@ -147,19 +136,16 @@ else
     --quiet
 fi
 
-log "Checking Docker buildx builder..."
 docker buildx inspect >/dev/null
 
 # -- Build for linux/amd64 and push -----------------------------------------
 log "Building and pushing image: $IMAGE"
 docker buildx build \
-  --progress plain \
   --platform linux/amd64 \
   --file apps/api/Dockerfile \
   --tag "$IMAGE" \
   --push \
   apps/api
-log "Image pushed: $IMAGE"
 
 # -- Deploy to Cloud Run -----------------------------------------------------
 log "Deploying to Cloud Run..."
@@ -172,7 +158,6 @@ gcloud run deploy "$SERVICE" \
   --port 8080 \
   --env-vars-file "$ENV_YAML" \
   --quiet
-log "Cloud Run deploy finished"
 
 rm -f "$ENV_YAML"
 
