@@ -6,4 +6,4 @@ pandas
 certifi
 python-dotenv
 tradingview-screener
-libsql-client
+libsql

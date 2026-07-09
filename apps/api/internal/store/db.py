@@ -15,22 +15,28 @@ DATABASE_AUTH_TOKEN = os.getenv("LIBSQL_AUTH_TOKEN") or os.getenv("TURSO_AUTH_TO
 class LibsqlCursor:
     def __init__(self, result: Any):
         self._result = result
-        self.lastrowid = getattr(result, "last_insert_rowid", None)
+        self.lastrowid = getattr(result, "lastrowid", None)
 
     def fetchone(self):
+        if hasattr(self._result, "fetchone"):
+            return self._result.fetchone()
         rows = getattr(self._result, "rows", [])
         return rows[0] if rows else None
 
     def fetchall(self):
+        if hasattr(self._result, "fetchall"):
+            return self._result.fetchall()
         return list(getattr(self._result, "rows", []))
 
 
 class LibsqlConnection:
     def __init__(self):
-        import libsql_client
+        import libsql
 
-        kwargs = {"auth_token": DATABASE_AUTH_TOKEN} if DATABASE_AUTH_TOKEN else {}
-        self._client = libsql_client.create_client_sync(DATABASE_URL, **kwargs)
+        self._conn = libsql.connect(
+            database=DATABASE_URL,
+            auth_token=DATABASE_AUTH_TOKEN or "",
+        )
 
     def __enter__(self):
         return self
@@ -40,15 +46,14 @@ class LibsqlConnection:
         return False
 
     def execute(self, sql: str, params: tuple[Any, ...] | list[Any] | None = None) -> LibsqlCursor:
-        return LibsqlCursor(self._client.execute(sql, list(params or [])))
+        result = self._conn.execute(sql, list(params or []))
+        return LibsqlCursor(result)
 
     def commit(self) -> None:
-        # Remote libSQL statements are autocommitted unless an explicit
-        # transaction is used. The store layer only needs sqlite-compatible API.
-        return None
+        self._conn.commit()
 
     def close(self) -> None:
-        self._client.close()
+        pass  # libsql connections are managed by the library
 
 
 def connect() -> sqlite3.Connection | LibsqlConnection:
