@@ -205,6 +205,29 @@ export type StockAnalysisResponse = {
   dcaTiming?: string;
   source?: "openai";
   model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
+};
+
+export type AgentStyle = { Discipline: number; Patience: number; Data: number; Instinct: number };
+
+export type AgentBadge = {
+  id: string;
+  name: string;
+  mono: string;
+  title: string;
+  color: string;
+  avatarUrl?: string | null;
+  premium?: boolean;
+};
+
+export type AgentProfile = AgentBadge & {
+  tagline: string;
+  years: number;
+  bio: string;
+  belief: string;
+  knows: string[];
+  style: AgentStyle;
 };
 
 export type StrategyPick = {
@@ -229,6 +252,8 @@ export type StrategyPlaybookResponse = {
   picks: StrategyPick[];
   source?: "openai";
   model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
 };
 
 export type QuantPerspectiveCheck = {
@@ -254,6 +279,48 @@ export type QuantPerspectiveResponse = {
   tradingViewFocus: string[];
   source?: "openai";
   model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
+};
+
+export type ValuationVerdictResponse = {
+  symbol: string;
+  name: string;
+  currency: string;
+  verdict: "CHASING" | "FAIR" | "DISCOUNT" | "INSUFFICIENT_DATA";
+  chasingAnswer: string;
+  narrative: string;
+  rightNow: {
+    action: "BUY" | "WAIT" | "TRIM" | "AVOID";
+    note: string;
+    entryOnlyAt?: number | null;
+    pctAway?: number | null;
+    conviction: number;
+  };
+  metrics: {
+    currentPrice?: number | null;
+    ytdPct?: number | null;
+    bookValuePerShare?: number | null;
+    pbv?: number | null;
+    pbvFloor?: number | null;
+    dividendYield?: number | null;
+  };
+  structureBand: {
+    discountAnchor?: number | null;
+    fairAnchor?: number | null;
+    now?: number | null;
+    zoneLabel: string;
+  };
+  whatAiSees: string[];
+  thePlay: {
+    text: string;
+    addBackLow?: number | null;
+    addBackHigh?: number | null;
+  };
+  source?: "openai";
+  model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
 };
 
 export type TodayPerformanceResponse = {
@@ -269,6 +336,20 @@ export type TodayPerformanceResponse = {
   risk: string;
   source?: "openai";
   model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
+};
+
+export type PortfolioReviewResponse = {
+  score: number;
+  verdict: string;
+  intro: string;
+  sections: Array<{ h: string; b: string }>;
+  bullets: string[];
+  sign: string;
+  source?: "openai";
+  model?: string;
+  agent: AgentBadge;
 };
 
 export type PortfolioHolding = StockRecord & {
@@ -489,10 +570,14 @@ export type UpwardMovesResponse = {
   averageMovePct: number;
   source?: "openai";
   model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
 };
 
-export async function loadUpwardMoves(symbol: string, timeframe: "1D" | "1W"): Promise<UpwardMovesResponse> {
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/upward-moves?timeframe=${timeframe}`);
+export async function loadUpwardMoves(symbol: string, timeframe: "1D" | "1W", agent?: string): Promise<UpwardMovesResponse> {
+  const query = new URLSearchParams({ timeframe });
+  if (agent) query.set("agent", agent);
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/upward-moves?${query}`);
   if (!response.ok) {
     let detail = `Failed to load technical moves: ${response.status}`;
     try {
@@ -560,6 +645,11 @@ export type BuyTimingResponse = {
   action: "BUY" | "WAIT" | "TRIM" | "AVOID";
   narrativeSource: "calculated" | "openai";
   model?: string | null;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
+  recap?: string | null;
+  agentFit?: "aligned" | "neutral" | "against" | null;
+  agentFitReason?: string | null;
   nextBuy: { start?: string | null; end?: string | null; opensInDays?: number | null; label?: string | null };
   nextTrim: { start?: string | null; end?: string | null; opensInDays?: number | null; label?: string | null };
   entryBand: {
@@ -630,14 +720,22 @@ export async function loadDeepAnalysis(symbol: string): Promise<DeepAnalysisResp
   return (await response.json()) as DeepAnalysisResponse;
 }
 
-export async function loadBuyTiming(symbol: string): Promise<BuyTimingResponse> {
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/buy-timing`);
+export async function loadAgents(): Promise<AgentProfile[]> {
+  const response = await fetch(`${API_BASE}/agents`);
+  if (!response.ok) throw new Error(`Failed to load agents: ${response.status}`);
+  return (await response.json()) as AgentProfile[];
+}
+
+export async function loadBuyTiming(symbol: string, agent?: string): Promise<BuyTimingResponse> {
+  const query = agent ? `?agent=${encodeURIComponent(agent)}` : "";
+  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/buy-timing${query}`);
   if (!response.ok) throw new Error(`Failed to load buy timing: ${response.status}`);
   return (await response.json()) as BuyTimingResponse;
 }
 
-export async function summarizeStock(symbol: string, strategy?: string): Promise<StockAnalysisResponse> {
-  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}`, {
+export async function summarizeStock(symbol: string, strategy?: string, agent?: string): Promise<StockAnalysisResponse> {
+  const query = agent ? `?agent=${encodeURIComponent(agent)}` : "";
+  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}${query}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -652,8 +750,9 @@ export async function summarizeStock(symbol: string, strategy?: string): Promise
   return (await response.json()) as StockAnalysisResponse;
 }
 
-export async function loadQuantPerspective(symbol: string, strategy?: string, mode?: string): Promise<QuantPerspectiveResponse> {
-  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/quant`, {
+export async function loadQuantPerspective(symbol: string, strategy?: string, mode?: string, agent?: string): Promise<QuantPerspectiveResponse> {
+  const query = agent ? `?agent=${encodeURIComponent(agent)}` : "";
+  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/quant${query}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -668,8 +767,26 @@ export async function loadQuantPerspective(symbol: string, strategy?: string, mo
   return (await response.json()) as QuantPerspectiveResponse;
 }
 
-export async function loadTodayPerformance(symbol: string, strategy?: string): Promise<TodayPerformanceResponse> {
-  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/today`, {
+export async function loadValuationVerdict(symbol: string, strategy?: string, agent?: string): Promise<ValuationVerdictResponse> {
+  const query = agent ? `?agent=${encodeURIComponent(agent)}` : "";
+  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/valuation${query}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ strategy })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to load valuation verdict: ${response.status}`);
+  }
+
+  return (await response.json()) as ValuationVerdictResponse;
+}
+
+export async function loadTodayPerformance(symbol: string, strategy?: string, agent?: string): Promise<TodayPerformanceResponse> {
+  const query = agent ? `?agent=${encodeURIComponent(agent)}` : "";
+  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/today${query}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -684,8 +801,9 @@ export async function loadTodayPerformance(symbol: string, strategy?: string): P
   return (await response.json()) as TodayPerformanceResponse;
 }
 
-export async function loadStrategyPlaybook(params: { strategy: string; region?: "all" | "us" | "th"; limit?: number; candidateLimit?: number }): Promise<StrategyPlaybookResponse> {
-  const response = await fetch(`${API_BASE}/strategy/recommendations`, {
+export async function loadStrategyPlaybook(params: { strategy: string; region?: "all" | "us" | "th"; limit?: number; candidateLimit?: number; agent?: string }): Promise<StrategyPlaybookResponse> {
+  const query = params.agent ? `?agent=${encodeURIComponent(params.agent)}` : "";
+  const response = await fetch(`${API_BASE}/strategy/recommendations${query}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -703,6 +821,13 @@ export async function loadStrategyPlaybook(params: { strategy: string; region?: 
   }
 
   return (await response.json()) as StrategyPlaybookResponse;
+}
+
+export async function loadPortfolioReview(agent?: string): Promise<PortfolioReviewResponse> {
+  const query = agent ? `?agent=${encodeURIComponent(agent)}` : "";
+  const response = await fetch(`${API_BASE}/analysis/portfolio/review${query}`, { method: "POST" });
+  if (!response.ok) throw new Error(`Failed to load portfolio review: ${response.status}`);
+  return (await response.json()) as PortfolioReviewResponse;
 }
 
 export async function loadPortfolio(): Promise<PortfolioDashboard> {

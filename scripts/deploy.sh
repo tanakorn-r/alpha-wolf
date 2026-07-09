@@ -88,15 +88,11 @@ if [[ -z "$TURSO_URL" ]]; then
 
   TURSO_URL="$(turso db show "$TURSO_DB_NAME" --url)"
   TURSO_AUTH_TOKEN="$(turso db tokens create "$TURSO_DB_NAME")"
-  upsert_env_value TURSO_URL "$TURSO_URL"
-  upsert_env_value TURSO_AUTH_TOKEN "$TURSO_AUTH_TOKEN"
-  upsert_env_value LIBSQL_DATABASE_URL "$TURSO_URL"
-  upsert_env_value LIBSQL_AUTH_TOKEN "$TURSO_AUTH_TOKEN"
   log "Turso configured: $TURSO_URL"
 else
   log "Turso already configured: $TURSO_URL"
-  [[ -n "$LIBSQL_DATABASE_URL" ]] || upsert_env_value LIBSQL_DATABASE_URL "$TURSO_URL"
-  [[ -z "$TURSO_AUTH_TOKEN" || -n "$LIBSQL_AUTH_TOKEN" ]] || upsert_env_value LIBSQL_AUTH_TOKEN "$TURSO_AUTH_TOKEN"
+  [[ -n "$LIBSQL_DATABASE_URL" ]]
+  [[ -z "$TURSO_AUTH_TOKEN" || -n "$LIBSQL_AUTH_TOKEN" ]]
 fi
 
 # -- Build env-vars YAML for Cloud Run --------------------------------------

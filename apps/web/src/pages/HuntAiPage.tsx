@@ -1,7 +1,6 @@
 import { ErrorCard } from "../components/ui/panels";
 import { AnalystTab } from "../features/hunt-ai/AnalystTab";
 import { BuyTimingTab } from "../features/hunt-ai/BuyTimingTab";
-import { HuntHero } from "../features/hunt-ai/HuntHero";
 import { HuntTabsBar } from "../features/hunt-ai/HuntTabsBar";
 import { IntradayTab } from "../features/hunt-ai/IntradayTab";
 import { Next100Tab } from "../features/hunt-ai/Next100Tab";
@@ -13,8 +12,7 @@ import { useHuntAi } from "../features/hunt-ai/useHuntAi";
 export function HuntAiPage() {
   const hunt = useHuntAi();
   return (
-    <section className="flex flex-col gap-5 text-[#ececee]">
-      <HuntHero />
+    <section className="flex flex-col gap-4 text-[#ececee]">
       <WatchlistBar hunt={hunt} />
       <HuntTabsBar hunt={hunt} />
       {hunt.tab === "signals" ? <SignalsTab hunt={hunt} /> : null}

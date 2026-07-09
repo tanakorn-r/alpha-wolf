@@ -102,7 +102,7 @@ function buildTradePlan(deep: DeepAnalysisResponse): TradePlan {
 }
 
 function Loading({ symbol }: { symbol: string }) {
-  return <div className="flex items-center gap-[11px] py-5 text-[#8c8c95]"><LoadingSpinner size={18} />Analyzing {symbol}…</div>;
+  return <div className="flex items-center gap-[14px] py-5 text-[#8c8c95]"><LoadingSpinner size={18} className="text-[#3ecf8e]" />Analyzing {symbol}…</div>;
 }
 
 function ErrorState({ symbol, onRetry, retrying }: { symbol: string; onRetry: () => void; retrying: boolean }) {

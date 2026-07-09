@@ -4,7 +4,7 @@ import { EmptyPanel, LoadingStrip, RetryPanel } from "../../components/ui/panels
 import { N100_QUOTA_LIMIT } from "../../store/useWolfStore";
 import { realTimeframes, timeframes, type N100Timeframe } from "./lib";
 import { Next100Result } from "./Next100Result";
-import { PremiumLoading, panel } from "./ui";
+import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
 export function Next100Tab({ hunt }: { hunt: HuntAi }) {
@@ -74,7 +74,7 @@ export function Next100Tab({ hunt }: { hunt: HuntAi }) {
           />
         </div>
       ) : null}
-      {n100.fetching && !n100.report?.data ? <PremiumLoading title={`Forecasting ${n100.ticker}'s next 10 moves...`} /> : null}
+      {n100.fetching && !n100.report?.data ? <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "forecast", n100.ticker)} subject={n100.ticker} agentId={hunt.activeAgentId} task="forecast" /> : null}
       {n100.fetching && n100.report?.data ? <LoadingStrip label={`Refreshing cached ${n100.ticker} forecast...`} /> : null}
       {n100.error ? <RetryPanel label={n100.error} onRetry={n100.run} /> : null}
       {n100.report?.data ? (

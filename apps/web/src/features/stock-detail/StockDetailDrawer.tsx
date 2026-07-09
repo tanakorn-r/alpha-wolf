@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AiVerdictCard } from "../../components/AiVerdictCard";
+import { AgentByline } from "../../components/agents/AgentByline";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
@@ -10,6 +11,7 @@ import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, f
 import { loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, saveHolding, summarizeStock, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
 import { negative, panel, positive } from "../../lib/ui";
 import { useWolfStore } from "../../store/useWolfStore";
+import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
 
 const returnWindows = ["ytd", "1y", "2y", "3y", "4y"] as const;
 type ResearchTab = "overview" | "consensus" | "financials" | "calendar" | "market" | "news";
@@ -19,6 +21,7 @@ export function StockDetailDrawer() {
   const selectedSymbol = useWolfStore((state) => state.selectedSymbol);
   const selectedStrategy = useWolfStore((state) => state.selectedStrategy);
   const selectedMode = useWolfStore((state) => state.selectedMode);
+  const activeAgentId = useWolfStore((state) => state.activeAgentId);
   const detailOpen = useWolfStore((state) => state.detailOpen);
   const closeDetail = useWolfStore((state) => state.closeDetail);
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
@@ -84,6 +87,11 @@ export function StockDetailDrawer() {
   }, [detailOpen, selectedSymbol]);
 
   useEffect(() => {
+    setAnalysis(null);
+    setHuntAdvice(null);
+  }, [activeAgentId]);
+
+  useEffect(() => {
     if (!detailOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -97,7 +105,7 @@ export function StockDetailDrawer() {
     setError("");
     setAnalyzing(true);
     try {
-      setAnalysis(await summarizeStock(selectedSymbol, selectedStrategy));
+      setAnalysis(await summarizeStock(selectedSymbol, selectedStrategy, activeAgentId));
     } catch {
       setError("AI analysis is unavailable. Check the API configuration.");
     } finally {
@@ -110,7 +118,7 @@ export function StockDetailDrawer() {
     setError("");
     setHuntLoading(true);
     try {
-      setHuntAdvice(await loadQuantPerspective(selectedSymbol, selectedStrategy, selectedMode ?? undefined));
+      setHuntAdvice(await loadQuantPerspective(selectedSymbol, selectedStrategy, selectedMode ?? undefined, activeAgentId));
     } catch {
       setError("Alpha Hunt is unavailable. Check the API configuration.");
     } finally {
@@ -151,7 +159,7 @@ export function StockDetailDrawer() {
             {error ? <div className={`${panel} text-sm text-rose-600`}>{error}</div> : null}
             {addStatus ? <div className={`${panel} text-sm ${addHoldingMutation.isError ? "text-[#f2575c]" : "text-[#3ecf8e]"}`}>{addStatus}</div> : null}
             {detail && !loading ? <>
-              {analyzing || analysis ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} /> : null}
+              {analyzing || analysis ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
               <QuickReadCard detail={detail} analysis={analysis} />
               <ResearchTabs ref={tabsRef} active={tab} onSelect={selectTab} />
               {tab === "overview" ? <DetailContent detail={detail} huntAdvice={huntAdvice} huntLoading={huntLoading} onHunt={runAlphaHunt} /> : tab === "news" ? <NewsSection detail={detail} research={research} researchLoading={researchLoading} /> : researchLoading ? <DetailSkeleton symbol={selectedSymbol} /> : tab === "market" ? <MarketResearch market={market} analyzing={analyzing} onAnalyze={analyze} /> : <ResearchContent tab={tab} research={research} detail={detail} />}
@@ -691,8 +699,8 @@ function IndustryRankBadge({ detail }: { detail: StockDetailResponse }) {
   );
 }
 
-function AiGate({ symbol, analysis, analyzing, onAnalyze }: { symbol: string; analysis: StockAnalysisResponse | null; analyzing: boolean; onAnalyze: () => void }) {
-  if (analyzing) return <div className="flex items-center justify-center gap-3.5 rounded-[14px] border border-[#2a2a31] bg-[#141417] p-[34px] text-[#8c8c95]"><span className="h-5 w-5 animate-spin rounded-full border-2 border-[#2a2a31] border-t-[#3ecf8e]" />Scoring {symbol} across value, income, growth &amp; timing…</div>;
+function AiGate({ symbol, analysis, analyzing, onAnalyze, activeAgentId }: { symbol: string; analysis: StockAnalysisResponse | null; analyzing: boolean; onAnalyze: () => void; activeAgentId: string }) {
+  if (analyzing) return <PremiumLoading title={agentLoadingTitle(activeAgentId, "deep", symbol)} subject={symbol} agentId={activeAgentId} task="deep" />;
   if (analysis) return <AiVerdictCard value={analysis} onRerun={onAnalyze} size="modal" />;
   return <div className="flex flex-col items-center gap-3.5 rounded-[14px] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask AI to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">OpenAI will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><PremiumAiButton label={`Analyze ${symbol}`} sublabel="Premium · full picture" onClick={onAnalyze} size="wide" /></div>;
 }
@@ -741,6 +749,7 @@ function AlphaHuntDecisionDesk({ advice, loading, onHunt }: { advice: QuantPersp
     const tone = huntTone(advice.tone);
     return (
       <div className="min-w-0 overflow-hidden rounded-xl border border-[#2a2a31] bg-[linear-gradient(145deg,#15161a,#101113)] p-4 shadow-[0_18px_45px_rgba(0,0,0,0.26)]">
+        <AgentByline agent={advice.agent} label="Quant agent" />
         <div className="flex items-start justify-between gap-4 max-[560px]:flex-col">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
@@ -790,7 +799,7 @@ function AlphaHuntDecisionDesk({ advice, loading, onHunt }: { advice: QuantPersp
           </div>
         </div>
         <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#242429] pt-3">
-          <span className="text-[11px] text-[#8c8c95]">Swing investor read, generated on request.</span>
+          <span className="text-[11px] text-[#8c8c95]">Swing investor read{advice.generatedAt ? ` · generated ${new Date(advice.generatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ", generated on request."}</span>
           <button type="button" onClick={onHunt} className="rounded-lg border border-[#2a2a31] bg-[#161619] px-3 py-2 text-xs font-semibold text-[#bcbcc2] hover:border-[#3ecf8e] hover:text-[#3ecf8e]">Re-hunt</button>
         </div>
       </div>

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime, timezone
 import ssl
 from typing import Any
 from urllib import error as urllib_error
@@ -10,8 +11,9 @@ from urllib import request as urllib_request
 import certifi
 from pydantic import ValidationError
 
+from internal.ai.agents import agent_badge, compose_instructions
 from internal.store.utils import parse_json_fragment
-from models import BuyTimingNarrative, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformanceResponse
+from models import BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
 
 OPENAI_TIMEOUT_SECONDS = 45
 DEFAULT_OPENAI_MODEL = "gpt-5.5"
@@ -39,33 +41,47 @@ def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return schema
 
 
-def analyze_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+def analyze_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     strategy = str(context.get("selectedStrategy") or "").strip().lower()
     result = _run_openai_structured_request(
         context=context,
         schema_model=StockAnalysis,
         schema_name="stock_analysis",
-        instructions=_analysis_instructions_for_strategy(strategy),
+        instructions=compose_instructions(_analysis_instructions_for_strategy(strategy), agent_id),
         max_output_tokens=2500,
     )
     if [score.label for score in result.scores] != EXPECTED_SCORE_LABELS:
         raise OpenAIAnalysisError("OpenAI returned an invalid scorecard order")
+    result = _calibrate_stock_analysis_for_agent(context, result, agent_id)
+    result = _calibrate_stock_signal(result)
 
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
-    return {**result.model_dump(), "source": "openai", "model": model}
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
-def analyze_quant_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+def analyze_quant_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     result = _run_openai_structured_request(
         context=context,
         schema_model=QuantPerspective,
         schema_name="quant_perspective",
-        instructions=_quant_instructions(),
+        instructions=compose_instructions(_quant_instructions(), agent_id),
         max_output_tokens=2200,
     )
     result = _calibrate_quant_result(context, result)
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
-    return {**result.model_dump(), "source": "openai", "model": model}
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def analyze_valuation_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
+    result = _run_openai_structured_request(
+        context=context,
+        schema_model=ValuationVerdict,
+        schema_name="valuation_verdict",
+        instructions=compose_instructions(_valuation_instructions(), agent_id),
+        max_output_tokens=1800,
+    )
+    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
 def _calibrate_quant_result(context: dict[str, Any], result: QuantPerspective) -> QuantPerspective:
@@ -85,49 +101,219 @@ def _calibrate_quant_result(context: dict[str, Any], result: QuantPerspective) -
     return adjusted
 
 
-def analyze_today_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+def _calibrate_stock_analysis_for_agent(context: dict[str, Any], result: StockAnalysis, agent_id: str | None) -> StockAnalysis:
+    agent = (agent_id or "vera").strip().lower()
+    scores = {score.label: score.score for score in result.scores}
+    quant = context.get("quantScorecard") or {}
+    components = quant.get("componentScores") if isinstance(quant.get("componentScores"), dict) else {}
+    quant_score = _num(quant.get("score"))
+    technical = _num(components.get("technicalTiming"))
+    swing = _num(components.get("swingEntry"))
+    business = _num(components.get("businessQuality"))
+    relative = _num(components.get("relativeStrength"))
+
+    value = float(scores.get("Value", result.confidence))
+    health = float(scores.get("Financial health", result.confidence))
+    dividend = float(scores.get("Dividend safety", result.confidence))
+    growth = float(scores.get("Growth", result.confidence))
+    timing = float(scores.get("Timing", result.confidence))
+
+    if agent == "rex":
+        raw = _weighted(
+            (timing, 0.42),
+            (technical, 0.18),
+            (swing, 0.18),
+            (relative, 0.10),
+            (growth, 0.07),
+            (value, 0.05),
+        )
+        calibrated = raw - 3
+    elif agent == "kai":
+        raw = _weighted(
+            (timing, 0.34),
+            (technical, 0.24),
+            (relative, 0.18),
+            (swing, 0.12),
+            (growth, 0.08),
+            (value, 0.04),
+        )
+        calibrated = raw + 5
+    elif agent == "nadia":
+        raw = _weighted(
+            (quant_score, 0.28),
+            (relative, 0.18),
+            (technical, 0.14),
+            (value, 0.13),
+            (health, 0.13),
+            (growth, 0.08),
+            (timing, 0.06),
+        )
+        calibrated = raw + (0 if raw < 75 else -2)
+    elif agent == "sam":
+        raw = _weighted(
+            (dividend, 0.34),
+            (health, 0.24),
+            (value, 0.16),
+            (business, 0.12),
+            (growth, 0.08),
+            (timing, 0.06),
+        )
+        calibrated = raw + 2
+    elif agent == "ben":
+        raw = _weighted(
+            (business, 0.32),
+            (health, 0.27),
+            (growth, 0.17),
+            (dividend, 0.10),
+            (value, 0.09),
+            (timing, 0.05),
+        )
+        calibrated = raw + (4 if raw >= 68 else -4 if raw <= 45 else 0)
+    elif agent == "alphawolf":
+        raw = _weighted(
+            (value, 0.18),
+            (health, 0.18),
+            (business, 0.16),
+            (timing, 0.16),
+            (technical, 0.10),
+            (dividend, 0.10),
+            (relative, 0.07),
+            (growth, 0.05),
+        )
+        calibrated = raw + (3 if raw >= 72 else -3 if raw <= 42 else 0)
+    else:
+        raw = _weighted(
+            (value, 0.30),
+            (health, 0.25),
+            (dividend, 0.18),
+            (business, 0.12),
+            (growth, 0.10),
+            (timing, 0.05),
+        )
+        calibrated = raw
+
+    calibrated = _expand_conviction(calibrated)
+    calibrated = _apply_market_evidence_adjustments(calibrated, result)
+
+    # Let the Agent lens lead. The model still contributes, but generic caution should not pin
+    # every answer to the 50-60 band when supplied evidence is clearer than that.
+    blended = round(0.18 * result.confidence + 0.82 * calibrated)
+    return result.model_copy(update={"confidence": int(_clamp(blended, 1, 100))})
+
+
+def _expand_conviction(score: float) -> float:
+    distance = score - 50.0
+    if abs(distance) < 4:
+        return score
+    multiplier = 1.42 if abs(distance) >= 12 else 1.24
+    return 50.0 + distance * multiplier
+
+
+def _apply_market_evidence_adjustments(score: float, result: StockAnalysis) -> float:
+    target_move = _num(result.targetPrice.impliedUpsidePct)
+    entry_gap = _num(result.entryPrice.distanceFromCurrentPct)
+    scorecard = {item.label: float(item.score) for item in result.scores}
+    best = max(scorecard.values(), default=score)
+    worst = min(scorecard.values(), default=score)
+
+    adjusted = score
+    if target_move is not None:
+        adjusted += 7 if target_move >= 18 else 4 if target_move >= 10 else -7 if target_move <= -5 else -3 if target_move < 2 else 0
+    if entry_gap is not None:
+        adjusted += 4 if entry_gap <= 0 else -5 if entry_gap >= 8 else -2 if entry_gap >= 4 else 0
+    if best >= 78 and worst >= 50:
+        adjusted += 4
+    if worst <= 35:
+        adjusted -= 5
+    return adjusted
+
+
+def _calibrate_stock_signal(result: StockAnalysis) -> StockAnalysis:
+    signal, tone = _signal_from_score(result.confidence)
+    target_move = _num(result.targetPrice.impliedUpsidePct)
+    if target_move is not None and target_move < -3 and result.confidence < 65:
+        signal, tone = ("PASS", "bad") if result.confidence < 50 else ("WATCH", "warn")
+    return result.model_copy(update={"signal": signal, "tone": tone})
+
+
+def _signal_from_score(score: int) -> tuple[str, str]:
+    if score >= 82:
+        return "STRONG BUY", "good"
+    if score >= 68:
+        return "BUY", "good"
+    if score >= 55:
+        return "ACCUMULATE", "warn"
+    if score >= 40:
+        return "WATCH", "warn"
+    return "PASS", "bad"
+
+
+def _weighted(*items: tuple[float | None, float]) -> float:
+    total = 0.0
+    weight = 0.0
+    for value, item_weight in items:
+        if value is None:
+            continue
+        total += float(value) * item_weight
+        weight += item_weight
+    return total / weight if weight else 50.0
+
+
+def _num(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number == number else None
+
+
+def _clamp(value: float, low: int, high: int) -> float:
+    return max(low, min(high, value))
+
+
+def analyze_today_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     result = _run_openai_structured_request(
         context=context,
-        schema_model=TodayPerformanceResponse,
+        schema_model=TodayPerformance,
         schema_name="today_performance",
-        instructions=_today_performance_instructions(),
+        instructions=compose_instructions(_today_performance_instructions(), agent_id),
         max_output_tokens=1600,
     )
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
-    return {**result.model_dump(), "source": "openai", "model": model}
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
-def analyze_buy_timing_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+def analyze_buy_timing_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     result = _run_openai_structured_request(
         context=context,
         schema_model=BuyTimingNarrative,
         schema_name="buy_timing_narrative",
-        instructions=_buy_timing_instructions(),
+        instructions=compose_instructions(_buy_timing_instructions(), agent_id),
         max_output_tokens=900,
     )
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
-    return {**result.model_dump(), "source": "openai", "model": model}
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
-def recommend_strategy_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+def recommend_strategy_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     result = _run_openai_structured_request(
         context=context,
         schema_model=StrategyPlaybook,
         schema_name="strategy_playbook",
-        instructions=_strategy_recommendations_instructions(),
+        instructions=compose_instructions(_strategy_recommendations_instructions(), agent_id),
         max_output_tokens=2400,
     )
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
-    return {**result.model_dump(), "source": "openai", "model": model}
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
-def predict_technical_moves_with_openai(context: dict[str, Any]) -> dict[str, Any]:
+def predict_technical_moves_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     try:
         result = _run_openai_structured_request(
             context=context,
             schema_model=TechnicalMovesPrediction,
             schema_name="technical_moves_prediction",
-            instructions=_technical_moves_instructions(),
+            instructions=compose_instructions(_technical_moves_instructions(), agent_id),
             max_output_tokens=3600,
             tools=[{"type": "web_search"}],
         )
@@ -138,12 +324,24 @@ def predict_technical_moves_with_openai(context: dict[str, Any]) -> dict[str, An
             context=context,
             schema_model=TechnicalMovesPrediction,
             schema_name="technical_moves_prediction",
-            instructions=_technical_moves_instructions(),
+            instructions=compose_instructions(_technical_moves_instructions(), agent_id),
             max_output_tokens=3600,
             tools=[{"type": "web_search_preview"}],
         )
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
-    return {**result.model_dump(), "source": "openai", "model": model}
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def review_portfolio_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
+    result = _run_openai_structured_request(
+        context=context,
+        schema_model=PortfolioReview,
+        schema_name="portfolio_review",
+        instructions=compose_instructions(_portfolio_review_instructions(), agent_id),
+        max_output_tokens=1800,
+    )
+    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
 def _run_openai_structured_request(
@@ -252,7 +450,96 @@ when the post-ex dip (reversal) window is open and price has pulled back into th
 price is above entry or near the 5-year high, say WAIT.
 Return concise JSON only. The headline should sound like a direct trading instruction.
 The summary should explain why in 1-2 sentences with the key numbers supplied.
+recap: a plain-words recap a beginner can act on — say directly whether to buy now or wait, and
+if waiting, roughly how long (use the supplied buyWindow opensInDays/dates; if unconfirmed, say
+so). One or two short sentences, no jargon.
+agentFit: judge whether buying at the CURRENT price fits YOUR OWN trading style and strategy as
+the persona you were given — "aligned" (exactly a setup you would take), "neutral" (acceptable
+but not your ideal setup), or "against" (your strategy says stay out here).
+agentFitReason: one sentence, first person, explaining that fit using your persona's priorities
+and the supplied numbers only.
 """
+
+
+def _valuation_instructions() -> str:
+    return """
+You are Alpha Wolf's valuation AI for Hunt AI Daily Signals. Analyze only the supplied live
+research data. Your job is to answer whether buying now is cheap, fair, or chasing.
+
+Write like a confident portfolio operator, not a cautious generic analyst. The user wants a
+plain-money verdict: "load up", "standard buy", "wait", "skip this month", or "trap".
+
+Core lens:
+- Start from structural asset floor and dividend/cash yield, then judge whether the current price
+  is a discount, a fair DCA point, or a chase trap.
+- Separate collapse risk from price risk. If supplied data shows a state-backed, conglomerate-backed,
+  regulated, infrastructure, hospital, bank, utility, or other permanent asset, say plainly that
+  disappearance/collapse is not the main risk; overpaying is the risk.
+- For book-value-heavy businesses, use book value, P/BV, 52-week lows/support, and institutional
+  floor logic. For cash-flow/yield assets, use distribution safety, yield, lease/concession life,
+  and whether the payout is true income or capital return.
+- A high-quality company can still be a bad buy today if price is far above its floor. Say that
+  directly.
+- A beaten-down asset can be a good DCA target only if the floor/yield/business permanence supports it.
+
+This is an AI judgment, not a fixed formula: reason over sector structure, business permanence,
+normal valuation ranges, P/BV, P/E, book value per share, dividend yield, growth quality,
+profitability, balance-sheet risk, current price, YTD move, technical stretch, peer/benchmark
+context, sector/industry research, and recent news when supplied.
+
+Hard guardrails:
+- Do not invent prices, book value, P/BV, P/E, yields, sector facts, peers, dates, or policy links.
+- If book value per share is not directly supplied, you may infer it only as currentPrice / P/BV
+  when both numbers are supplied. Say less rather than pretending precision.
+- If a structural P/BV floor is not supplied, infer a conservative floor only from the supplied
+  company/sector context and label it as an inferred floor in prose. For banks or book-value-heavy
+  financials, P/BV can be central; for other sectors, do not overuse P/BV.
+- The UI supplies labels; return concise investor wording, not generic broker language.
+- Use the user's real-money lens: should they add now, wait for a better entry zone, trim, or avoid?
+- Keep verdict and action consistent. Use DISCOUNT with BUY only when the current setup is
+  actionable or clearly accumulatable now. If valuation is optically low but resistance,
+  technical stretch, balance-sheet risk, or sector risk makes the answer wait for a pullback,
+  use FAIR with WAIT and make the entry/add-back anchors explicit.
+- Do not downgrade a true value-zone setup to WAIT just because it is not the absolute bottom.
+  If current price is already at/near the structural floor, below book, in a deep discount band,
+  or offering a strong covered yield with no supplied collapse red flag, use rightNow.action BUY.
+  The note can say "DCA here; add heavier near X" or "small buy now, larger add-back at X".
+- Reserve WAIT for fair/expensive prices, chase-risk setups, thin data, or cases where the current
+  price is meaningfully above the value band. Nearby resistance alone is not enough to say WAIT
+  when the asset is already in a discount/value zone; it should become measured DCA/ACCUMULATE.
+
+Voice requirements:
+- Be decisive. Prefer "This is a chase", "This is a fair DCA", "This is a value zone", or
+  "Skip this month" over vague probability language.
+- Use vivid but professional labels when supported: "chase trap", "safe DCA zone", "value zone",
+  "yield trap", "floor is doing the work", "price is the problem".
+- Mention the structural floor/add-back zone in the narrative or rightNow.note whenever the data
+  supports one.
+- Mention yield when it is meaningful: say whether the user is paid to wait, underpaid for the
+  risk, or being fooled by an unsustainable/amortizing distribution.
+- If the asset is an infrastructure fund, REIT, trust, or concession-style vehicle and the supplied
+  data suggests finite life/amortization/capital return, do not treat it like a normal stock floor.
+
+Return strictly valid JSON matching the ValuationVerdict schema:
+- verdict: CHASING, FAIR, DISCOUNT, or INSUFFICIENT_DATA.
+- chasingAnswer: direct sentence starting with Yes, No, or Not enough data when possible.
+- narrative: 1-2 confident sentences explaining the structural valuation call with key supplied numbers.
+- rightNow.action: BUY, WAIT, TRIM, or AVOID.
+- rightNow.entryOnlyAt: exact add-back / entry price if justified, otherwise null.
+- rightNow.pctAway: percent from current price to entryOnlyAt if both are known; negative means entry is below current price.
+- rightNow.conviction: 0-100 for the verdict quality, not upside.
+- metrics: echo only supplied/inferred numeric metrics; null when unavailable.
+- structureBand.discountAnchor: practical cheap/add-back anchor if justified.
+- structureBand.fairAnchor: fair/book/normal anchor if justified.
+- structureBand.now: current price when supplied.
+- structureBand.zoneLabel: short label such as DISCOUNT, FAIR, CHASING, or UNKNOWN.
+- whatAiSees: 2-5 crisp evidence bullets.
+- thePlay.text: exact instruction for this month.
+- thePlay.addBackLow/addBackHigh: add-back zone bounds when justified, otherwise null.
+
+If the supplied data is too thin for a valuation call, use INSUFFICIENT_DATA and explain exactly
+which missing metrics prevent a real verdict.
+""".strip()
 
 
 def _analysis_instructions() -> str:
@@ -262,7 +549,9 @@ Do not invent missing facts, future prices, analyst opinions, dates, or industry
 Clearly distinguish Yahoo/Wall Street consensus from your own evidence-based conclusion.
 Judge the stock for the selected investment strategy and sound like Alpha Wolf's house view:
 sharp, calm, specific, and hard to confuse with generic broker research.
-Use BUY NOW, WAIT, HOLD, or PASS language in signal and make uncertainty explicit.
+Use the five-level action scale in signal language: STRONG BUY, BUY, ACCUMULATE, WATCH, or PASS.
+Do not flatten medium scores into WAIT: a 55-67 setup is ACCUMULATE, a 40-54 setup is WATCH.
+Make uncertainty explicit in the reasoning, not by using the same label for every score.
 Base confidence and every score on cited numerical evidence from the supplied context.
 Compare performance with the supplied regional benchmark and industry leader.
 Evaluate valuation, financial health, balance-sheet risk, growth quality, earnings quality,
@@ -340,15 +629,15 @@ Treat the supplied JSON input as the current market data:
 3. Calculate practical entryPrice, stop-loss implication, and targetPrice from the stock's normal
    trading range, support/resistance, moving averages, volatility, recent volume, market backdrop,
    and business risk. Do not copy Wall Street target blindly.
-4. Return a decisive but honest trade setup. Use BUY NOW, WAIT, PASS, or SELL/AVOID language in
-   signal. If the setup is not clean, prefer WAIT or PASS.
+4. Return a decisive but honest trade setup. Use the five-level action scale in signal language:
+   STRONG BUY, BUY, ACCUMULATE, WATCH, or PASS. If the setup is not clean, prefer WATCH or PASS.
 5. Keep the answer high-signal and numerical. Avoid broker-style filler and generic lines like
    "momentum is constructive" unless you tie it to exact price behavior and risk.
 
 [OUTPUT CONTRACT]
 Return strictly valid JSON matching the StockAnalysis schema. Do not add extra keys.
 Map the trade setup into the existing schema as follows:
-- signal: one of BUY NOW, WAIT, PASS, or SELL / AVOID when possible
+- signal: one of STRONG BUY, BUY, ACCUMULATE, WATCH, or PASS when possible
 - confidence: conviction_score from 0-100 for "should buy this now under Momentum?"
 - entryPrice.entryPrice: practical entry target
 - entryPrice.why: explain whether the entry is a pullback zone, breakout trigger, or current-price entry
@@ -548,4 +837,25 @@ technical structure while acknowledging business, news, and market context only 
 affect the setup.
 risk must state the main technical reason the path could fail in 1 sentence.
 Avoid hype and avoid buy/sell commands. This is a prediction map, not an order ticket.
+""".strip()
+
+
+def _portfolio_review_instructions() -> str:
+    return """
+You are reviewing the user's current AlphaWolf portfolio using only the supplied portfolioContext.
+Return the same shape as AlphaWolf V8's agent card: score, verdict, intro, sections, bullets, sign.
+
+Grounding rules:
+- Do not invent holdings, prices, weights, yields, P/L, dividend data, or future events.
+- Use the supplied totalValue, gainLossPct, forwardYield, topWeight, winners/losers, best/worst,
+  and holdings list. If the portfolio is empty, say there is nothing to grade yet.
+- score is 0-100 and should reflect portfolio health through your agent lens.
+- verdict is short and uppercase, like FUNDAMENTALLY SOUND, COLD - REGROUP, FACTOR RISK, or
+  COMPOUNDING NICELY.
+- intro is 1-2 sentences summarizing the book.
+- sections must contain 2-4 objects with h and b keys.
+- bullets must contain 2-4 practical next actions.
+- sign must be a short signed line in character, for example "— Vera, by the numbers".
+- Keep risk controls visible. Rex can sound lucky, but never reckless.
+Return strictly valid JSON matching the PortfolioReview schema. Do not add extra keys.
 """.strip()

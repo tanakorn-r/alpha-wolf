@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
+from internal.ai.agents import agent_badge, normalize_agent_id
 from internal.ai.context import build_analysis_context
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_buy_timing_with_openai, predict_technical_moves_with_openai
 from internal.market.deep import deep_analysis
@@ -71,17 +72,19 @@ def details_deep(symbol: str) -> dict[str, Any]:
 def details_buy_timing(
     symbol: str,
     strategy: StrategyKey = Query("stable_dca"),
+    agent: str = Query("vera"),
 ) -> dict[str, Any]:
     normalized = symbol.upper()
+    agent_id = normalize_agent_id(agent)
     result = build_buy_timing(normalized, strategy)
     if not result:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
 
     try:
-        narrative = analyze_buy_timing_with_openai({"buyTiming": result})
+        narrative = analyze_buy_timing_with_openai({"buyTiming": result}, agent_id)
     except OpenAIAnalysisError:
         return result
-    return apply_ai_narrative(result, narrative)
+    return {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
 
 
 @router.get("/api/details/{symbol}/upward-moves", response_model=TechnicalMovesPredictionResponse)
@@ -89,9 +92,11 @@ def details_upward_moves(
     symbol: str,
     timeframe: str = Query("1D", pattern="^(1D|1W)$"),
     strategy: StrategyKey = Query("capitalized"),
+    agent: str = Query("vera"),
 ) -> dict[str, Any]:
     normalized = symbol.upper()
-    cache_key = f"ai-next-10-technical:v6:{normalized}:{timeframe}:{strategy}"
+    agent_id = normalize_agent_id(agent)
+    cache_key = f"ai-next-10-technical:v10:{normalized}:{timeframe}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -127,6 +132,7 @@ def details_upward_moves(
         financials=financials_data,
         market_comparison=market_data,
         domain_insights=insights_data,
+        agent_id=agent_id,
     )
     context["forecastRequest"] = {
         "feature": "Next 10 Technical Moves",
@@ -139,7 +145,7 @@ def details_upward_moves(
     context["historicalMoveDistribution"] = historical
 
     try:
-        result = predict_technical_moves_with_openai(context)
+        result = predict_technical_moves_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

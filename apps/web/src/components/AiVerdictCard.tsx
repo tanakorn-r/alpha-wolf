@@ -1,11 +1,20 @@
 import type { StockAnalysisResponse } from "../lib/api";
 import { formatMoney, formatPercent } from "../lib/format";
 import { Ring } from "../lib/ring";
+import { AgentByline, AgentSignoff } from "./agents/AgentByline";
+import { PremiumAiButton } from "./PremiumAiButton";
 
 const TONE_COLOR: Record<string, string> = { good: "#3ecf8e", warn: "#f5c451", bad: "#f2575c" };
 const TONE_BG: Record<string, string> = { good: "rgba(62,207,142,0.07)", warn: "rgba(245,196,81,0.07)", bad: "rgba(242,87,92,0.07)" };
 const TONE_BORDER: Record<string, string> = { good: "rgba(62,207,142,0.4)", warn: "rgba(245,196,81,0.4)", bad: "rgba(242,87,92,0.4)" };
 const scoreColor = (score: number) => (score >= 75 ? "#3ecf8e" : score >= 55 ? "#f5c451" : "#f2575c");
+
+function generatedText(value?: string | null) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return ` · generated ${date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+}
 
 function PriceBanner({
   target,
@@ -82,6 +91,7 @@ export function AiVerdictCard({
       className="rounded-[14px] p-5"
       style={{ border: `1px solid ${TONE_BORDER[value.tone ?? "warn"]}`, background: TONE_BG[value.tone ?? "warn"] }}
     >
+      <AgentByline agent={value.agent} />
       {value.targetPrice || value.entryPrice ? <PriceBanner target={value.targetPrice} entry={value.entryPrice} tone={value.tone} /> : null}
 
       <div className="flex flex-wrap items-center gap-5">
@@ -155,16 +165,11 @@ export function AiVerdictCard({
 
       {onRerun ? (
         <div className="mt-4 flex items-center justify-between gap-3">
-          <span className="font-mono text-[11px] text-[#5a5a62]">{value.source === "openai" ? `OpenAI · ${value.model ?? "configured model"}` : "AI-generated on request"} · not financial advice</span>
-          <button
-            type="button"
-            onClick={onRerun}
-            className="rounded-lg border border-[#2a2a31] px-3 py-[7px] text-xs text-[#8c8c95] hover:border-[#3ecf8e]"
-          >
-            Re-run
-          </button>
+          <span className="font-mono text-[11px] text-[#5a5a62]">{value.source === "openai" ? `OpenAI · ${value.model ?? "configured model"}` : "AI-generated on request"}{generatedText(value.generatedAt)} · not financial advice</span>
+          <PremiumAiButton label="Re-run" sublabel="AI" onClick={onRerun} size="xs" />
         </div>
       ) : null}
+      <AgentSignoff agent={value.agent} />
     </div>
   );
 }

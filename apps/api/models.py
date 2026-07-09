@@ -239,9 +239,21 @@ class StockAnalysis(BaseModel):
     dcaTiming: str
 
 
+class AgentBadge(BaseModel):
+    id: str
+    name: str
+    mono: str
+    title: str
+    color: str
+    avatarUrl: str | None = None
+    premium: bool = False
+
+
 class StockAnalysisResponse(StockAnalysis):
     source: Literal["openai"]
     model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
 
 
 class StrategyPick(BaseModel):
@@ -273,6 +285,8 @@ class StrategyPlaybook(BaseModel):
 class StrategyPlaybookResponse(StrategyPlaybook):
     source: Literal["openai"]
     model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
 
 
 class StrategyRecommendationRequest(BaseModel):
@@ -312,9 +326,72 @@ class QuantPerspective(BaseModel):
 class QuantPerspectiveResponse(QuantPerspective):
     source: Literal["openai"]
     model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
 
 
-class TodayPerformanceResponse(BaseModel):
+class ValuationRightNow(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["BUY", "WAIT", "TRIM", "AVOID"]
+    note: str
+    entryOnlyAt: float | None = None
+    pctAway: float | None = None
+    conviction: int = Field(ge=0, le=100)
+
+
+class ValuationMetrics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    currentPrice: float | None = None
+    ytdPct: float | None = None
+    bookValuePerShare: float | None = None
+    pbv: float | None = None
+    pbvFloor: float | None = None
+    dividendYield: float | None = None
+
+
+class ValuationStructureBand(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    discountAnchor: float | None = None
+    fairAnchor: float | None = None
+    now: float | None = None
+    zoneLabel: str
+
+
+class ValuationPlay(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+    addBackLow: float | None = None
+    addBackHigh: float | None = None
+
+
+class ValuationVerdict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str
+    name: str
+    currency: str
+    verdict: Literal["CHASING", "FAIR", "DISCOUNT", "INSUFFICIENT_DATA"]
+    chasingAnswer: str
+    narrative: str
+    rightNow: ValuationRightNow
+    metrics: ValuationMetrics
+    structureBand: ValuationStructureBand
+    whatAiSees: list[str] = Field(min_length=2, max_length=5)
+    thePlay: ValuationPlay
+
+
+class ValuationVerdictResponse(ValuationVerdict):
+    source: Literal["openai"]
+    model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
+
+
+class TodayPerformance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     signal: str
@@ -327,8 +404,56 @@ class TodayPerformanceResponse(BaseModel):
     keyLevel: str
     action: str
     risk: str
+
+
+class TodayPerformanceResponse(TodayPerformance):
     source: Literal["openai"]
     model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
+
+
+class AgentStyle(BaseModel):
+    Discipline: int = Field(ge=0, le=100)
+    Patience: int = Field(ge=0, le=100)
+    Data: int = Field(ge=0, le=100)
+    Instinct: int = Field(ge=0, le=100)
+
+
+class AgentProfile(AgentBadge):
+    avatarUrl: str | None = None
+    premium: bool = False
+    tagline: str
+    years: int
+    bio: str
+    belief: str
+    knows: list[str]
+    style: AgentStyle
+
+
+class PortfolioReviewSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    h: str
+    b: str
+
+
+class PortfolioReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    score: int = Field(ge=0, le=100)
+    verdict: str
+    intro: str
+    sections: list[PortfolioReviewSection] = Field(min_length=1, max_length=4)
+    bullets: list[str] = Field(min_length=2, max_length=4)
+    sign: str
+
+
+class PortfolioReviewResponse(PortfolioReview):
+    source: Literal["openai"]
+    model: str
+    agent: AgentBadge
+    generatedAt: str | None = None
 
 
 class BuyTimingNarrative(BaseModel):
@@ -337,6 +462,9 @@ class BuyTimingNarrative(BaseModel):
     headline: str
     summary: str
     action: Literal["BUY", "WAIT", "TRIM", "AVOID"]
+    recap: str
+    agentFit: Literal["aligned", "neutral", "against"]
+    agentFitReason: str
 
 
 class PredictedTechnicalMove(BaseModel):
@@ -390,6 +518,8 @@ class TechnicalMovesPredictionResponse(TechnicalMovesPrediction):
     historicalMoves: list[HistoricalTechnicalMove] = Field(default_factory=list)
     source: Literal["openai"]
     model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
 
 
 class MarketUniverseCache(BaseModel):

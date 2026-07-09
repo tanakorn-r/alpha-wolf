@@ -13,27 +13,281 @@ def build_analysis_context(
     financials: dict[str, Any] | None,
     market_comparison: dict[str, Any] | None,
     domain_insights: dict[str, Any] | None,
+    agent_id: str | None = None,
 ) -> dict[str, Any]:
-    return json_safe(
-        {
-            "stock": bundle.get("stock"),
-            "selectedStrategy": bundle.get("strategy"),
-            "business": bundle.get("business"),
-            "performance": bundle.get("performance"),
-            "technicals": bundle.get("technicals"),
-            "platformVerdict": bundle.get("verdict"),
-            "platformOutlook": bundle.get("outlook"),
-            "industryRanking": bundle.get("peerRank"),
-            "dividendDipPattern": bundle.get("dividendPattern"),
-            "recentNews": bundle.get("news"),
-            "priceHistory": _compact_price_history(bundle.get("history") or []),
-            "financialResearch": financials,
-            "marketComparison": market_comparison,
-            "sectorAndIndustryResearch": domain_insights,
-            "agentProfile": _agent_profile(bundle.get("strategy"), bundle.get("mode")),
-            "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
+    context = {
+        "stock": bundle.get("stock"),
+        "selectedStrategy": bundle.get("strategy"),
+        "agentInputPack": _agent_input_pack(agent_id, bundle, financials, market_comparison, domain_insights),
+        "business": bundle.get("business"),
+        "performance": bundle.get("performance"),
+        "technicals": bundle.get("technicals"),
+        "platformVerdict": bundle.get("verdict"),
+        "platformOutlook": bundle.get("outlook"),
+        "industryRanking": bundle.get("peerRank"),
+        "dividendDipPattern": bundle.get("dividendPattern"),
+        "recentNews": bundle.get("news"),
+        "priceHistory": _compact_price_history(bundle.get("history") or []),
+        "financialResearch": financials,
+        "marketComparison": market_comparison,
+        "sectorAndIndustryResearch": domain_insights,
+        "agentProfile": _agent_profile(bundle.get("strategy"), bundle.get("mode")),
+        "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
+    }
+    return json_safe(context)
+
+
+def _agent_input_pack(
+    agent_id: str | None,
+    bundle: dict[str, Any],
+    financials: dict[str, Any] | None,
+    market_comparison: dict[str, Any] | None,
+    domain_insights: dict[str, Any] | None,
+) -> dict[str, Any]:
+    agent = (agent_id or "vera").strip().lower()
+    stock = bundle.get("stock") or {}
+    business = bundle.get("business") or {}
+    technicals = bundle.get("technicals") or {}
+    performance = bundle.get("performance") or {}
+    returns = performance.get("returns") or {}
+    verdict = bundle.get("verdict") or {}
+    peer_rank = bundle.get("peerRank") or {}
+    dividend_pattern = bundle.get("dividendPattern") or {}
+    history = _compact_price_history(bundle.get("history") or [])
+    latest_history = history[-30:] if history else []
+    news = (bundle.get("news") or [])[:5]
+
+    price = _num(stock.get("price")) or _num(business.get("currentPrice"))
+    support = _num(technicals.get("support"))
+    resistance = _num(technicals.get("resistance"))
+    dividend_yield = _num(business.get("dividendYield"))
+    payout_ratio = _num(business.get("payoutRatio"))
+    pe = _num(business.get("peRatio"))
+    pbv = _num(business.get("priceToBook"))
+    target = _num(business.get("targetMeanPrice"))
+    volatility = _num(technicals.get("volatility"))
+    volume_ratio = _num(technicals.get("volumeRatio"))
+    rsi = _num(technicals.get("rsi14"))
+
+    core = {
+        "symbol": stock.get("symbol"),
+        "name": stock.get("name"),
+        "price": price,
+        "currency": stock.get("currency"),
+        "selectedStrategy": bundle.get("strategy"),
+    }
+
+    if agent == "rex":
+        return {
+            "agent": "rex",
+            "inputPriority": ["live tape", "entry/stop/target", "momentum", "volume", "near-term catalyst", "fundamentals as veto only"],
+            "primary": {
+                **core,
+                "technicals": _pick(
+                    technicals,
+                    "signal",
+                    "rsi14",
+                    "macd",
+                    "macdSignal",
+                    "macdHistogram",
+                    "sma20",
+                    "sma50",
+                    "support",
+                    "resistance",
+                    "momentum",
+                    "volatility",
+                    "avgVolume",
+                    "currentVolume",
+                    "volumeRatio",
+                ),
+                "recentPriceAction": latest_history[-15:],
+                "riskMap": _risk_map(price, support, resistance, target),
+                "recentNews": news[:3],
+            },
+            "secondary": {
+                "businessVeto": _pick(business, "marketCap", "beta", "analystRating", "targetMeanPrice", "peRatio"),
+                "relativePerformance": {"returns": returns, "marketComparison": market_comparison},
+            },
+            "mustAnswer": ["Is there a trade now?", "Where is the stop?", "What invalidates the setup?", "Is the tape hot or cold?"],
         }
-    )
+
+    if agent == "kai":
+        return {
+            "agent": "kai",
+            "inputPriority": ["breakout heat", "crowd energy", "momentum acceleration", "quick flip target", "rug-pull risk", "hard exit"],
+            "primary": {
+                **core,
+                "chaseSetup": {
+                    "technicalSignal": technicals.get("signal"),
+                    "momentum": technicals.get("momentum"),
+                    "rsi14": rsi,
+                    "macd": technicals.get("macd"),
+                    "macdSignal": technicals.get("macdSignal"),
+                    "volumeRatio": volume_ratio,
+                    "volatility": volatility,
+                    "support": support,
+                    "resistance": resistance,
+                    "recentReturns": {key: returns.get(key) for key in ("1d", "1w", "1m", "ytd", "1y")},
+                },
+                "recentPriceAction": latest_history[-12:],
+                "quickFlipMap": _risk_map(price, support, resistance, target),
+                "recentNews": news[:5],
+            },
+            "secondary": {
+                "businessVetoOnly": _pick(business, "marketCap", "beta", "debtToEquity", "profitMargin", "analystRating", "targetMeanPrice"),
+                "relativeHeat": {"peerRank": peer_rank, "marketComparison": market_comparison},
+            },
+            "mustAnswer": ["Is this chaseable now?", "Where does the fun stop?", "Where is the fast sell/trim?", "What rug-pull signal kills the trade?"],
+        }
+
+    if agent == "nadia":
+        return {
+            "agent": "nadia",
+            "inputPriority": ["factor exposure", "relative strength", "volatility", "drawdown risk", "correlation/sector", "rebalance rule"],
+            "primary": {
+                **core,
+                "factorProxy": {
+                    "value": {"peRatio": pe, "priceToBook": pbv, "dividendYield": dividend_yield},
+                    "quality": _pick(business, "roe", "roa", "profitMargin", "operatingMargin", "grossMargin", "debtToEquity"),
+                    "growth": _pick(business, "revenueGrowth", "earningsGrowth"),
+                    "momentum": {"returns": returns, "technicalSignal": technicals.get("signal"), "momentum": technicals.get("momentum")},
+                    "risk": {"volatility": volatility, "beta": business.get("beta"), "volumeRatio": volume_ratio},
+                },
+                "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
+                "relativePerformance": {"peerRank": peer_rank, "marketComparison": market_comparison},
+            },
+            "secondary": {
+                "priceHistorySample": latest_history,
+                "sectorAndIndustryResearch": domain_insights,
+            },
+            "mustAnswer": ["Which factor is strongest?", "What is the risk flag?", "Is the signal strong enough by rule?", "What is the rebalance action?"],
+        }
+
+    if agent == "sam":
+        return {
+            "agent": "sam",
+            "inputPriority": ["dividend safety", "yield-on-cost potential", "cash-flow durability", "moat/quality", "DCA/DRIP plan", "price noise last"],
+            "primary": {
+                **core,
+                "income": {
+                    "dividendYield": dividend_yield,
+                    "payoutRatio": payout_ratio,
+                    "dividendRate": business.get("dividendRate") or stock.get("dividendRate"),
+                    "dividendDate": stock.get("dividendDate"),
+                    "dividendDipPattern": dividend_pattern,
+                },
+                "durability": _pick(business, "marketCap", "sector", "industry", "roe", "profitMargin", "operatingMargin", "debtToEquity", "beta"),
+                "longTermReturns": {key: returns.get(key) for key in ("1y", "2y", "3y", "4y", "ytd")},
+                "valuationForDca": {"price": price, "peRatio": pe, "priceToBook": pbv, "targetMeanPrice": target},
+            },
+            "secondary": {
+                "recentNews": news,
+                "financialResearch": _pick(financials or {}, "cashFlow", "incomeStatement", "balanceSheet", "dividends"),
+            },
+            "mustAnswer": ["Is the income safe?", "Is this a DRIP/DCA add?", "What would make it a yield trap?", "Should short-term price action be ignored?"],
+        }
+
+    if agent == "ben":
+        return {
+            "agent": "ben",
+            "inputPriority": ["moat durability", "management and capital allocation", "owner earnings", "balance-sheet resilience", "pricing power", "price only after structure"],
+            "primary": {
+                **core,
+                "businessStructure": {
+                    "sector": business.get("sector"),
+                    "industry": business.get("industry"),
+                    "marketCap": business.get("marketCap"),
+                    "roe": business.get("roe"),
+                    "roa": business.get("roa"),
+                    "grossMargin": business.get("grossMargin"),
+                    "operatingMargin": business.get("operatingMargin"),
+                    "profitMargin": business.get("profitMargin"),
+                    "debtToEquity": business.get("debtToEquity"),
+                    "revenueGrowth": business.get("revenueGrowth"),
+                    "earningsGrowth": business.get("earningsGrowth"),
+                },
+                "capitalAllocation": _pick(financials or {}, "cashFlow", "balanceSheet", "incomeStatement", "dividends"),
+                "ownershipPriceCheck": {"price": price, "peRatio": pe, "priceToBook": pbv, "targetMeanPrice": target, "dividendYield": dividend_yield},
+                "longTermReturns": {key: returns.get(key) for key in ("1y", "2y", "3y", "4y", "ytd")},
+            },
+            "secondary": {
+                "recentNews": news,
+                "industryRanking": peer_rank,
+                "sectorAndIndustryResearch": domain_insights,
+                "technicalsAsNoiseCheck": _pick(technicals, "signal", "sma50", "sma200", "support", "resistance"),
+            },
+            "mustAnswer": ["Is this a wonderful business?", "Can the structure compound?", "Would an owner ignore the price noise?", "What evidence would break the long-term thesis?"],
+        }
+
+    if agent == "alphawolf":
+        return {
+            "agent": "alphawolf",
+            "inputPriority": ["price attractiveness", "business structure", "technical timing", "income/cash-flow risk", "relative strength", "portfolio fit", "downside control"],
+            "primary": {
+                **core,
+                "fullCornerCheck": {
+                    "valuation": {"peRatio": pe, "priceToBook": pbv, "targetMeanPrice": target, "dividendYield": dividend_yield},
+                    "structure": _pick(business, "marketCap", "sector", "industry", "roe", "roa", "profitMargin", "operatingMargin", "grossMargin", "debtToEquity", "revenueGrowth", "earningsGrowth"),
+                    "timing": _pick(technicals, "signal", "rsi14", "macd", "macdSignal", "sma20", "sma50", "sma200", "support", "resistance", "momentum", "volumeRatio", "volatility"),
+                    "income": {"dividendYield": dividend_yield, "payoutRatio": payout_ratio, "dividendPattern": dividend_pattern},
+                    "riskReward": _risk_map(price, support, resistance, target),
+                    "relativePerformance": {"returns": returns, "peerRank": peer_rank, "marketComparison": market_comparison},
+                },
+                "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
+                "recentNews": news,
+            },
+            "secondary": {
+                "financialResearch": _pick(financials or {}, "incomeStatement", "balanceSheet", "cashFlow", "earnings", "calendar", "dividends"),
+                "sectorAndIndustryResearch": domain_insights,
+                "priceHistorySample": latest_history,
+            },
+            "mustAnswer": ["What does each corner say?", "Which corner is the bottleneck?", "Is the setup portfolio-worthy?", "What is the exact risk budget/action?"],
+        }
+
+    return {
+        "agent": "vera",
+        "inputPriority": ["intrinsic value", "financial statements", "balance sheet", "margin of safety", "dividend safety", "technical timing last"],
+        "primary": {
+            **core,
+            "valuation": {
+                "peRatio": pe,
+                "priceToBook": pbv,
+                "targetMeanPrice": target,
+                "currentPrice": price,
+                "dividendYield": dividend_yield,
+                "analystRating": business.get("analystRating"),
+            },
+            "financialHealth": _pick(business, "roe", "roa", "profitMargin", "operatingMargin", "grossMargin", "debtToEquity", "payoutRatio"),
+            "growthQuality": _pick(business, "revenueGrowth", "earningsGrowth"),
+            "financialResearch": _pick(financials or {}, "incomeStatement", "balanceSheet", "cashFlow", "earnings", "calendar"),
+            "marginOfSafety": _risk_map(price, support, resistance, target),
+        },
+        "secondary": {
+            "technicals": _pick(technicals, "signal", "rsi14", "sma20", "sma50", "sma200", "support", "resistance"),
+            "industryRanking": peer_rank,
+            "sectorAndIndustryResearch": domain_insights,
+            "recentNews": news,
+        },
+        "mustAnswer": ["Is intrinsic value compelling?", "Is the balance sheet acceptable?", "What is the margin of safety?", "What price would change the call?"],
+    }
+
+
+def _pick(source: dict[str, Any], *keys: str) -> dict[str, Any]:
+    return {key: source.get(key) for key in keys if key in source}
+
+
+def _risk_map(price: float | None, support: float | None, resistance: float | None, target: float | None) -> dict[str, Any]:
+    downside_pct = ((support - price) / price * 100) if price and support else None
+    upside_to_resistance_pct = ((resistance - price) / price * 100) if price and resistance else None
+    upside_to_target_pct = ((target - price) / price * 100) if price and target else None
+    return {
+        "support": support,
+        "resistance": resistance,
+        "targetMeanPrice": target,
+        "downsideToSupportPct": downside_pct,
+        "upsideToResistancePct": upside_to_resistance_pct,
+        "upsideToTargetPct": upside_to_target_pct,
+    }
 
 
 def _compact_price_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:

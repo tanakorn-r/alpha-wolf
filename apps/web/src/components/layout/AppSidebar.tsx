@@ -10,8 +10,8 @@ const items: Array<{ to: string; label: string; kind: NavIconKind }> = [
   { to: "/", label: "Dashboard", kind: "dashboard" },
   { to: "/daily-brief", label: "Daily Brief", kind: "insights" },
   { to: "/live-trade", label: "Live Trade", kind: "daytrader" },
-  { to: "/scanner", label: "DCA Scanner", kind: "search" },
-  { to: "/calendar", label: "Income Calendar", kind: "discover" }
+  { to: "/scanner", label: "Stock Hunt", kind: "search" },
+  { to: "/calendar", label: "Dividend Hunt", kind: "discover" }
 ];
 
 export function AppSidebar() {

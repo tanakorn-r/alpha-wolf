@@ -4,46 +4,18 @@ import type { HuntAi } from "./useHuntAi";
 
 export function WatchlistBar({ hunt }: { hunt: HuntAi }) {
   const list = hunt.watchlist;
+  const holdingSymbols = list.symbols.filter((symbol) => list.holdingSymbols.includes(symbol));
+  const watchingSymbols = list.symbols.filter((symbol) => !list.holdingSymbols.includes(symbol));
   return (
     <div className="flex flex-col gap-2">
-      <div className={`${panel} flex flex-wrap items-center gap-2 px-[15px] py-[11px]`}>
-        <span className="flex-none text-[10.5px] uppercase tracking-[0.5px] text-[#5a5a62]">Watchlist</span>
-        {list.symbols.map((symbol) => {
-          const active = list.activeTicker === symbol;
-          return (
-            <button
-              key={symbol}
-              type="button"
-              onClick={() => list.select(symbol)}
-              className={`flex items-center gap-1 rounded-[7px] border bg-[#0e0e10] px-2.5 py-1 font-mono text-xs font-semibold transition-colors ${active ? "border-[#3ecf8e] text-[#3ecf8e]" : "border-[#2a2a31] text-[#ececee] hover:border-[#3ecf8e]"}`}
-            >
-              {symbol}
-              {!list.holdingSymbols.includes(symbol) ? (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    list.remove(symbol);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.stopPropagation();
-                      list.remove(symbol);
-                    }
-                  }}
-                  className="ml-[3px] px-px text-[14px] leading-none text-[#5a5a62] hover:text-[#f2575c]"
-                >
-                  x
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-        <button type="button" onClick={list.toggle} className="flex items-center gap-[5px] rounded-[7px] border border-dashed border-[#2a2a31] px-[11px] py-1 text-xs font-semibold text-[#3ecf8e] hover:border-[#3ecf8e] hover:bg-[#3ecf8e]/05">
-          <span className="text-base leading-none">+</span>Add stock
+      <div className={`${panel} flex flex-wrap items-center gap-[10px] px-[15px] py-[11px]`}>
+        <WatchlistGroup label="You hold" symbols={holdingSymbols} list={list} />
+        <div className="mx-[2px] h-7 w-px bg-[#2a2a31]" />
+        <WatchlistGroup label="Watching" symbols={watchingSymbols} list={list} />
+        <button type="button" onClick={list.toggle} className="flex items-center gap-[7px] rounded-[7px] border border-dashed border-[#2a2a31] px-[11px] py-[6px] text-[13px] font-bold text-[#3ecf8e] hover:border-[#3ecf8e] hover:bg-[#3ecf8e]/05">
+          <span className="text-[18px] leading-none">+</span>Add stock
         </button>
-        <span className="ml-auto flex-none font-mono text-[11px] text-[#5a5a62]">Shared across all tabs</span>
+        <span className="ml-auto flex-none font-mono text-[11px] text-[#5a5a62]">Tap a stock - every tab follows</span>
       </div>
 
       {list.addOpen ? (
@@ -75,5 +47,51 @@ export function WatchlistBar({ hunt }: { hunt: HuntAi }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function WatchlistGroup({ label, symbols, list }: { label: string; symbols: string[]; list: HuntAi["watchlist"] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="flex items-center gap-[7px] text-[10.5px] uppercase tracking-[0.5px] text-[#5a5a62]">
+        <span className="h-[7px] w-[7px] rounded-full bg-[#3ecf8e]" />
+        {label}
+      </span>
+      {symbols.map((symbol) => <WatchlistChip key={symbol} symbol={symbol} list={list} />)}
+    </div>
+  );
+}
+
+function WatchlistChip({ symbol, list }: { symbol: string; list: HuntAi["watchlist"] }) {
+  const active = list.activeTicker === symbol;
+  const removable = !list.holdingSymbols.includes(symbol);
+  return (
+    <button
+      type="button"
+      onClick={() => list.select(symbol)}
+      className={`flex items-center gap-[7px] rounded-[7px] border bg-[#0e0e10] px-[10px] py-[6px] font-mono text-[12px] font-bold transition-colors ${active ? "border-[#ececee] text-[#ececee]" : "border-[#2a2a31] text-[#bcbcc2] hover:border-[#3ecf8e] hover:text-[#ececee]"}`}
+    >
+      <span className="h-[6px] w-[6px] rounded-full bg-[#3ecf8e]" />
+      {symbol}
+      {removable ? (
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.stopPropagation();
+            list.remove(symbol);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.stopPropagation();
+              list.remove(symbol);
+            }
+          }}
+          className="ml-px px-px text-[14px] leading-none text-[#5a5a62] hover:text-[#f2575c]"
+        >
+          x
+        </span>
+      ) : null}
+    </button>
   );
 }

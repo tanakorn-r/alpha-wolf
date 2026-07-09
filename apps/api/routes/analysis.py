@@ -3,15 +3,17 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 
+from internal.ai.agents import normalize_agent_id
 from internal.ai.context import build_analysis_context
-from internal.ai.openai_client import OpenAIAnalysisError, analyze_quant_with_openai, analyze_today_with_openai, analyze_with_openai, recommend_strategy_with_openai
+from internal.ai.openai_client import OpenAIAnalysisError, analyze_quant_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
 from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials, get_market_comparison
+from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
 from internal.market.universe import build_market_page
 from internal.store.cache import cache_get, cache_set
-from models import QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TodayPerformanceResponse
+from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TodayPerformanceResponse, ValuationVerdictResponse
 
 router = APIRouter()
 
@@ -19,10 +21,11 @@ DETAIL_TTL_SECONDS = 180
 
 
 @router.post("/api/analysis/{symbol}", response_model=StockAnalysisResponse)
-def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
-    cache_key = f"v4:{normalized}:{strategy}"
+    agent_id = normalize_agent_id(agent)
+    cache_key = f"v11:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -54,11 +57,12 @@ def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None)) -
         financials=financials_data,
         market_comparison=market_data,
         domain_insights=insights_data,
+        agent_id=agent_id,
     )
 
     # --- OPENAI EVALUATION ---
     try:
-        result = analyze_with_openai(context)
+        result = analyze_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
         
@@ -67,12 +71,13 @@ def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None)) -
 
 
 @router.post("/api/analysis/{symbol}/quant", response_model=QuantPerspectiveResponse)
-def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
+    agent_id = normalize_agent_id(agent)
     mode = str((payload or {}).get("mode") or "").strip().lower()
     mode = mode if mode in {"swing", "day", "long", "value", "fomo"} else None
-    cache_key = f"quant:v8:{normalized}:{strategy}:{mode or 'default'}"
+    cache_key = f"quant:v12:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -104,10 +109,11 @@ def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
         financials=financials_data,
         market_comparison=market_data,
         domain_insights=insights_data,
+        agent_id=agent_id,
     )
 
     try:
-        result = analyze_quant_with_openai(context)
+        result = analyze_quant_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -115,11 +121,12 @@ def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     return result
 
 
-@router.post("/api/analysis/{symbol}/today", response_model=TodayPerformanceResponse)
-def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None)) -> dict[str, Any]:
+@router.post("/api/analysis/{symbol}/valuation", response_model=ValuationVerdictResponse)
+def valuation_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
-    cache_key = f"today:v1:{normalized}:{strategy}"
+    agent_id = normalize_agent_id(agent)
+    cache_key = f"valuation:v7:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -151,10 +158,60 @@ def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
         financials=financials_data,
         market_comparison=market_data,
         domain_insights=insights_data,
+        agent_id=agent_id,
     )
 
     try:
-        result = analyze_today_with_openai(context)
+        result = analyze_valuation_with_openai(context, agent_id)
+    except OpenAIAnalysisError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
+    return result
+
+
+@router.post("/api/analysis/{symbol}/today", response_model=TodayPerformanceResponse)
+def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
+    normalized = symbol.upper().strip()
+    strategy = parse_strategy((payload or {}).get("strategy"))
+    agent_id = normalize_agent_id(agent)
+    cache_key = f"today:v5:{normalized}:{strategy}:{agent_id}"
+    cached = cache_get("analysis", cache_key)
+    if cached is not None:
+        return cached
+
+    bundle = build_detail_bundle(normalized, strategy)
+    if not bundle:
+        raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+
+    try:
+        financials_data = get_financials(normalized)
+    except Exception as exc:
+        print(f"Warning: Financials load failed for {normalized}: {exc}")
+        financials_data = {}
+
+    try:
+        market_data = get_market_comparison(normalized)
+    except Exception as exc:
+        print(f"Warning: Market comparison load failed for {normalized}: {exc}")
+        market_data = {}
+
+    try:
+        insights_data = get_domain_insights(normalized)
+    except Exception as exc:
+        print(f"Warning: Domain insights load failed for {normalized}: {exc}")
+        insights_data = {}
+
+    context = build_analysis_context(
+        bundle,
+        financials=financials_data,
+        market_comparison=market_data,
+        domain_insights=insights_data,
+        agent_id=agent_id,
+    )
+
+    try:
+        result = analyze_today_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -163,13 +220,14 @@ def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
 
 
 @router.post("/api/strategy/recommendations", response_model=StrategyPlaybookResponse)
-def strategy_recommendations(payload: StrategyRecommendationRequest) -> dict[str, Any]:
+def strategy_recommendations(payload: StrategyRecommendationRequest, agent: str = Query("vera")) -> dict[str, Any]:
     strategy_prompt = payload.strategy.strip()
     base_strategy = _infer_base_strategy(strategy_prompt)
+    agent_id = normalize_agent_id(agent)
     cache_digest = hashlib.sha256(
-        f"{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}".encode("utf-8")
+        f"{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}".encode("utf-8")
     ).hexdigest()[:24]
-    cache_key = f"strategy-playbook:v1:{cache_digest}"
+    cache_key = f"strategy-playbook:v4:{cache_digest}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -195,11 +253,33 @@ def strategy_recommendations(payload: StrategyRecommendationRequest) -> dict[str
     }
 
     try:
-        result = recommend_strategy_with_openai(context)
+        result = recommend_strategy_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     result = _filter_strategy_picks(result, candidates, payload.limit, strategy_prompt)
+    cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
+    return result
+
+
+@router.post("/api/analysis/portfolio/review", response_model=PortfolioReviewResponse)
+def portfolio_review(agent: str = Query("vera")) -> dict[str, Any]:
+    agent_id = normalize_agent_id(agent)
+    portfolio = build_portfolio_dashboard()
+    context = _portfolio_review_context(portfolio)
+    cache_digest = hashlib.sha256(
+        f"{agent_id}:{context.get('totalValue')}:{context.get('gainLossPct')}:{context.get('forwardYield')}:{','.join(item.get('symbol', '') for item in context.get('holdings', []))}".encode("utf-8")
+    ).hexdigest()[:24]
+    cache_key = f"portfolio-review:v3:{cache_digest}"
+    cached = cache_get("analysis", cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        result = review_portfolio_with_openai({"portfolioContext": context}, agent_id)
+    except OpenAIAnalysisError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -239,6 +319,60 @@ def _strategy_candidate_context(candidate: dict[str, Any], base_strategy: Strate
         "story": candidate.get("story"),
         "baseStrategyScore": scores.get(base_strategy),
         "strategyScores": scores,
+    }
+
+
+def _portfolio_review_context(portfolio: Any) -> dict[str, Any]:
+    data = portfolio.model_dump() if hasattr(portfolio, "model_dump") else dict(portfolio or {})
+    summary = data.get("summary") or {}
+    holdings = data.get("holdings") or []
+    total_value = float(summary.get("totalValue") or 0)
+    rows: list[dict[str, Any]] = []
+    for holding in holdings:
+        value = float(holding.get("value") or 0)
+        cost = float(holding.get("cost") or 0)
+        gain_loss_pct = float(holding.get("gainLossPct") or 0)
+        rows.append(
+            {
+                "symbol": holding.get("symbol"),
+                "name": holding.get("name"),
+                "strategy": holding.get("strategy"),
+                "shares": holding.get("shares"),
+                "averageCost": holding.get("averageCost"),
+                "price": holding.get("price"),
+                "currency": holding.get("currency"),
+                "value": value,
+                "cost": cost,
+                "gainLoss": holding.get("gainLoss"),
+                "gainLossPct": gain_loss_pct,
+                "weightPct": (value / total_value * 100) if total_value > 0 else 0,
+                "dividendYield": holding.get("dividendYield"),
+                "monthlyDca": holding.get("monthlyDca"),
+            }
+        )
+
+    sorted_by_value = sorted(rows, key=lambda item: float(item.get("value") or 0), reverse=True)
+    sorted_by_return = sorted(rows, key=lambda item: float(item.get("gainLossPct") or 0), reverse=True)
+    top = sorted_by_value[0] if sorted_by_value else None
+    best = sorted_by_return[0] if sorted_by_return else None
+    worst = sorted_by_return[-1] if sorted_by_return else None
+
+    return {
+        "empty": len(rows) == 0,
+        "holdingCount": len(rows),
+        "totalValue": total_value,
+        "invested": summary.get("invested"),
+        "gainLoss": summary.get("gainLoss"),
+        "gainLossPct": summary.get("gainLossPct"),
+        "dividendsYtd": summary.get("dividendsYtd"),
+        "forwardYield": summary.get("forwardYield"),
+        "winners": len([row for row in rows if float(row.get("gainLossPct") or 0) >= 0]),
+        "losers": len([row for row in rows if float(row.get("gainLossPct") or 0) < 0]),
+        "top": top,
+        "topWeightPct": top.get("weightPct") if top else 0,
+        "best": best,
+        "worst": worst,
+        "holdings": rows,
     }
 
 

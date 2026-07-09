@@ -151,6 +151,10 @@ def apply_ai_narrative(result: dict[str, Any], narrative: dict[str, Any]) -> dic
         "action": narrative.get("action") or result["action"],
         "narrativeSource": narrative.get("source") or "openai",
         "model": narrative.get("model"),
+        "recap": narrative.get("recap"),
+        "agentFit": narrative.get("agentFit"),
+        "agentFitReason": narrative.get("agentFitReason"),
+        "generatedAt": narrative.get("generatedAt"),
     }
 
 

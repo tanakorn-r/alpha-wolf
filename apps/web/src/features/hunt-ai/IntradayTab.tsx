@@ -10,12 +10,13 @@ import {
   YAxis,
 } from "recharts";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
 import { EmptyPanel, RetryPanel } from "../../components/ui/panels";
 import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
 import { PremiumChartTooltip } from "./ChartTooltip";
-import { buildTechnicalChartData, colorForTone, compact, moneyMaybe, stopFromEntry } from "./lib";
-import { ChartLoading, SpinnerOrb, panel } from "./ui";
+import { buildTechnicalChartData, colorForTone, compact, formatAnalyzedAt, moneyMaybe, stopFromEntry } from "./lib";
+import { ChartLoading, SpinnerOrb, agentName, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
 export function IntradayTab({ hunt }: { hunt: HuntAi }) {
@@ -118,6 +119,7 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
             <div className={`${analysis ? "rounded-[10px]" : "rounded-xl border border-[#2a2a31]"} bg-[#161619] p-4`}>
               {analysis ? (
                 <>
+                  <AgentByline agent={analysis.agent} label="Signal agent" />
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-[10px] uppercase tracking-[0.5px] text-[#8c8c95]">AI Signal · now</span>
                     <span className="rounded-[5px] border border-[#f5c451]/30 bg-[#f5c451]/10 px-2 py-0.5 text-[10px] font-semibold text-[#f5c451]">{intraday.ticker}</span>
@@ -130,25 +132,34 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
                     <IntradayLevel label="Take profit" value={moneyMaybe(analysis.targetPrice?.targetPrice, currency)} color="#3ecf8e" />
                     <IntradayLevel label="Signal score" value={`${analysis.confidence}/100`} color={tone} />
                   </div>
+                  <div className="font-mono text-[10px] text-[#5a5a62]">Cached {formatAnalyzedAt(intraday.analyzedAt)}</div>
+                  <AgentSignoff agent={analysis.agent} />
                 </>
               ) : (
                 <div className="text-center">
                   <SpinnerOrb />
-                  <div className="mb-1.5 text-[13px] font-semibold">{intraday.aiLoading ? "AI is reading..." : "AI is watching..."}</div>
+                  <div className="mb-1.5 text-[13px] font-semibold">{intraday.aiLoading ? `${agentName(hunt.activeAgentId)} is reading...` : `${agentName(hunt.activeAgentId)} is watching...`}</div>
                   <div className="mx-auto max-w-[240px] text-[12px] leading-[1.6] text-[#8c8c95]">One explicit read. Entry, stop, target and signal score appear here when requested.</div>
                 </div>
               )}
             </div>
           </div>
-          <PremiumAiButton
-            label={intraday.aiLoading ? "Reading..." : "Get AI signal now"}
-            sublabel="Premium · live tape"
-            disabled={intraday.aiLoading || intraday.pending}
-            loading={intraday.aiLoading}
-            onClick={() => void intraday.run()}
-            size="compact"
-            className="w-full"
-          />
+          <div className="flex flex-col gap-1.5">
+            {analysis ? (
+              <div className="text-right font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">
+                Last sync {formatAnalyzedAt(intraday.analyzedAt)}
+              </div>
+            ) : null}
+            <PremiumAiButton
+              label={intraday.aiLoading ? "Reading..." : analysis ? "Refresh AI signal" : "Get AI signal now"}
+              sublabel={analysis ? "Premium · cached signal" : "Premium · live tape"}
+              disabled={intraday.aiLoading || intraday.pending}
+              loading={intraday.aiLoading}
+              onClick={() => void intraday.run()}
+              size="compact"
+              className="w-full"
+            />
+          </div>
         </div>
       </div>
       <div className="text-center font-mono text-[10.5px] text-[#5a5a62]">Real delayed quotes - technical read only - not financial advice</div>

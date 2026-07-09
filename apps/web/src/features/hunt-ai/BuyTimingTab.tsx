@@ -1,7 +1,9 @@
 import { EmptyPanel, LoadingPanel, RetryPanel } from "../../components/ui/panels";
+import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
+import { PremiumAiButton } from "../../components/PremiumAiButton";
 import type { BuyTimingResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
-import { clamp } from "./lib";
+import { clamp, formatAnalyzedAt } from "./lib";
 import type { HuntAi } from "./useHuntAi";
 
 export function BuyTimingTab({ hunt }: { hunt: HuntAi }) {
@@ -14,10 +16,10 @@ export function BuyTimingTab({ hunt }: { hunt: HuntAi }) {
   if (row.pending) return <LoadingPanel title={`Mapping ${row.symbol} timing...`} body="Measuring real ex-dividend dips and seasonal returns." />;
   if (row.failed || !row.timing) return <RetryPanel label={`Could not load ${row.symbol} timing data.`} onRetry={row.retry} />;
 
-  return <TimingPage timing={row.timing} />;
+  return <TimingPage timing={row.timing} analyzedAt={row.analyzedAt} refreshing={row.fetching} onRefresh={row.retry} />;
 }
 
-function TimingPage({ timing }: { timing: BuyTimingResponse }) {
+function TimingPage({ timing, analyzedAt, refreshing, onRefresh }: { timing: BuyTimingResponse; analyzedAt: string; refreshing?: boolean; onRefresh: () => void }) {
   const entryBand = formatEntryBand(timing);
   const dipText = pct(timing.stats.avgPostExDipPct);
   const hitRate = timing.postExDipPattern.hitRate != null ? `${timing.postExDipPattern.hitRate.toFixed(0)}% hit rate` : "thin sample";
@@ -26,22 +28,29 @@ function TimingPage({ timing }: { timing: BuyTimingResponse }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="rounded-[14px] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-7 py-6">
+      <section className="rounded-[13px] border border-[#2a2a31] bg-[#161619] p-[18px]">
+        <AgentByline agent={timing.agent} label="Timing agent" />
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-[1080px]">
-            <div className="text-[20px] font-bold tracking-[-0.25px] text-[#ececee]">{timing.headline}</div>
-            <p className="mt-3 max-w-[1050px] text-[14px] leading-[1.65] text-[#bcbcc2]">{timing.summary}</p>
+            <div className="text-[15px] font-bold tracking-[-0.2px] text-[#ececee]">{timing.headline}</div>
+            <p className="mt-[6px] max-w-[1050px] text-[12.5px] leading-[1.6] text-[#bcbcc2]">{timing.summary}</p>
           </div>
-          <span className="rounded-[7px] border border-[#2a2a31] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.08em] text-[#8c8c95]">
-            {timing.narrativeSource === "openai" ? "AI read" : "Calculated"}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-[5px] border border-[#2a2a31] bg-[#0e0e10] px-[10px] py-[3px] font-mono text-[10px] font-bold uppercase tracking-[0.04em] text-[#8c8c95]">
+              {timing.narrativeSource === "openai" ? "AI read" : "Calculated"}
+            </span>
+            <span className="font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">
+              Last sync {formatAnalyzedAt(analyzedAt)}
+            </span>
+            <PremiumAiButton label={refreshing ? "Refreshing" : "Refresh"} sublabel="Timing" disabled={refreshing} loading={refreshing} onClick={onRefresh} size="xs" />
+          </div>
         </div>
-        <div className="mt-5 grid gap-3 min-[760px]:grid-cols-3">
+        <div className="mt-4 grid gap-3 min-[760px]:grid-cols-3">
           <PlainAnswer label="Today" value={currentMonthLabel()} detail={timing.price != null ? `Price now ${formatCurrency(timing.price, timing.currency)}` : "Current month"} />
           <PlainAnswer label="Best wait" value={wait} detail={timing.nextBuy.label ? `Buy window ${timing.nextBuy.label}` : "Wait for entry price"} />
           <PlainAnswer label="Price check" value={priceCheck(timing)} detail={priceCheckDetail(timing)} />
         </div>
-        <div className="mt-6 grid gap-4 min-[900px]:grid-cols-2">
+        <div className="mt-4 grid gap-3 min-[900px]:grid-cols-2">
           <WindowBox
             tone="buy"
             eyebrow={`Next buy point · ${opensText(timing.nextBuy.opensInDays)}`}
@@ -55,9 +64,12 @@ function TimingPage({ timing }: { timing: BuyTimingResponse }) {
             body={trimBody}
           />
         </div>
+        {timing.recap ? <AgentRecap timing={timing} /> : null}
+        <AgentSignoff agent={timing.agent} />
       </section>
+      <div className="text-center font-mono text-[10.5px] text-[#5a5a62]">Buy Timing cached {formatAnalyzedAt(analyzedAt)}.</div>
 
-      <section className="rounded-[14px] border border-[#2a2a31] bg-[#161619] px-7 py-6">
+      <section className="rounded-[13px] border border-[#2a2a31] bg-[#161619] p-[18px]">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <div className="text-[15px] font-bold">Month map</div>
           <div className="text-[12px] text-[#5a5a62]">{cycleLabel(timing)}</div>
@@ -74,8 +86,8 @@ function TimingPage({ timing }: { timing: BuyTimingResponse }) {
         <StatBox label="Edge vs random buy" value={timing.stats.edgeVsRandomBuyPct != null ? `${signed(timing.stats.edgeVsRandomBuyPct)}%` : "Not enough data"} color="#3ecf8e" />
       </div>
 
-      <section className="rounded-[14px] border border-[#2a2a31] bg-[#161619] px-7 py-6">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      <section className="rounded-[13px] border border-[#2a2a31] bg-[#161619] p-[18px]">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-[15px] font-bold">5-year seasonality · avg monthly return</div>
             <div className="mt-1 text-[12px] text-[#5a5a62]">Measured from historical monthly closes, not generated.</div>
@@ -88,9 +100,9 @@ function TimingPage({ timing }: { timing: BuyTimingResponse }) {
         <SeasonalityChart values={timing.seasonality} cheapestMonth={timing.cheapestMonth ?? ""} peakMonth={timing.peakMonth ?? ""} />
       </section>
 
-      <section className="rounded-[14px] border border-[#2a2a31] bg-[#161619] px-7 py-5">
-        <div className="mb-3 text-[12px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Calculation drivers</div>
-        <div className="grid gap-3 text-[13px] text-[#bcbcc2] min-[760px]:grid-cols-3">
+      <section className="rounded-[13px] border border-[#2a2a31] bg-[#161619] p-[18px]">
+        <div className="mb-3 text-[10px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Calculation drivers</div>
+        <div className="grid gap-3 text-[12.5px] text-[#bcbcc2] min-[760px]:grid-cols-3">
           <Driver label="Post-ex pattern" value={`${hitRate} · sample ${timing.postExDipPattern.sampleSize}`} />
           <Driver label="Current setup" value={`${timing.action} · ${priceCheckDetail(timing)}`} />
           <Driver label="Price now" value={timing.price != null ? formatCurrency(timing.price, timing.currency) : "n/a"} />
@@ -100,12 +112,32 @@ function TimingPage({ timing }: { timing: BuyTimingResponse }) {
   );
 }
 
+function AgentRecap({ timing }: { timing: BuyTimingResponse }) {
+  const fit = timing.agentFit ?? "neutral";
+  const meta =
+    fit === "aligned"
+      ? { color: "#3ecf8e", label: "Fits my strategy" }
+      : fit === "against"
+        ? { color: "#f2575c", label: "Not my setup" }
+        : { color: "#f5c451", label: "OK, not my ideal setup" };
+  return (
+    <div className="mt-4 rounded-[12px] border px-4 py-[14px]" style={{ borderColor: `${meta.color}50`, background: `${meta.color}0f` }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[9.5px] font-bold uppercase tracking-[0.06em]" style={{ color: meta.color }}>{timing.agent?.name ?? "Agent"} recap</span>
+        <span className="rounded-[5px] border px-2 py-[2px] text-[9.5px] font-bold uppercase tracking-[0.04em]" style={{ borderColor: `${meta.color}55`, color: meta.color, background: `${meta.color}14` }}>{meta.label}</span>
+      </div>
+      <p className="mt-2 text-[13px] font-semibold leading-[1.55] text-[#ececee]">{timing.recap}</p>
+      {timing.agentFitReason ? <p className="mt-1.5 text-[11.5px] italic leading-[1.55] text-[#8c8c95]">“{timing.agentFitReason}”</p> : null}
+    </div>
+  );
+}
+
 function PlainAnswer({ label, value, detail }: { label: string; value: string; detail: string }) {
   return (
     <div className="rounded-[10px] border border-[#2a2a31] bg-[#111113] px-4 py-3">
-      <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#666670]">{label}</div>
-      <div className="mt-1 text-[20px] font-extrabold tracking-[-0.2px] text-[#ececee]">{value}</div>
-      <div className="mt-1 text-[12px] text-[#8c8c95]">{detail}</div>
+      <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#8c8c95]">{label}</div>
+      <div className="mt-1 text-[18px] font-extrabold tracking-[-0.3px] text-[#ececee]">{value}</div>
+      <div className="mt-1 text-[11px] text-[#8c8c95]">{detail}</div>
     </div>
   );
 }
@@ -113,10 +145,10 @@ function PlainAnswer({ label, value, detail }: { label: string; value: string; d
 function WindowBox({ tone, eyebrow, title, body }: { tone: "buy" | "trim"; eyebrow: string; title: string; body: string }) {
   const color = tone === "buy" ? "#3ecf8e" : "#f5c451";
   return (
-    <div className="rounded-[12px] border px-5 py-4" style={{ borderColor: `${color}50`, background: tone === "buy" ? "rgba(62,207,142,0.07)" : "rgba(245,196,81,0.06)" }}>
-      <div className="text-[11px] font-bold uppercase tracking-[0.08em]" style={{ color }}>{eyebrow}</div>
-      <div className="mt-3 font-mono text-[24px] font-bold tracking-[0.08em] text-[#ececee]">{title}</div>
-      <div className="mt-2 text-[12px] text-[#8c8c95]">{body}</div>
+    <div className="rounded-[12px] border px-4 py-[14px]" style={{ borderColor: `${color}50`, background: tone === "buy" ? "rgba(62,207,142,0.07)" : "rgba(245,196,81,0.06)" }}>
+      <div className="text-[9.5px] font-bold uppercase tracking-[0.06em]" style={{ color }}>{eyebrow}</div>
+      <div className="mt-2 font-mono text-[18px] font-extrabold tracking-[-0.3px] text-[#ececee]">{title}</div>
+      <div className="mt-1.5 text-[11px] text-[#8c8c95]">{body}</div>
     </div>
   );
 }
@@ -238,9 +270,9 @@ function CycleMarker({ left, color, label, align = "center" }: { left: number; c
 
 function StatBox({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div className="rounded-[12px] border border-[#2a2a31] bg-[#161619] px-5 py-4">
-      <div className="text-[11px] uppercase tracking-[0.08em] text-[#8c8c95]">{label}</div>
-      <div className="mt-3 font-mono text-[22px] font-bold" style={{ color }}>{value}</div>
+    <div className="rounded-[12px] border border-[#2a2a31] bg-[#161619] px-4 py-[14px]">
+      <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#8c8c95]">{label}</div>
+      <div className="mt-2 font-mono text-[18px] font-extrabold tracking-[-0.3px]" style={{ color }}>{value}</div>
     </div>
   );
 }

@@ -76,6 +76,7 @@ export function useStockHunt() {
   const openDetail = useWolfStore((state) => state.openDetail);
   const setStrategy = useWolfStore((state) => state.setStrategy);
   const setSelectedMode = useWolfStore((state) => state.setSelectedMode);
+  const activeAgentId = useWolfStore((state) => state.activeAgentId);
   const [strategyMode, setStrategyMode] = useState<StrategyMode>("swing");
   const baseStrategy = modeToBaseStrategy[strategyMode];
   const cashReserve = useWolfStore((state) => state.cashReserve);
@@ -268,7 +269,7 @@ export function useStockHunt() {
       setAnalyzing(true);
       setAnalyzingSymbol(symbol);
       try {
-        setAnalysis(await summarizeStock(symbol, baseStrategy));
+        setAnalysis(await summarizeStock(symbol, baseStrategy, activeAgentId));
       } finally {
         setAnalyzing(false);
         setAnalyzingSymbol("");

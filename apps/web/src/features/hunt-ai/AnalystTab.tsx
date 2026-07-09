@@ -1,11 +1,12 @@
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { SearchIcon } from "../../components/ui/icons";
+import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
+import { PremiumAiButton } from "../../components/PremiumAiButton";
 import type { StockAnalysisResponse, StockDetailResponse } from "../../lib/api";
 import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
 import { AnalystPanels } from "./AnalystPanels";
-import { colorForTone, normalizeSignal } from "./lib";
-import { PremiumLoading, panel } from "./ui";
+import { formatAnalyzedAt, signalLevel } from "./lib";
+import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
 export function AnalystTab({ hunt }: { hunt: HuntAi }) {
@@ -20,7 +21,7 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
           </div>
           <div>
             <div className="mb-[9px] text-[22px] font-bold" style={{ background: "linear-gradient(90deg,#74a4ff,#3ecf8e,#c77dff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Stock Analyst</div>
-            <div className="mx-auto max-w-[400px] text-[13px] leading-[1.7] text-[#8c8c95]">Search any stock — AlphaWolf pulls price action, news, revenue, cost structure, company fundamentals and tells you exactly how it fits your portfolio.</div>
+            <div className="mx-auto max-w-[400px] text-[13px] leading-[1.7] text-[#8c8c95]">Pick a ticker from the Hunt watchlist and AlphaWolf pulls price action, news, revenue, cost structure, and fundamentals.</div>
           </div>
           <button type="button" onClick={hunt.unlockPremium} className="flex items-center gap-[9px] rounded-[11px] px-8 py-3 text-[14px] font-bold text-white hover:opacity-90" style={{ background: "linear-gradient(135deg,#74a4ff,#3ecf8e,#c77dff)" }}>
             Unlock Stock Analyst — from $29/mo
@@ -31,6 +32,7 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
   }
 
   const hasResult = !analyst.loading && analyst.detail != null && analyst.analysis != null;
+  const selectedTicker = analyst.activeTicker;
   const currency = analyst.detail?.stock.currency ?? "USD";
   const price = analyst.detail?.stock.price;
   const change = analyst.detail?.stock.changePct ?? 0;
@@ -38,74 +40,120 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
 
   return (
     <div className="flex flex-col gap-3.5">
-      <div className="flex gap-[9px]">
-        <div className="relative flex-1 max-w-[420px]">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            value={analyst.query}
-            onChange={(e) => analyst.setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void analyst.run(analyst.query); }}
-            placeholder="Any ticker — AAPL, TSLA, NVDA, PTT…"
-            className="w-full rounded-[9px] border border-[#2a2a31] bg-[#161619] py-[11px] pl-9 pr-3 text-[13px] text-[#ececee] outline-none focus:border-[#3ecf8e]"
-          />
+      <div className={`${panel} flex flex-wrap items-center justify-between gap-3 px-4 py-3`}>
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <div>
+            <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#5a5a62]">Analyst target</div>
+            <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
+              <span className="font-mono text-[18px] font-extrabold text-[#ececee]">{selectedTicker || "—"}</span>
+              {analyst.detail ? <span className="max-w-[220px] truncate text-[11px] text-[#8c8c95]">{analyst.detail.stock.name}</span> : null}
+              {inPortfolio ? <span className="rounded-[5px] border border-[#3ecf8e]/25 bg-[#3ecf8e]/10 px-2 py-[2px] text-[9px] font-semibold text-[#3ecf8e]">IN PORTFOLIO</span> : null}
+            </div>
+          </div>
+          {analyst.detail ? (
+            <div className="flex items-baseline gap-1.5 border-l border-[#252529] pl-3">
+              <span className="font-mono text-[18px] font-bold">{price != null ? formatCurrency(price, currency) : "—"}</span>
+              <span className={`font-mono text-[11px] ${change >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{change >= 0 ? "+" : ""}{change.toFixed(2)}%</span>
+            </div>
+          ) : null}
         </div>
-        <button
-          type="button"
-          disabled={analyst.loading || !analyst.query.trim()}
-          onClick={() => void analyst.run(analyst.query)}
-          className="flex-none rounded-[8px] bg-[#3ecf8e] px-5 py-[10px] text-[13px] font-bold text-[#06120c] hover:opacity-85 disabled:opacity-50"
-        >
-          {analyst.loading ? "Analyzing..." : "Analyze →"}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {analyst.analysis && analyst.analyzedAt ? (
+            <span className="font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">Last sync {formatAnalyzedAt(analyst.analyzedAt)}</span>
+          ) : null}
+          <PremiumAiButton label={analyst.loading ? "Analyzing" : analyst.analysis ? "Refresh" : "Analyze"} sublabel="Analyst" disabled={!selectedTicker} loading={analyst.loading} onClick={() => void analyst.run()} size="xs" />
+        </div>
       </div>
 
-      {analyst.holdingSymbols.length > 0 ? (
-        <div className="flex flex-wrap items-center gap-[7px]">
-          <span className="text-[11px] text-[#5a5a62]">Holdings:</span>
-          {analyst.holdingSymbols.slice(0, 8).map((sym) => (
-            <button
-              key={sym}
-              type="button"
-              onClick={() => { analyst.setQuery(sym); void analyst.run(sym); }}
-              className={`rounded-[6px] border px-[10px] py-[4px] font-mono text-[12px] font-semibold transition-colors hover:border-[#3ecf8e] ${analyst.ticker === sym ? "border-[#3ecf8e] bg-[#3ecf8e]/10 text-[#3ecf8e]" : "border-[#2a2a31] bg-[#0e0e10] text-[#ececee]"}`}
-            >
-              {sym}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      {analyst.loading ? <PremiumLoading title={`AlphaWolf is deep-reading ${analyst.query.trim().toUpperCase() || "this stock"}...`} /> : null}
+      {analyst.loading ? <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "analyst", selectedTicker || "this stock")} subject={selectedTicker || "AI"} agentId={hunt.activeAgentId} task="analyst" /> : null}
 
       {hasResult && analyst.detail && analyst.analysis ? (
         <div className="flex flex-col gap-3">
-          <div className={`${panel} flex flex-wrap items-center justify-between gap-3 px-5 py-4`}>
-            <div className="flex flex-wrap items-center gap-3">
-              <div>
-                <div className="font-mono text-[20px] font-bold">{analyst.detail.stock.symbol}</div>
-                <div className="mt-[1px] text-[12px] text-[#8c8c95]">{analyst.detail.stock.name}</div>
-              </div>
-              {inPortfolio ? <span className="rounded-[5px] border border-[#3ecf8e]/25 bg-[#3ecf8e]/10 px-2 py-[2px] text-[10px] font-semibold text-[#3ecf8e]">IN YOUR PORTFOLIO</span> : null}
-            </div>
-            <div className="flex items-baseline gap-2">
-              <div className="font-mono text-[24px] font-bold">{price != null ? formatCurrency(price, currency) : "—"}</div>
-              <div className={`font-mono text-[13px] ${change >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{change >= 0 ? "+" : ""}{change.toFixed(2)}%</div>
-            </div>
-          </div>
+          <div><AgentByline agent={analyst.analysis.agent} label="Analyst agent" /></div>
+          <AnalystDecisionMatrix analysis={analyst.analysis} />
           <AnalystScoreCard analysis={analyst.analysis} currency={currency} />
           <AnalystPriceChart detail={analyst.detail} analysis={analyst.analysis} />
           <AnalystReasons analysis={analyst.analysis} />
           <AnalystPanels detail={analyst.detail} analysis={analyst.analysis} />
+          <AgentSignoff agent={analyst.analysis.agent} />
         </div>
       ) : null}
 
-      {!analyst.loading && !analyst.ticker ? (
+      {!analyst.loading && !selectedTicker ? (
         <div className={`${panel} px-10 py-10 text-center`}>
-          <div className="mb-3 text-[30px]">🐺</div>
-          <div className="text-[14px] font-semibold">The pack is ready</div>
-          <div className="mx-auto mt-2 max-w-[340px] text-[12.5px] leading-[1.7] text-[#8c8c95]">Search any ticker above or tap a holding. AlphaWolf pulls every signal and tells you exactly what to do.</div>
+          <div className="text-[14px] font-semibold">The analyst is waiting for a ticker</div>
+          <div className="mx-auto mt-2 max-w-[360px] text-[12.5px] leading-[1.7] text-[#8c8c95]">Add or select a stock in the Hunt watchlist above. The Analyst tab will use that same ticker.</div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function AnalystDecisionMatrix({ analysis }: { analysis: StockAnalysisResponse }) {
+  const matrix = buildAnalystMatrix(analysis);
+  return (
+    <div className={`${panel} overflow-hidden p-4`}>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="text-[13px] font-bold tracking-[-0.1px] text-[#ececee]">Analyst Matrix</div>
+          <div className="mt-0.5 text-[11px] text-[#8c8c95]">Price now vs. business structure.</div>
+        </div>
+        <div className="rounded-[7px] border px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.05em]" style={{ color: matrix.color, borderColor: `${matrix.color}66`, background: `${matrix.color}12` }}>
+          {matrix.action}
+        </div>
+      </div>
+
+      <div className="grid gap-3 min-[900px]:grid-cols-[0.82fr_1.18fr]">
+        <div className="grid gap-2 min-[560px]:grid-cols-2 min-[900px]:grid-cols-1">
+          <MatrixAxisCard title="Price now" score={matrix.priceScore} label={matrix.priceLabel} color={matrix.priceColor} body={matrix.priceBody} />
+          <MatrixAxisCard title="Structure" score={matrix.structureScore} label={matrix.structureLabel} color={matrix.structureColor} body={matrix.structureBody} />
+        </div>
+
+        <div className="relative min-h-[168px] rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3">
+          <div className="absolute inset-x-4 top-1/2 h-px bg-[#252529]" />
+          <div className="absolute inset-y-4 left-1/2 w-px bg-[#252529]" />
+          <QuadrantLabel className="left-3 top-3" color="#3ecf8e" title="Buy / add" sub="good price + strong structure" />
+          <QuadrantLabel className="right-3 top-3 text-right" color="#74a4ff" title="Watch entry" sub="strong structure, price needs help" />
+          <QuadrantLabel className="bottom-3 left-3" color="#f5c451" title="Trade only" sub="price ok, structure not proven" />
+          <QuadrantLabel className="bottom-3 right-3 text-right" color="#f2575c" title="Pass" sub="weak price + weak structure" />
+
+          <div
+            className="absolute grid h-[28px] w-[28px] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 bg-[#161619] font-mono text-[9px] font-extrabold shadow-[0_10px_28px_rgba(0,0,0,0.35)] transition-all"
+            style={{ left: `${matrix.x}%`, top: `${matrix.y}%`, color: matrix.color, borderColor: matrix.color }}
+          >
+            {analysis.agent?.mono ?? "AI"}
+          </div>
+          <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 text-[8px] uppercase tracking-[0.08em] text-[#5a5a62]">Price</div>
+          <div className="absolute left-1.5 top-1/2 -translate-y-1/2 -rotate-90 text-[8px] uppercase tracking-[0.08em] text-[#5a5a62]">Structure</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MatrixAxisCard({ title, score, label, color, body }: { title: string; score: number; label: string; color: string; body: string }) {
+  return (
+    <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#5a5a62]">{title}</div>
+          <div className="mt-0.5 text-[12px] font-bold" style={{ color }}>{label}</div>
+        </div>
+        <div className="font-mono text-[22px] font-extrabold leading-none" style={{ color }}>{score}</div>
+      </div>
+      <div className="mb-1.5 h-[5px] overflow-hidden rounded-full bg-[#1a1a1f]">
+        <div className="h-full rounded-full" style={{ width: `${score}%`, background: color }} />
+      </div>
+      <div className="text-[10.5px] leading-[1.45] text-[#8c8c95]">{body}</div>
+    </div>
+  );
+}
+
+function QuadrantLabel({ className, color, title, sub }: { className: string; color: string; title: string; sub: string }) {
+  return (
+    <div className={`absolute max-w-[128px] ${className}`}>
+      <div className="text-[10px] font-bold" style={{ color }}>{title}</div>
+      <div className="mt-0.5 text-[8.5px] leading-[1.25] text-[#5a5a62]">{sub}</div>
     </div>
   );
 }
@@ -162,8 +210,62 @@ function AnalystPriceChart({ detail, analysis }: { detail: StockDetailResponse; 
   );
 }
 
+function buildAnalystMatrix(analysis: StockAnalysisResponse) {
+  const value = scoreOf(analysis, "Value");
+  const timing = scoreOf(analysis, "Timing");
+  const health = scoreOf(analysis, "Financial health");
+  const dividend = scoreOf(analysis, "Dividend safety");
+  const growth = scoreOf(analysis, "Growth");
+  const upside = analysis.targetPrice?.impliedUpsidePct;
+  const entryGap = analysis.entryPrice?.distanceFromCurrentPct;
+
+  const upsideScore = typeof upside === "number" ? clampNumber(50 + upside * 1.55, 5, 95) : 50;
+  const entryScore = typeof entryGap === "number" ? clampNumber(72 - Math.max(entryGap, -8) * 3.1, 5, 95) : 50;
+  const priceScore = Math.round(clampNumber(value * 0.38 + timing * 0.28 + upsideScore * 0.22 + entryScore * 0.12, 1, 99));
+  const structureScore = Math.round(clampNumber(health * 0.42 + dividend * 0.25 + growth * 0.23 + value * 0.10, 1, 99));
+  const strongPrice = priceScore >= 64;
+  const strongStructure = structureScore >= 64;
+  const color = strongPrice && strongStructure ? "#3ecf8e" : !strongPrice && strongStructure ? "#74a4ff" : strongPrice ? "#f5c451" : "#f2575c";
+  const action = strongPrice && strongStructure ? "Buy / add zone" : !strongPrice && strongStructure ? "Good company, wait price" : strongPrice ? "Cheap but fragile" : "Pass / avoid";
+
+  return {
+    priceScore,
+    structureScore,
+    priceColor: bandColor(priceScore),
+    structureColor: bandColor(structureScore),
+    priceLabel: priceScore >= 72 ? "Attractive now" : priceScore >= 58 ? "Fair / selective" : priceScore >= 42 ? "Wait for reset" : "Too expensive",
+    structureLabel: structureScore >= 72 ? "Strong structure" : structureScore >= 58 ? "Acceptable structure" : structureScore >= 42 ? "Fragile structure" : "Weak structure",
+    priceBody: priceBody(upside, entryGap),
+    structureBody: `Health ${health}/100 · dividend ${dividend}/100 · growth ${growth}/100.`,
+    color,
+    action,
+    x: clampNumber(priceScore, 10, 90),
+    y: clampNumber(100 - structureScore, 10, 90),
+  };
+}
+
+function scoreOf(analysis: StockAnalysisResponse, label: StockAnalysisResponse["scores"][number]["label"]) {
+  return analysis.scores.find((score) => score.label === label)?.score ?? 50;
+}
+
+function bandColor(score: number) {
+  if (score >= 68) return "#3ecf8e";
+  if (score >= 52) return "#f5c451";
+  return "#f2575c";
+}
+
+function priceBody(upside?: number | null, entryGap?: number | null) {
+  const upsideText = typeof upside === "number" ? `${upside >= 0 ? "+" : ""}${upside.toFixed(1)}% target gap` : "target gap unavailable";
+  const entryText = typeof entryGap === "number" ? `${entryGap >= 0 ? "+" : ""}${entryGap.toFixed(1)}% vs entry` : "entry gap unavailable";
+  return `${upsideText} · ${entryText}.`;
+}
+
+function clampNumber(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function AnalystReasons({ analysis }: { analysis: StockAnalysisResponse }) {
-  const color = colorForTone(analysis.tone);
+  const color = signalLevel(analysis.confidence, analysis.signal).color;
   const reasons = [
     analysis.entryPrice?.why,
     analysis.targetPrice?.basis,
@@ -190,7 +292,8 @@ function AnalystReasons({ analysis }: { analysis: StockAnalysisResponse }) {
 }
 
 function AnalystScoreCard({ analysis, currency }: { analysis: StockAnalysisResponse; currency: string }) {
-  const color = colorForTone(analysis.tone);
+  const level = signalLevel(analysis.confidence, analysis.signal);
+  const color = level.color;
   const entry = analysis.entryPrice?.entryPrice;
   const target = analysis.targetPrice?.targetPrice;
   const stop = entry ? entry * 0.985 : null;
@@ -201,7 +304,7 @@ function AnalystScoreCard({ analysis, currency }: { analysis: StockAnalysisRespo
           <div className="flex min-w-[110px] flex-col justify-center gap-[2px]">
             <div className="font-mono text-[48px] font-extrabold leading-none" style={{ color }}>{analysis.confidence}</div>
             <div className="text-[10px] text-[#5a5a62]">/100 AlphaWolf Score</div>
-            <div className="mt-[5px] text-[13px] font-bold" style={{ color }}>{normalizeSignal(analysis.signal)}</div>
+            <div className="mt-[5px] text-[13px] font-bold" style={{ color }}>{level.label}</div>
           </div>
           <div className="w-px self-stretch bg-[#2a2a31]" />
           <div className="grid min-w-[260px] flex-1 grid-cols-3 gap-2.5 max-[760px]:grid-cols-1">

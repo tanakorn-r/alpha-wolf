@@ -7,11 +7,19 @@ const PREMIUM_STORAGE_KEY = "aw_premium";
 const DEEP_EXTRAS_STORAGE_KEY = "aw_deep_extras";
 const N100_QUOTA_STORAGE_KEY = "aw_n100_quota_used";
 const N100_REPORT_CACHE_STORAGE_KEY = "aw_n100_report_cache";
+const HUNT_AI_CACHE_STORAGE_KEY = "aw_hunt_ai_cache";
+const ACTIVE_AGENT_STORAGE_KEY = "aw_active_agent";
+const DEFAULT_AGENT_ID = "vera";
 export const N100_QUOTA_LIMIT = 100;
 
 export type Next10ReportCacheEntry = {
   analyzedAt: string;
   data: UpwardMovesResponse;
+};
+
+export type HuntAiCacheEntry<T = unknown> = {
+  analyzedAt: string;
+  data: T;
 };
 
 export type DetailMode = "swing" | "day" | "long" | "value" | "fomo";
@@ -32,6 +40,8 @@ type WolfState = {
   deepExtras: string[];
   n100QuotaUsed: number;
   next10ReportCache: Record<string, Next10ReportCacheEntry>;
+  huntAiCache: Record<string, HuntAiCacheEntry>;
+  activeAgentId: string;
   setStrategy: (strategy: StrategyKey) => void;
   setSelectedMode: (mode: DetailMode | null) => void;
   setSelectedSymbol: (symbol: string) => void;
@@ -51,6 +61,9 @@ type WolfState = {
   useN100Quota: () => void;
   setNext10ReportCache: (key: string, entry: Next10ReportCacheEntry) => void;
   getNext10ReportCache: (key: string) => Next10ReportCacheEntry | undefined;
+  setHuntAiCache: <T>(key: string, entry: HuntAiCacheEntry<T>) => void;
+  getHuntAiCache: <T>(key: string) => HuntAiCacheEntry<T> | undefined;
+  setActiveAgent: (agentId: string) => void;
 };
 
 function loadReserve(): number {
@@ -107,6 +120,30 @@ function persistNext10ReportCache(value: Record<string, Next10ReportCacheEntry>)
   if (typeof window !== "undefined") window.localStorage.setItem(N100_REPORT_CACHE_STORAGE_KEY, JSON.stringify(value));
 }
 
+function loadHuntAiCache(): Record<string, HuntAiCacheEntry> {
+  const raw = typeof window !== "undefined" ? window.localStorage.getItem(HUNT_AI_CACHE_STORAGE_KEY) : null;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, HuntAiCacheEntry> : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistHuntAiCache(value: Record<string, HuntAiCacheEntry>) {
+  if (typeof window !== "undefined") window.localStorage.setItem(HUNT_AI_CACHE_STORAGE_KEY, JSON.stringify(value));
+}
+
+function loadActiveAgent(): string {
+  const raw = typeof window !== "undefined" ? window.localStorage.getItem(ACTIVE_AGENT_STORAGE_KEY) : null;
+  return raw && ["vera", "rex", "nadia", "sam", "kai", "ben", "alphawolf"].includes(raw) ? raw : DEFAULT_AGENT_ID;
+}
+
+function persistActiveAgent(agentId: string) {
+  if (typeof window !== "undefined") window.localStorage.setItem(ACTIVE_AGENT_STORAGE_KEY, agentId);
+}
+
 export const useWolfStore = create<WolfState>((set, get) => ({
   selectedStrategy: "stable_dca",
   selectedMode: null,
@@ -123,6 +160,8 @@ export const useWolfStore = create<WolfState>((set, get) => ({
   deepExtras: loadDeepExtras(),
   n100QuotaUsed: loadN100Quota(),
   next10ReportCache: loadNext10ReportCache(),
+  huntAiCache: loadHuntAiCache(),
+  activeAgentId: loadActiveAgent(),
   setStrategy: (selectedStrategy) => set({ selectedStrategy }),
   setSelectedMode: (selectedMode) => set({ selectedMode }),
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
@@ -168,5 +207,15 @@ export const useWolfStore = create<WolfState>((set, get) => ({
     persistNext10ReportCache(next);
     set({ next10ReportCache: next });
   },
-  getNext10ReportCache: (key) => get().next10ReportCache[key]
+  getNext10ReportCache: (key) => get().next10ReportCache[key],
+  setHuntAiCache: (key, entry) => {
+    const next = { ...get().huntAiCache, [key]: entry };
+    persistHuntAiCache(next);
+    set({ huntAiCache: next });
+  },
+  getHuntAiCache: <T,>(key: string) => get().huntAiCache[key] as HuntAiCacheEntry<T> | undefined,
+  setActiveAgent: (activeAgentId) => {
+    persistActiveAgent(activeAgentId);
+    set({ activeAgentId });
+  }
 }));

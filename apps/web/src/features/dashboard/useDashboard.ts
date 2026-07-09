@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { deleteHolding, loadPortfolio, saveHolding, summarizeStock, type PortfolioHolding, type StockAnalysisResponse } from "../../lib/api";
+import { deleteHolding, loadPortfolio, loadPortfolioReview, saveHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 
 export type Dashboard = ReturnType<typeof useDashboard>;
@@ -8,8 +8,9 @@ export type Dashboard = ReturnType<typeof useDashboard>;
 export function useDashboard() {
   const openDetail = useWolfStore((state) => state.openDetail);
   const setPortfolioSummary = useWolfStore((state) => state.setPortfolioSummary);
+  const activeAgentId = useWolfStore((state) => state.activeAgentId);
   const [actionError, setActionError] = useState("");
-  const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
+  const [analysis, setAnalysis] = useState<PortfolioReviewResponse | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [sellTarget, setSellTarget] = useState<PortfolioHolding | null>(null);
   const [selling, setSelling] = useState(false);
@@ -30,11 +31,10 @@ export function useDashboard() {
   const hasIncome = (portfolio?.incomeEvents.length ?? 0) > 0;
 
   async function askAi() {
-    const symbol = portfolio?.holdings[0]?.symbol;
-    if (!symbol) return;
+    if (!portfolio?.holdings.length) return;
     setAnalyzing(true);
     try {
-      setAnalysis(await summarizeStock(symbol, "stable_dca"));
+      setAnalysis(await loadPortfolioReview(activeAgentId));
     } catch {
       setActionError("AI analysis could not be generated.");
     } finally {
@@ -55,6 +55,7 @@ export function useDashboard() {
     isError: portfolioQuery.isError,
     isFetching: portfolioQuery.isFetching,
     actionError,
+    activeAgentId,
     analysis,
     analyzing,
     sellTarget,

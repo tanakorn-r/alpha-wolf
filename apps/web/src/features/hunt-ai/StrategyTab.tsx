@@ -1,8 +1,9 @@
 import type { StrategyPlaybookResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
-import { STRAT_CARDS, clamp, colorForTone } from "./lib";
+import { STRAT_CARDS, clamp, colorForTone, formatAnalyzedAt } from "./lib";
 import { StrategyIcon } from "../../components/ui/icons";
-import { PremiumLoading, panel } from "./ui";
+import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
+import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
 export function StrategyTab({ hunt }: { hunt: HuntAi }) {
@@ -64,7 +65,7 @@ export function StrategyTab({ hunt }: { hunt: HuntAi }) {
         })}
       </div>
 
-      {strategy.loading ? <PremiumLoading title={`AlphaWolf is building the ${selected?.label ?? "strategy"} playbook...`} /> : null}
+      {strategy.loading ? <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "strategy", selected?.label ?? "strategy")} subject="AI" agentId={hunt.activeAgentId} task="strategy" /> : null}
 
       {!strategy.loading && strategy.analysis && selected ? (
         <PlaybookCard playbook={strategy.analysis} stratLabel={selected.label} stratColor={selected.color} />
@@ -83,9 +84,13 @@ function PlaybookCard({ playbook, stratLabel, stratColor }: { playbook: Strategy
   return (
     <div className={`${panel} overflow-hidden`}>
       <div className="px-[18px] py-[14px]" style={{ background: `linear-gradient(90deg,${stratColor}22,transparent)`, borderBottom: `1px solid ${stratColor}33` }}>
+        <AgentByline agent={playbook.agent} label="Strategy agent" />
         <div className="flex flex-wrap items-center gap-3">
           <div className="text-[14px] font-bold">{stratLabel} Top 5</div>
           <span className="rounded-[5px] border border-[#3ecf8e]/30 bg-[#3ecf8e]/10 px-[7px] py-[2px] text-[10px] font-bold text-[#3ecf8e]">AI-BUILT FOR YOUR HOLDINGS</span>
+          {playbook.generatedAt ? (
+            <span className="ml-auto font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">Last sync {formatAnalyzedAt(playbook.generatedAt)}</span>
+          ) : null}
         </div>
         <div className="mt-2 text-[12px] leading-[1.55] text-[#bcbcc2]">{playbook.headline}</div>
       </div>
@@ -135,6 +140,7 @@ function PlaybookCard({ playbook, stratLabel, stratColor }: { playbook: Strategy
             );
           })}
         </div>
+        <AgentSignoff agent={playbook.agent} />
       </div>
     </div>
   );

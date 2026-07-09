@@ -10,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentByline } from "../../components/agents/AgentByline";
 import { TagPill } from "../../components/ui/Badge";
 import { EmptyPanel } from "../../components/ui/panels";
 import type { HistoricalMove, UpwardMovesResponse } from "../../lib/api";
@@ -58,6 +59,7 @@ export function Next100Result({ report, timeframe, onRerun, canRerun, analyzedAt
       <div className={`${panel} overflow-hidden`}>
         <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#24242a] px-5 py-4">
           <div>
+            <AgentByline agent={report.agent} label="Forecast agent" />
             <div className="flex flex-wrap items-center gap-2">
               <div className="text-[16px] font-bold">Next 10 Forecast · <span className="font-mono text-[#3ecf8e]">{report.symbol}</span></div>
               <TagPill label={timeframe} color="#c77dff" />
@@ -65,7 +67,12 @@ export function Next100Result({ report, timeframe, onRerun, canRerun, analyzedAt
             </div>
             <div className="mt-1 text-[12px] text-[#8c8c95]">Past movement first, forecast second. Cached {formatAnalyzedAt(analyzedAt)}.</div>
           </div>
-          <PremiumAiButton label="Refresh" sublabel="Next 10" disabled={!canRerun} onClick={onRerun} size="compact" />
+          <div className="ml-auto flex flex-none flex-wrap items-center justify-end gap-2">
+            <span className="font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">
+              Last sync {formatAnalyzedAt(analyzedAt)}
+            </span>
+            <PremiumAiButton label="Refresh" sublabel="Next 10" disabled={!canRerun} onClick={onRerun} size="compact" />
+          </div>
         </div>
 
         <div className="grid gap-0 min-[820px]:grid-cols-3">

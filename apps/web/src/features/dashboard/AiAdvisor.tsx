@@ -1,5 +1,7 @@
-import { AiVerdictCard } from "../../components/AiVerdictCard";
-import { LoadingSpinner } from "../../components/LoadingSpinner";
+import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
+import { PremiumAiButton } from "../../components/PremiumAiButton";
+import type { PortfolioReviewResponse } from "../../lib/api";
+import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
 import type { Dashboard } from "./useDashboard";
 
 export function AiAdvisor({ dash }: { dash: Dashboard }) {
@@ -10,26 +12,54 @@ export function AiAdvisor({ dash }: { dash: Dashboard }) {
           <div>
             <div className="text-xs font-semibold uppercase tracking-[.14em] text-[#3ecf8e]">AI · on demand</div>
             <h2 className="mt-1 text-lg font-semibold">Need a second opinion on this month?</h2>
-            <p className="mt-1 text-sm text-[#8c8c95]">AI runs only after you ask and uses live technicals and fundamentals.</p>
+            <p className="mt-1 text-sm text-[#8c8c95]">Your active Agent grades concentration, P/L, yield, and next actions from live portfolio data.</p>
           </div>
-          <button
-            type="button"
-            disabled={!dash.hasHoldings || dash.analyzing}
-            onClick={() => void dash.askAi()}
-            className="flex items-center gap-2 rounded-lg bg-[#3ecf8e] px-5 py-3 text-sm font-bold text-[#06120c] disabled:opacity-40"
-          >
-            {dash.analyzing ? <LoadingSpinner size={14} /> : null}
-            {dash.analyzing ? "Analyzing…" : "Suggest my next move"}
-          </button>
+          <PremiumAiButton label={dash.analyzing ? "Analyzing" : "Review portfolio"} sublabel="Portfolio AI" disabled={!dash.hasHoldings || dash.analyzing} loading={dash.analyzing} onClick={() => void dash.askAi()} size="compact" />
         </section>
       ) : null}
-      {dash.analyzing ? (
-        <div className="flex items-center justify-center gap-3.5 rounded-xl border border-[#2a2a31] bg-[#141417] p-[34px] text-[#8c8c95]">
-          <span className="h-5 w-5 animate-spin rounded-full border-2 border-[#2a2a31] border-t-[#3ecf8e]" />
-          Analyzing your portfolio…
-        </div>
-      ) : null}
-      {dash.analysis ? <AiVerdictCard value={dash.analysis} onRerun={() => void dash.askAi()} size="modal" /> : null}
+      {dash.analyzing ? <PremiumLoading title={agentLoadingTitle(dash.activeAgentId, "portfolio")} subject="AI" agentId={dash.activeAgentId} task="portfolio" /> : null}
+      {dash.analysis ? <PortfolioReviewCard review={dash.analysis} onRerun={() => void dash.askAi()} /> : null}
     </>
+  );
+}
+
+function PortfolioReviewCard({ review, onRerun }: { review: PortfolioReviewResponse; onRerun: () => void }) {
+  const color = review.agent.color;
+  return (
+    <section className="rounded-[14px] border bg-[#161619] p-5" style={{ borderColor: `${color}55` }}>
+      <AgentByline agent={review.agent} label="Portfolio agent" />
+      <div className="flex flex-wrap items-start gap-5">
+        <div className="flex h-[92px] w-[92px] flex-none flex-col items-center justify-center rounded-[18px] border bg-[#0e0e10]" style={{ borderColor: `${color}66` }}>
+          <div className="font-mono text-[34px] font-extrabold leading-none" style={{ color }}>{review.score}</div>
+          <div className="mt-1 text-[9px] uppercase tracking-[0.08em] text-[#8c8c95]">score</div>
+        </div>
+        <div className="min-w-[240px] flex-1">
+          <div className="inline-flex rounded-[7px] border px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-[0.06em]" style={{ borderColor: `${color}66`, color }}>
+            {review.verdict}
+          </div>
+          <p className="mt-3 text-[13.5px] leading-[1.65] text-[#cfcfd4]">{review.intro}</p>
+        </div>
+        <PremiumAiButton label="Re-run" sublabel="Portfolio" onClick={onRerun} size="xs" />
+      </div>
+
+      <div className="mt-5 grid gap-3 min-[820px]:grid-cols-3">
+        {review.sections.map((section) => (
+          <div key={section.h} className="rounded-[11px] border border-[#2a2a31] bg-[#0e0e10] p-4">
+            <div className="text-[12px] font-bold text-[#ececee]">{section.h}</div>
+            <p className="mt-2 text-[12.5px] leading-[1.6] text-[#8c8c95]">{section.b}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4 grid gap-2">
+        {review.bullets.map((bullet, index) => (
+          <div key={index} className="flex gap-2.5 text-[13px] leading-[1.55] text-[#cfcfd4]">
+            <span style={{ color }}>●</span>
+            <span>{bullet}</span>
+          </div>
+        ))}
+      </div>
+      <AgentSignoff agent={review.agent} text={review.sign} />
+    </section>
   );
 }
