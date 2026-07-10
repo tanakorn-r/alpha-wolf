@@ -16,7 +16,7 @@ export function AppHeader() {
   const page = location.pathname === "/scanner"
     ? { title: "DCA Scanner", subtitle: "Search any stock, then tap for an AI buy / wait verdict" }
     : location.pathname === "/daily-brief"
-      ? { title: "Daily Brief", subtitle: "What moved, what pays, what needs action" }
+      ? { title: "Daily Brief", subtitle: "Ask your AI what deserves attention today" }
     : location.pathname === "/live-trade"
       ? { title: "Live Trade", subtitle: "TradingView chart plus live US screener reads" }
     : isHuntAi
@@ -26,9 +26,9 @@ export function AppHeader() {
       : { title: "Strategy Dashboard", subtitle: "Everything happening with your money, in one view" };
 
   return (
-    <header className="aw-header sticky top-0 z-10 flex items-end justify-between gap-4 border-b border-[#2a2a31] px-7 pb-[18px] pt-[22px]">
+    <header className="aw-header sticky top-0 z-10 flex items-end justify-between gap-4 border-b border-[#2a2a31] bg-[#0e0e10] px-6 pb-3.5 pt-4 max-[719px]:px-4 max-[719px]:pt-[calc(1rem_+_env(safe-area-inset-top))]">
       <div className="min-w-0">
-        <h1 className="m-0 text-[21px] font-bold tracking-[-0.4px] text-[#ececee]">{page.title}</h1>
+        <h1 className="m-0 text-[20px] font-bold tracking-[-0.3px] text-[#ececee]">{page.title}</h1>
         <p className="mt-[3px] max-w-[760px] truncate text-[13px] text-[#8c8c95]">{page.subtitle}</p>
       </div>
       <div className="flex flex-none flex-wrap items-center justify-end gap-2.5">

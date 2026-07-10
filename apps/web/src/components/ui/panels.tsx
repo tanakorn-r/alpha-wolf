@@ -1,11 +1,11 @@
 import { LoadingSpinner } from "../LoadingSpinner";
 
-const panel = "rounded-xl border border-[#2a2a31] bg-[#161619]";
+const panel = "rounded-[10px] border border-[#2a2a31] bg-[#161619]";
 
 export function LoadingPanel({ title, body }: { title: string; body?: string }) {
   return (
-    <div className={`${panel} flex items-center gap-4 p-8 text-[#8c8c95]`}>
-      <LoadingSpinner size={22} className="flex-none text-[#3ecf8e]" />
+    <div className={`${panel} flex items-center gap-3 px-4 py-3.5 text-[#8c8c95]`}>
+      <LoadingSpinner size={18} className="flex-none text-[#3ecf8e]" />
       <div>
         <div className="text-sm font-semibold text-[#ececee]">{title}</div>
         {body ? <div className="text-xs">{body}</div> : null}
@@ -26,7 +26,7 @@ export function LoadingStrip({ label }: { label: string }) {
 export function EmptyPanel({ title, body }: { title: string; body: string }) {
   return (
     <div className={`${panel} p-10 text-center`}>
-      <div className="mx-auto mb-3 grid h-10 w-10 place-items-center rounded-xl bg-[#0e0e10] text-[#3ecf8e]">+</div>
+      <div className="mx-auto mb-2 grid h-9 w-9 place-items-center rounded-[10px] bg-[#0e0e10] text-[#3ecf8e]">+</div>
       <div className="text-sm font-semibold">{title}</div>
       <div className="mx-auto mt-2 max-w-[420px] text-[12.5px] leading-[1.65] text-[#8c8c95]">{body}</div>
     </div>

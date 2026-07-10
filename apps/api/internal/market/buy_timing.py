@@ -66,6 +66,7 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
     seasonality = _monthly_returns(closes)
     cheapest = min(seasonality, key=lambda item: item["returnPct"])["month"] if seasonality else None
     peak = max(seasonality, key=lambda item: item["returnPct"])["month"] if seasonality else None
+    monthly_map = _monthly_map(seasonality, events, cycle_days, next_ex, today)
     price_context = _price_context(closes, current_price)
     timeline = _build_timeline(today, last_ex, next_ex, current_buy_start, current_buy_end, buy_start, buy_end, trim_start, trim_end)
     pattern_good = bool(avg_dip is not None and avg_dip < -0.3 and (hit_rate or 0) >= 55)
@@ -120,6 +121,7 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
         "seasonality": seasonality,
         "cheapestMonth": cheapest,
         "peakMonth": peak,
+        "monthlyMap": monthly_map,
         "events": [
             {
                 "exDate": _iso(event["date"]),
@@ -186,6 +188,72 @@ def _monthly_returns(closes: pd.Series) -> list[dict[str, Any]]:
         return [{"month": month, "returnPct": 0.0} for month in MONTHS]
     monthly = closes.resample("ME").last().pct_change().dropna() * 100.0
     return [{"month": month, "returnPct": round(float(monthly[monthly.index.month == index + 1].mean()) if not monthly[monthly.index.month == index + 1].empty else 0.0, 2)} for index, month in enumerate(MONTHS)]
+
+
+def _monthly_map(seasonality: list[dict[str, Any]], events: list[dict[str, Any]], cycle_days: int | None, next_ex: date | None, today: date) -> list[dict[str, Any]]:
+    # Turn the two timing signals into one actionable per-calendar-month call: green = buy, red =
+    # trim. Seasonality says which months are historically weak (accumulate) vs strong (lighten);
+    # the dividend cycle says which months hold the post-ex dip (buy) vs the pre-ex run-up (trim).
+    # We blend them 50/50 when a cycle exists, else fall back to seasonality alone.
+    returns = [float(item.get("returnPct") or 0.0) for item in seasonality] if seasonality else [0.0] * 12
+    max_abs = max((abs(value) for value in returns), default=0.0) or 1.0
+
+    buy_months: set[int] = set()
+    trim_months: set[int] = set()
+    ex_months: set[int] = set()
+    anchor = next_ex or (events[-1]["date"] if events else None)
+    if anchor and cycle_days and cycle_days > 0:
+        # Project ex-dates across a wide window so every calendar month is covered regardless of
+        # cycle length (quarterly fills ~4 buy/4 trim months, semi-annual ~2 each).
+        step = timedelta(days=cycle_days)
+        event = anchor
+        while event > today - timedelta(days=400):
+            event -= step
+        limit = today + timedelta(days=400)
+        while event <= limit:
+            # At month granularity: the ex month is the pre-dividend run-up (trim into strength),
+            # the following month carries the post-ex dip + recovery (buy). A ±few-day split would
+            # collapse both into the ex month and cancel out, so separate them by a month.
+            ex_months.add(event.month - 1)
+            trim_months.add(event.month - 1)
+            buy_months.add((event + timedelta(days=20)).month - 1)
+            event += step
+
+    has_cycle = bool(buy_months or trim_months)
+    w_season = 0.5 if has_cycle else 1.0
+    w_cycle = 0.5 if has_cycle else 0.0
+
+    result: list[dict[str, Any]] = []
+    for index, month in enumerate(MONTHS):
+        seasonal_unit = max(-1.0, min(1.0, -returns[index] / max_abs))  # weak month (drop) -> buy
+        cycle_unit = 0.0
+        in_buy = index in buy_months
+        in_trim = index in trim_months
+        if in_buy and not in_trim:
+            cycle_unit = 1.0
+        elif in_trim and not in_buy:
+            cycle_unit = -1.0
+        score = round((w_season * seasonal_unit + w_cycle * cycle_unit) * 100)
+        action = "BUY" if score >= 20 else "TRIM" if score <= -20 else "HOLD"
+        notes: list[str] = []
+        if in_buy and not in_trim:
+            notes.append("post-ex dip window")
+        if in_trim and not in_buy:
+            notes.append("pre-ex run-up")
+        if seasonal_unit >= 0.35:
+            notes.append("seasonally weak")
+        elif seasonal_unit <= -0.35:
+            notes.append("seasonally strong")
+        result.append({
+            "month": month,
+            "score": score,
+            "action": action,
+            "returnPct": round(returns[index], 2),
+            "isExMonth": index in ex_months,
+            "isCurrent": index == today.month - 1,
+            "note": ", ".join(notes) or "neutral",
+        })
+    return result
 
 
 def _price_context(closes: pd.Series, current_price: float | None) -> dict[str, Any] | None:

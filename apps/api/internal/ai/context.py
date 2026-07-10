@@ -13,11 +13,13 @@ def build_analysis_context(
     financials: dict[str, Any] | None,
     market_comparison: dict[str, Any] | None,
     domain_insights: dict[str, Any] | None,
+    position_context: dict[str, Any] | None = None,
     agent_id: str | None = None,
 ) -> dict[str, Any]:
     context = {
         "stock": bundle.get("stock"),
         "selectedStrategy": bundle.get("strategy"),
+        "positionContext": position_context or {"isHolding": False, "mode": "candidate", "question": "Should the user buy this stock or not?"},
         "agentInputPack": _agent_input_pack(agent_id, bundle, financials, market_comparison, domain_insights),
         "business": bundle.get("business"),
         "performance": bundle.get("performance"),

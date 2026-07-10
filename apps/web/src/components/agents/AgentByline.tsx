@@ -1,9 +1,9 @@
 import type { AgentBadge } from "../../lib/api";
 
-export function AgentByline({ agent, label = "Agent analysis" }: { agent?: AgentBadge | null; label?: string }) {
+export function AgentByline({ agent, label = "Agent analysis", className = "mb-3" }: { agent?: AgentBadge | null; label?: string; className?: string }) {
   if (!agent) return null;
   return (
-    <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#2a2a31] bg-[#0e0e10] px-2.5 py-1.5">
+    <div className={`inline-flex items-center gap-2 rounded-full border border-[#2a2a31] bg-[#0e0e10] px-2.5 py-1.5 ${className}`}>
       <span className="flex h-6 w-6 items-center justify-center rounded-full border font-mono text-[9px] font-extrabold" style={{ color: agent.color, borderColor: `${agent.color}55`, background: `${agent.color}18` }}>
         {agent.avatarUrl ? <img src={agent.avatarUrl} alt="" className="h-full w-full rounded-full object-cover" /> : agent.mono}
       </span>

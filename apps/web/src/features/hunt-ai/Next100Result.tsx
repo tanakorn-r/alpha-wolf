@@ -55,11 +55,11 @@ export function Next100Result({ report, timeframe, onRerun, canRerun, analyzedAt
   const forecastColor = gain >= 0 ? "#3ecf8e" : "#f2575c";
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       <div className={`${panel} overflow-hidden`}>
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#24242a] px-5 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#24242a] px-4 py-3">
           <div>
-            <AgentByline agent={report.agent} label="Forecast agent" />
+            <AgentByline agent={report.agent} label="Forecast agent" className="mb-2" />
             <div className="flex flex-wrap items-center gap-2">
               <div className="text-[16px] font-bold">Next 10 Forecast · <span className="font-mono text-[#3ecf8e]">{report.symbol}</span></div>
               <TagPill label={timeframe} color="#c77dff" />
@@ -97,8 +97,8 @@ export function Next100Result({ report, timeframe, onRerun, canRerun, analyzedAt
         </div>
       </div>
 
-      <div className={`${panel} px-5 pb-3.5 pt-5`}>
-        <div className="mb-3.5 flex flex-wrap items-start justify-between gap-2.5">
+      <div className={`${panel} px-4 pb-3 pt-4`}>
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2.5">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="text-[15px] font-semibold">Price Path</div>
@@ -128,10 +128,10 @@ export function Next100Result({ report, timeframe, onRerun, canRerun, analyzedAt
 
 function TapeSummaryCard({ label, value, body, color }: { label: string; value: string; body: string; color: string }) {
   return (
-    <div className="border-t border-[#24242a] px-5 py-4 min-[820px]:border-r min-[820px]:last:border-r-0">
-      <div className="mb-2 text-[11px] font-semibold uppercase text-[#8c8c95]">{label}</div>
-      <div className="mb-2 font-mono text-[24px] font-bold leading-none" style={{ color }}>{value}</div>
-      <div className="text-[12.5px] leading-[1.55] text-[#bcbcc2]">{body}</div>
+    <div className="border-t border-[#24242a] px-4 py-3 min-[820px]:border-r min-[820px]:last:border-r-0">
+      <div className="mb-1.5 text-[10px] font-semibold uppercase text-[#8c8c95]">{label}</div>
+      <div className="mb-1.5 font-mono text-[21px] font-bold leading-none" style={{ color }}>{value}</div>
+      <div className="text-[12px] leading-[1.5] text-[#bcbcc2]">{body}</div>
     </div>
   );
 }
@@ -144,8 +144,8 @@ function BacktradePanel({ moves, currency, confidence, netMove }: { moves: Histo
   const chronological = moves.slice().reverse();
 
   return (
-    <div className={`${panel} px-5 py-4`}>
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <div className={`${panel} px-4 py-3.5`}>
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-[15px] font-semibold">Last 10 Days, In Plain English</div>
@@ -184,7 +184,7 @@ function BacktradePanel({ moves, currency, confidence, netMove }: { moves: Histo
         })}
       </div>
 
-      <details className="mt-4 rounded-[9px] border border-[#252529] bg-[#0e0e10] px-3 py-2">
+      <details className="mt-3 rounded-[9px] border border-[#252529] bg-[#0e0e10] px-3 py-2">
         <summary className="cursor-pointer text-[12px] font-semibold text-[#bcbcc2]">Show day-by-day notes</summary>
         <div className="mt-3 flex flex-col gap-2">
           {chronological.map((move) => {
@@ -208,7 +208,7 @@ function BacktradePanel({ moves, currency, confidence, netMove }: { moves: Histo
 function ForecastPanel({ rows, currency }: { rows: MoveRow[]; currency: string }) {
   return (
     <div className={`${panel} overflow-hidden`}>
-      <div className="flex flex-wrap items-center justify-between gap-3 px-5 pb-3 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 pb-2.5 pt-3.5">
         <div>
           <div className="flex items-center gap-2">
             <div className="text-[15px] font-semibold">AI Next 10 Scenario</div>
@@ -218,14 +218,14 @@ function ForecastPanel({ rows, currency }: { rows: MoveRow[]; currency: string }
         </div>
         <span className="font-mono text-[11px] text-[#5a5a62]">Moves #1-10</span>
       </div>
-      <div className="grid gap-2 px-5 pb-2 text-[10.5px] uppercase text-[#5a5a62]" style={{ gridTemplateColumns: "44px 1fr 0.7fr 1.5fr" }}>
+      <div className="grid gap-2 px-4 pb-2 text-[10px] uppercase text-[#5a5a62]" style={{ gridTemplateColumns: "40px 1fr 0.7fr 1.5fr" }}>
         <div>#</div><div>Projected price</div><div className="text-right">Move</div><div>Why</div>
       </div>
       {rows.slice(0, 10).map((row) => {
         const color = directionColor(row.direction);
         const reason = row.reason || phaseLabel(row);
         return (
-          <div key={row.i} className="grid items-center gap-2 border-t border-[#1f1f24] px-5 py-3" style={{ gridTemplateColumns: "44px 1fr 0.7fr 1.5fr" }}>
+          <div key={row.i} className="grid items-center gap-2 border-t border-[#1f1f24] px-4 py-2.5" style={{ gridTemplateColumns: "40px 1fr 0.7fr 1.5fr" }}>
             <span className="font-mono text-[12px] text-[#5a5a62]">{row.i}</span>
             <span className="font-mono text-[13px] font-semibold" style={{ color }}>{formatCurrency(row.target, currency)}</span>
             <span className="text-right font-mono text-[12px] font-semibold" style={{ color }}>{row.movePct >= 0 ? "+" : ""}{row.movePct.toFixed(2)}%</span>
@@ -253,7 +253,7 @@ function TrajectoryChart({ rows, startPrice, history, currency }: { rows: MoveRo
   const domain = paddedDomain(data.flatMap((point) => [point.actualPrice, point.forecastPrice]).filter((value): value is number => typeof value === "number"), 0.12);
 
   return (
-    <div className="h-[260px] w-full">
+    <div className="h-[230px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <ComposedChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
           <defs>

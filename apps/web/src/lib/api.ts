@@ -207,6 +207,9 @@ export type StockAnalysisResponse = {
   model?: string;
   agent?: AgentBadge | null;
   generatedAt?: string | null;
+  recap?: string | null;
+  agentFit?: "aligned" | "neutral" | "against" | null;
+  agentFitReason?: string | null;
 };
 
 export type AgentStyle = { Discipline: number; Patience: number; Data: number; Instinct: number };
@@ -254,6 +257,9 @@ export type StrategyPlaybookResponse = {
   model?: string;
   agent?: AgentBadge | null;
   generatedAt?: string | null;
+  recap?: string | null;
+  agentFit?: "aligned" | "neutral" | "against" | null;
+  agentFitReason?: string | null;
 };
 
 export type QuantPerspectiveCheck = {
@@ -281,6 +287,9 @@ export type QuantPerspectiveResponse = {
   model?: string;
   agent?: AgentBadge | null;
   generatedAt?: string | null;
+  recap?: string | null;
+  agentFit?: "aligned" | "neutral" | "against" | null;
+  agentFitReason?: string | null;
 };
 
 export type ValuationVerdictResponse = {
@@ -321,6 +330,9 @@ export type ValuationVerdictResponse = {
   model?: string;
   agent?: AgentBadge | null;
   generatedAt?: string | null;
+  recap?: string | null;
+  agentFit?: "aligned" | "neutral" | "against" | null;
+  agentFitReason?: string | null;
 };
 
 export type TodayPerformanceResponse = {
@@ -703,6 +715,7 @@ export type BuyTimingResponse = {
   seasonality: Array<{ month: string; returnPct: number }>;
   cheapestMonth?: string | null;
   peakMonth?: string | null;
+  monthlyMap?: Array<{ month: string; score: number; action: "BUY" | "TRIM" | "HOLD"; returnPct: number; isExMonth: boolean; isCurrent: boolean; note: string }>;
   events: Array<{ exDate: string; amount?: number | null; dipPct: number; recoverySessions?: number | null }>;
   technicalContext?: {
     signal?: string | null;

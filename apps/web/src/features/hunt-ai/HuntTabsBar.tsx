@@ -1,25 +1,22 @@
-import { ArrowUpIcon } from "../../components/ui/icons";
 import type { HuntTab } from "./lib";
 import type { HuntAi } from "./useHuntAi";
 
 const tabs: Array<{ key: HuntTab; label: string; tag?: string; tone?: "live" | "ultra" | "pro" }> = [
-  { key: "signals", label: "Daily Signals" },
+  { key: "signals", label: "Signals", tag: "PRO", tone: "pro"  },
+  { key: "brief", label: "Daily Brief", tag: "PRO", tone: "pro" },
   { key: "timing", label: "Buy Timing", tag: "PRO", tone: "pro" },
-  { key: "intraday", label: "Live Intraday", tag: "LIVE", tone: "live" },
-  { key: "n100", label: "Next 10 ↑", tag: "PRO", tone: "ultra" },
-  { key: "strategy", label: "FOMO + Strategy", tag: "PRO", tone: "pro" },
   { key: "analyst", label: "Analyst", tag: "PRO", tone: "pro" },
 ];
 
 export function HuntTabsBar({ hunt }: { hunt: HuntAi }) {
   return (
-    <div className="flex gap-[3px] overflow-x-auto rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-[3px] [scrollbar-width:none]">
+    <div className="flex gap-[3px] overflow-x-auto rounded-[9px] border border-[#2a2a31] bg-[#0e0e10] p-[3px] [scrollbar-width:none]">
       {tabs.map((tab) => (
         <button
           key={tab.key}
           type="button"
           onClick={() => hunt.setTab(tab.key)}
-          className={`flex flex-none items-center gap-[7px] rounded-lg px-4 py-2 text-[13px] font-medium transition-colors ${hunt.tab === tab.key ? "bg-[#1c1c20] text-[#ececee]" : "text-[#8c8c95] hover:text-[#ececee]"}`}
+          className={`flex flex-none items-center gap-1.5 rounded-[7px] px-3.5 py-1.5 text-[12.5px] font-medium transition-colors ${hunt.tab === tab.key ? "bg-[#1c1c20] text-[#ececee]" : "text-[#8c8c95] hover:text-[#ececee]"}`}
         >
           <TabGlyph tab={tab.key} />
           {tab.label}
@@ -39,9 +36,7 @@ function Tag({ tone, children }: { tone: "live" | "ultra" | "pro"; children: Rea
 
 function TabGlyph({ tab }: { tab: HuntTab }) {
   if (tab === "signals") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 11l3-4 3 3 4-6 2 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  if (tab === "brief") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 3.5h10M3 7h7M3 10.5h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="M12 7h1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
   if (tab === "timing") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" /><path d="M8 4.7V8l2.4 1.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  if (tab === "intraday") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="1.8" fill="currentColor" /><circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.3" /><circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1" opacity="0.4" /></svg>;
-  if (tab === "n100") return <ArrowUpIcon size={13} />;
-  if (tab === "strategy") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.5 4L14 7l-4.5 1L8 12.5 6.5 8 2 7l4.5-1.5L8 1.5z" stroke="currentColor" strokeWidth="1.4" /></svg>;
   return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" stroke="currentColor" strokeWidth="1.4" /><path d="M4 6h8M4 9h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
 }

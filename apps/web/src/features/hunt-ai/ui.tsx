@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 
-export const panel = "rounded-xl border border-[#2a2a31] bg-[#161619]";
+export const panel = "rounded-[10px] border border-[#2a2a31] bg-[#161619]";
 
 type ProgressStep = {
   label: string;
@@ -79,24 +79,24 @@ export function PremiumLoading({ title, subject, steps, agentId, task }: { title
   const marker = compactMarker(subject || compactSubject(title));
 
   return (
-    <div className={`${panel} relative overflow-hidden bg-[linear-gradient(180deg,#17171b,#131316)] px-8 py-8 max-[680px]:px-5`}>
-      <div className="pointer-events-none absolute -right-10 -top-12 h-[190px] w-[190px] rounded-full bg-[#3ecf8e]/[0.08] blur-[18px]" />
+    <div className={`${panel} relative overflow-hidden bg-[linear-gradient(180deg,#17171b,#131316)] px-5 py-5 max-[680px]:px-4`}>
+      <div className="pointer-events-none absolute -right-10 -top-12 h-[150px] w-[150px] rounded-full bg-[#3ecf8e]/[0.08] blur-[18px]" />
 
-      <div className="relative mb-6 flex items-center gap-4">
-        <div className="relative h-[52px] w-[52px] flex-none">
+      <div className="relative mb-4 flex items-center gap-3.5">
+        <div className="relative h-11 w-11 flex-none">
           <div className="absolute inset-0 rounded-full border-[2.5px] border-transparent border-t-[#3ecf8e] animate-spin" />
-          <div className="absolute inset-[7px] rounded-full border-2 border-transparent border-t-[#4d96ff] animate-[spin_1.3s_linear_infinite_reverse]" />
-          <div className="absolute inset-[14px] rounded-full border-2 border-transparent border-t-[#c77dff] animate-spin" />
-          <div className="absolute inset-0 grid place-items-center px-1 text-center font-mono text-[12px] font-extrabold leading-none text-[#ececee]">{marker}</div>
+          <div className="absolute inset-[6px] rounded-full border-2 border-transparent border-t-[#4d96ff] animate-[spin_1.3s_linear_infinite_reverse]" />
+          <div className="absolute inset-[12px] rounded-full border-2 border-transparent border-t-[#c77dff] animate-spin" />
+          <div className="absolute inset-0 grid place-items-center px-1 text-center font-mono text-[11px] font-extrabold leading-none text-[#ececee]">{marker}</div>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-[17px] font-bold tracking-[-0.3px] text-[#ececee]">{title}</div>
-          <div className="mt-[3px] text-[12.5px] text-[#8c8c95]">{agentLoadingSubtitle(agentId)}</div>
+          <div className="text-[15px] font-bold tracking-[-0.2px] text-[#ececee]">{title}</div>
+          <div className="mt-[2px] text-[12px] text-[#8c8c95]">{agentLoadingSubtitle(agentId)}</div>
         </div>
-        <div className="flex-none font-mono text-[22px] font-extrabold text-[#3ecf8e]">{percent}%</div>
+        <div className="flex-none font-mono text-[18px] font-extrabold text-[#3ecf8e]">{percent}%</div>
       </div>
 
-      <div className="mb-6 h-[5px] overflow-hidden rounded-full bg-[#232329]">
+      <div className="mb-4 h-1 overflow-hidden rounded-full bg-[#232329]">
         <div
           className="h-full rounded-full bg-[linear-gradient(90deg,#3ecf8e,#4d96ff,#3ecf8e)] bg-[length:200%_100%] transition-[width] duration-500 ease-out"
           style={{ width: `${percent}%` }}
@@ -109,7 +109,7 @@ export function PremiumLoading({ title, subject, steps, agentId, task }: { title
           const active = index === stepIndex;
           const pending = index > stepIndex;
           return (
-            <div key={step.label} className="flex items-center gap-3.5 px-1 py-[9px]">
+            <div key={step.label} className="flex items-center gap-3 px-1 py-[6px]">
               <div className="grid h-[18px] w-[18px] flex-none place-items-center">
                 {done ? (
                   <div className="grid h-[18px] w-[18px] place-items-center rounded-full bg-[#3ecf8e]">
@@ -120,8 +120,8 @@ export function PremiumLoading({ title, subject, steps, agentId, task }: { title
                 {pending ? <div className="h-2 w-2 rounded-full border-[1.5px] border-[#2a2a31]" /> : null}
               </div>
               <div className="min-w-0 flex-1">
-                <div className={`text-[13.5px] font-medium transition-colors ${pending ? "text-[#5a5a62]" : "text-[#ececee]"}`}>{step.label}</div>
-                {active ? <div className="mt-0.5 font-mono text-[11.5px] text-[#8c8c95]">{step.sub}</div> : null}
+                <div className={`text-[12.5px] font-medium transition-colors ${pending ? "text-[#5a5a62]" : "text-[#ececee]"}`}>{step.label}</div>
+                {active ? <div className="mt-0.5 font-mono text-[10.5px] text-[#8c8c95]">{step.sub}</div> : null}
               </div>
               {active ? <div className="flex-none animate-pulse font-mono text-[10px] tracking-[0.5px] text-[#3ecf8e]">{agentId === "kai" ? "COOKING" : "WORKING"}</div> : null}
               {done ? <div className="flex-none font-mono text-[10px] tracking-[0.5px] text-[#5a5a62]">DONE</div> : null}

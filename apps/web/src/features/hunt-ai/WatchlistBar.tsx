@@ -7,13 +7,13 @@ export function WatchlistBar({ hunt }: { hunt: HuntAi }) {
   const holdingSymbols = list.symbols.filter((symbol) => list.holdingSymbols.includes(symbol));
   const watchingSymbols = list.symbols.filter((symbol) => !list.holdingSymbols.includes(symbol));
   return (
-    <div className="flex flex-col gap-2">
-      <div className={`${panel} flex flex-wrap items-center gap-[10px] px-[15px] py-[11px]`}>
+    <div className="flex flex-col gap-1.5">
+      <div className={`${panel} flex flex-wrap items-center gap-2 px-3 py-2.5`}>
         <WatchlistGroup label="You hold" symbols={holdingSymbols} list={list} />
-        <div className="mx-[2px] h-7 w-px bg-[#2a2a31]" />
+        <div className="mx-px h-6 w-px bg-[#2a2a31]" />
         <WatchlistGroup label="Watching" symbols={watchingSymbols} list={list} />
-        <button type="button" onClick={list.toggle} className="flex items-center gap-[7px] rounded-[7px] border border-dashed border-[#2a2a31] px-[11px] py-[6px] text-[13px] font-bold text-[#3ecf8e] hover:border-[#3ecf8e] hover:bg-[#3ecf8e]/05">
-          <span className="text-[18px] leading-none">+</span>Add stock
+        <button type="button" onClick={list.toggle} className="flex items-center gap-1.5 rounded-[7px] border border-dashed border-[#2a2a31] px-2.5 py-[5px] text-[12px] font-bold text-[#3ecf8e] hover:border-[#3ecf8e] hover:bg-[#3ecf8e]/05">
+          <span className="text-[16px] leading-none">+</span>Add stock
         </button>
         <span className="ml-auto flex-none font-mono text-[11px] text-[#5a5a62]">Tap a stock - every tab follows</span>
       </div>
@@ -52,9 +52,9 @@ export function WatchlistBar({ hunt }: { hunt: HuntAi }) {
 
 function WatchlistGroup({ label, symbols, list }: { label: string; symbols: string[]; list: HuntAi["watchlist"] }) {
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="flex items-center gap-[7px] text-[10.5px] uppercase tracking-[0.5px] text-[#5a5a62]">
-        <span className="h-[7px] w-[7px] rounded-full bg-[#3ecf8e]" />
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-[0.5px] text-[#5a5a62]">
+        <span className="h-[6px] w-[6px] rounded-full bg-[#3ecf8e]" />
         {label}
       </span>
       {symbols.map((symbol) => <WatchlistChip key={symbol} symbol={symbol} list={list} />)}
@@ -69,7 +69,7 @@ function WatchlistChip({ symbol, list }: { symbol: string; list: HuntAi["watchli
     <button
       type="button"
       onClick={() => list.select(symbol)}
-      className={`flex items-center gap-[7px] rounded-[7px] border bg-[#0e0e10] px-[10px] py-[6px] font-mono text-[12px] font-bold transition-colors ${active ? "border-[#ececee] text-[#ececee]" : "border-[#2a2a31] text-[#bcbcc2] hover:border-[#3ecf8e] hover:text-[#ececee]"}`}
+      className={`flex items-center gap-1.5 rounded-[7px] border bg-[#0e0e10] px-2.5 py-[5px] font-mono text-[11.5px] font-bold transition-colors ${active ? "border-[#ececee] text-[#ececee]" : "border-[#2a2a31] text-[#bcbcc2] hover:border-[#3ecf8e] hover:text-[#ececee]"}`}
     >
       <span className="h-[6px] w-[6px] rounded-full bg-[#3ecf8e]" />
       {symbol}

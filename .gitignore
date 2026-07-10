@@ -21,3 +21,16 @@ apps/api/.env
 apps/go-api/*.exe
 /go-api
 /api-server
+
+# Capacitor native build artifacts (generated projects keep their own .gitignore;
+# these cover the heavy outputs and synced web assets in case)
+apps/web/ios/App/Pods/
+apps/web/ios/App/build/
+apps/web/ios/DerivedData/
+apps/web/ios/App/App/public/
+apps/web/android/.gradle/
+apps/web/android/build/
+apps/web/android/app/build/
+apps/web/android/.idea/
+apps/web/android/local.properties
+apps/web/android/app/src/main/assets/public/

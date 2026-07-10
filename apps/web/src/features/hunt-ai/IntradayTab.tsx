@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
+import { AgentRecap } from "../../components/agents/AgentRecap";
 import { EmptyPanel, RetryPanel } from "../../components/ui/panels";
 import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
@@ -42,29 +43,29 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
   const tone = analysis ? colorForTone(analysis.tone) : "#3ecf8e";
 
   return (
-    <div className="flex flex-col gap-3.5">
+    <div className="flex flex-col gap-3">
       <LegendBar />
-      <div className="flex flex-wrap items-center gap-[7px]">
+      <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[11.5px] font-medium text-[#8c8c95]">Watching:</span>
         {intraday.symbols.map((symbol) => (
           <button
             key={symbol}
             type="button"
             onClick={() => intraday.select(symbol)}
-            className={`rounded-[9px] border px-3 py-2 font-mono text-[12.5px] font-bold ${intraday.ticker === symbol ? "border-[#c77dff]/50 bg-[#c77dff]/10" : "border-[#2a2a31] bg-[#161619] hover:border-[#3ecf8e]"}`}
+            className={`rounded-[7px] border px-2.5 py-1.5 font-mono text-[11.5px] font-bold ${intraday.ticker === symbol ? "border-[#c77dff]/50 bg-[#c77dff]/10" : "border-[#2a2a31] bg-[#161619] hover:border-[#3ecf8e]"}`}
           >
             {symbol}
           </button>
         ))}
       </div>
-      <div className="grid items-start gap-3 max-[1100px]:grid-cols-1" style={{ gridTemplateColumns: "1fr 290px" }}>
-        <div className={`${panel} p-5`}>
-          <div className="mb-3.5 flex flex-wrap items-baseline gap-3">
-            <span className="font-mono text-[28px] font-bold tracking-[-0.5px]">{price == null ? "—" : formatCurrency(price, currency)}</span>
+      <div className="grid items-start gap-3 max-[1100px]:grid-cols-1" style={{ gridTemplateColumns: "1fr 280px" }}>
+        <div className={`${panel} p-3.5`}>
+          <div className="mb-2.5 flex flex-wrap items-baseline gap-3">
+            <span className="font-mono text-[22px] font-bold tracking-[-0.3px]">{price == null ? "—" : formatCurrency(price, currency)}</span>
             <span className={`font-mono text-[13px] ${up ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{price == null ? "" : `${up ? "+" : ""}${change.toFixed(3)}%`}</span>
             <span className="ml-auto font-mono text-[11px] text-[#5a5a62]">{detail?.stock.symbol ?? intraday.ticker}</span>
           </div>
-          <div className="h-[220px]">
+          <div className="h-[190px]">
             {intraday.pending ? <ChartLoading label={`Loading ${intraday.ticker} chart...`} /> : null}
             {intraday.failed ? <RetryPanel label={`Could not load ${intraday.ticker} chart.`} onRetry={intraday.retry} /> : null}
             {detail && !intraday.failed ? (
@@ -116,23 +117,24 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
         </div>
         <div className="flex flex-col gap-2.5">
           <div className={analysis ? "aw-rainbow-border rounded-xl p-[2px]" : ""}>
-            <div className={`${analysis ? "rounded-[10px]" : "rounded-xl border border-[#2a2a31]"} bg-[#161619] p-4`}>
+            <div className={`${analysis ? "rounded-[10px]" : "rounded-[10px] border border-[#2a2a31]"} bg-[#161619] p-3.5`}>
               {analysis ? (
                 <>
-                  <AgentByline agent={analysis.agent} label="Signal agent" />
+                  <AgentByline agent={analysis.agent} label="Signal agent" className="mb-2" />
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-[10px] uppercase tracking-[0.5px] text-[#8c8c95]">AI Signal · now</span>
                     <span className="rounded-[5px] border border-[#f5c451]/30 bg-[#f5c451]/10 px-2 py-0.5 text-[10px] font-semibold text-[#f5c451]">{intraday.ticker}</span>
                   </div>
-                  <div className="mb-1 text-[26px] font-extrabold tracking-[-0.3px]" style={{ color: tone }}>{analysis.signal}</div>
-                  <p className="mb-3 text-[11.5px] leading-[1.6] text-[#bcbcc2]">{compact(analysis.summary, 170)}</p>
-                  <div className="mb-3 flex flex-col gap-[5px]">
+                  <div className="mb-1 text-[22px] font-extrabold tracking-[-0.2px]" style={{ color: tone }}>{analysis.signal}</div>
+                  <p className="mb-2.5 text-[11px] leading-[1.5] text-[#bcbcc2]">{compact(analysis.summary, 160)}</p>
+                  <div className="mb-2.5 flex flex-col gap-1">
                     <IntradayLevel label="Enter at" value={moneyMaybe(analysis.entryPrice?.entryPrice, currency)} color={tone} />
                     <IntradayLevel label="Stop loss" value={moneyMaybe(stopFromEntry(analysis.entryPrice?.entryPrice), currency)} color="#f2575c" />
                     <IntradayLevel label="Take profit" value={moneyMaybe(analysis.targetPrice?.targetPrice, currency)} color="#3ecf8e" />
                     <IntradayLevel label="Signal score" value={`${analysis.confidence}/100`} color={tone} />
                   </div>
                   <div className="font-mono text-[10px] text-[#5a5a62]">Cached {formatAnalyzedAt(intraday.analyzedAt)}</div>
+                  <AgentRecap agent={analysis.agent} recap={analysis.recap} fit={analysis.agentFit} reason={analysis.agentFitReason} className="mt-2.5 text-left" />
                   <AgentSignoff agent={analysis.agent} />
                 </>
               ) : (
@@ -162,14 +164,14 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
           </div>
         </div>
       </div>
-      <div className="text-center font-mono text-[10.5px] text-[#5a5a62]">Real delayed quotes - technical read only - not financial advice</div>
+      <div className="text-center font-mono text-[10px] text-[#5a5a62]">Real delayed quotes - technical read only - not financial advice</div>
     </div>
   );
 }
 
 function IntradayLevel({ label, value, color }: { label: string; value: string; color: string }) {
   return (
-    <div className="flex items-center justify-between rounded-[7px] bg-[#0e0e10] px-[10px] py-2 text-[12px]">
+    <div className="flex items-center justify-between rounded-[7px] bg-[#0e0e10] px-2.5 py-1.5 text-[11.5px]">
       <span className="text-[#8c8c95]">{label}</span>
       <span className="font-mono font-semibold" style={{ color }}>{value}</span>
     </div>
@@ -178,7 +180,7 @@ function IntradayLevel({ label, value, color }: { label: string; value: string; 
 
 function LegendBar() {
   return (
-    <div className={`${panel} flex flex-wrap items-center gap-4 px-[14px] py-[10px] text-[11px] text-[#8c8c95]`}>
+    <div className={`${panel} flex flex-wrap items-center gap-3 px-3 py-2 text-[10.5px] text-[#8c8c95]`}>
       <LegendLine color="#3ecf8e" label="Price" />
       <LegendDashed color="#74a4ff" label="VWAP" />
       <LegendLine color="#f5c451" label="MA10" />

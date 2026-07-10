@@ -48,11 +48,40 @@
   --color-negative-soft: #fee2e2;
 }
 
+:root {
+  --aw-root-zoom: 1.1;
+  --aw-sidebar-width: calc(220px / var(--aw-root-zoom));
+  --aw-sidebar-rail-width: calc(70px / var(--aw-root-zoom));
+  --aw-zoomed-viewport-height: calc(100vh / var(--aw-root-zoom));
+  /* Caps how wide the page column grows so content stays balanced (readable
+     line lengths, aligned header/content) on ultra-wide screens. No effect at
+     <=1440px — normal desktops and mobile are unchanged. */
+  --aw-content-max: 1400px;
+}
+
 html,
 body,
 #root {
   min-height: 100%;
   margin: 0;
+}
+
+/* Native (Capacitor) shell: the dark background fills the notch / home-indicator
+   safe areas, and rubber-band overscroll must not flash white. Individual fixed
+   chrome (header/sidebar) can inset itself with `env(safe-area-inset-*)`, which
+   `viewport-fit=cover` in index.html enables. */
+html {
+  background: #0e0e10;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+/* App is designed in hardcoded px; a root zoom scales every font + spacing
+   proportionally up to web-standard sizing without touching each class. */
+#root {
+  zoom: var(--aw-root-zoom);
 }
 
 body {
@@ -97,6 +126,8 @@ select:disabled,
 }
 
 .aw-sidebar {
+  width: var(--aw-sidebar-width);
+  height: var(--aw-zoomed-viewport-height);
   background: #0e0e10 !important;
   border-color: #2a2a31 !important;
   overflow-y: auto;
@@ -109,6 +140,7 @@ select:disabled,
 
 .aw-content {
   background: #0e0e10;
+  padding-left: 0;
 }
 
 .aw-header {
@@ -126,6 +158,14 @@ select:disabled,
   scrollbar-color: rgba(124, 92, 252, 0.25) transparent;
 }
 
+/* Cap + center the page content column so it doesn't sprawl on wide monitors.
+   (No effect <=1440px; header stays full-width for its sticky bg/border.) */
+.aw-main {
+  width: 100%;
+  max-width: var(--aw-content-max);
+  margin-inline: auto;
+}
+
 @media (max-width: 900px) {
   .aw-shell {
     width: 100%;
@@ -134,13 +174,25 @@ select:disabled,
   }
 
   .aw-sidebar {
-    width: 76px;
+    width: var(--aw-sidebar-rail-width);
   }
 
   .aw-sidebar > div:not(:first-child) span,
   .aw-sidebar nav a:not(.active),
   .aw-sidebar nav button {
     font-size: 0;
+  }
+}
+
+@media (min-width: 720px) {
+  .aw-content {
+    padding-left: var(--aw-sidebar-rail-width);
+  }
+}
+
+@media (min-width: 900px) {
+  .aw-content {
+    padding-left: var(--aw-sidebar-width);
   }
 }
 
@@ -177,6 +229,21 @@ select:disabled,
 .aw-drawer .bg-violet-600 { background: #3ecf8e !important; color: #06120c !important; }
 .aw-drawer .text-violet-500,
 .aw-drawer .text-violet-600 { color: #3ecf8e !important; }
+
+@media (max-width: 719px) {
+  /* Mobile overlays live under #root, which is zoomed to 1.1 for the app UI.
+     Compensate their vertical size so fixed sheets fit the real device viewport. */
+  .aw-modal-panel,
+  .aw-detail-panel,
+  .aw-deep-panel {
+    max-height: calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) / 1.1) !important;
+  }
+
+  .aw-detail-panel,
+  .aw-deep-panel {
+    height: calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) / 1.1) !important;
+  }
+}
 
 @keyframes skeleton-shimmer {
   0% {

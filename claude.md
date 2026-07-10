@@ -143,7 +143,7 @@
 - Hunt AI (`pages/HuntAiPage.tsx` + `features/hunt-ai/*`, `/hunt-ai`; `/deep-ai`
   and `/day-trader` redirect here): shared watchlist (holdings + `deepExtras`)
   + 6 tabs — **Daily Signals** (V6 recommendation cards: reasons, target entry, AI score),
-  **Buy Timing** (selected-stock timing page backed by `/buy-timing`: plain answer row, month map, real dividend-cycle dips, recovery, edge, seasonality + optional AI narrative),
+  **Buy Timing** (selected-stock timing page backed by `/buy-timing`: plain answer row, 12-month **buy/trim-by-month** map (`monthlyMap`: blended seasonality + dividend-cycle score per calendar month, green=buy/red=trim), real dividend-cycle dips, recovery, edge, seasonality + optional AI narrative),
   **Live Intraday** (delayed ~15-20min quote/chart + on-demand AI signal),
   **Next 10 ↑** (quota-metered `upward-moves` forecast, cached per
   ticker/timeframe, only 1D/1W real), **Strategy** (5 mode cards + optional
@@ -153,12 +153,14 @@
   `watchlist/signals/timing/intraday/next100/strategy/analyst`); pure helpers in
   `features/hunt-ai/lib.ts`.
 - Stock detail drawer has a "✦ Deep AI" button → `DeepAnalysisPanel.tsx`.
+- Mobile: `apps/web` is wrapped with Capacitor v8 (native projects `apps/web/ios`+`apps/web/android`, config `apps/web/capacitor.config.ts`, appId `com.alphawolf.app`, webDir `dist`). Scripts `cap:sync`/`cap:ios`/`cap:android`/`cap:add:*`. Native build needs `apps/web/.env.production` with absolute `VITE_API_BASE` (no dev proxy on device). Full workflow in `apps/web/MOBILE.md`.
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Buy Timing now ships an AI recap: `BuyTimingNarrative` gained `recap` (plain-words buy-now-or-wait-how-long), `agentFit` (aligned/neutral/against — does buying at the current price fit the active agent persona's strategy) and `agentFitReason` (first-person, persona voice); instructions in `_buy_timing_instructions`, passthrough in `apply_ai_narrative`, types in `api.ts`, rendered as the fit-colored `AgentRecap` panel in `BuyTimingTab.tsx` (only when the OpenAI narrative ran — calculated fallback shows no recap). Verified end-to-end on SIRI.BK.
+- Replaced Buy Timing's sparse single-cycle "Dividend cycle timing" bar with a 12-month buy/trim calendar. Backend `buy_timing.py._monthly_map` blends 5-yr seasonality (weak month→buy, strong→trim) with the dividend cycle (ex month→trim, following month→buy), 50/50 when a cycle exists else seasonality-only, returning per-month `{score -100..100, action BUY/TRIM/HOLD, returnPct, isExMonth, isCurrent, note}` as `monthlyMap`. Frontend `BuyTimingTab.tsx` renders `MonthlyBuyMap` (green=buy/red=trim cells, fill=|score|, today ring, ex-div dot, legend); removed dead `CycleClock`/`CycleMarker`/`ZoneLabel`/`zoneRange`/`formatShortDate`. Verified helper across semi-annual/quarterly/no-dividend regimes; tsc + py parse clean. (Prior: Daily-Signals valuation band now derives zone from the AI's `verdict + rightNow.action` via `zoneFromCall` + `alignZoneBoundaries`, and the P/BV-floor deep-value branch only fires when `discountFloor < discountFair` else falls through — both in `SignalsTab.tsx`.)
 
 **Next Steps**
+- (open) Mobile: relocate the sidebar-only Cash "Adjust" control (and portfolio glance) so it's reachable on mobile (bottom-nav layout drops the sidebar). Then a real device/simulator run of the iOS+Android builds.
 - (open) Do a visual QA pass against AlphaWolfV6 screenshots once seeded holdings exist.
 - (open) Optional: `/api/details/{symbol}/upward-moves` return real currency
   so Next 10 shows ฿ for THB tickers (only matters for non-USD holdings).

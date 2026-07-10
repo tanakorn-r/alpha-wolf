@@ -13,6 +13,7 @@ from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
 from internal.market.universe import build_market_page
 from internal.store.cache import cache_get, cache_set
+from internal.store.portfolio import list_holdings
 from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TodayPerformanceResponse, ValuationVerdictResponse
 
 router = APIRouter()
@@ -25,7 +26,9 @@ def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), a
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    cache_key = f"v11:{normalized}:{strategy}:{agent_id}"
+    position_context = _position_context(normalized)
+    position_cache_key = _position_cache_key(position_context)
+    cache_key = f"v13:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -57,6 +60,7 @@ def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), a
         financials=financials_data,
         market_comparison=market_data,
         domain_insights=insights_data,
+        position_context=position_context,
         agent_id=agent_id,
     )
 
@@ -77,7 +81,7 @@ def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     agent_id = normalize_agent_id(agent)
     mode = str((payload or {}).get("mode") or "").strip().lower()
     mode = mode if mode in {"swing", "day", "long", "value", "fomo"} else None
-    cache_key = f"quant:v12:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
+    cache_key = f"quant:v13:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -126,7 +130,7 @@ def valuation_analysis(symbol: str, payload: dict[str, Any] | None = Body(defaul
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    cache_key = f"valuation:v7:{normalized}:{strategy}:{agent_id}"
+    cache_key = f"valuation:v8:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -219,6 +223,71 @@ def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     return result
 
 
+def _position_context(symbol: str) -> dict[str, Any]:
+    normalized = symbol.upper().strip()
+    try:
+        portfolio = build_portfolio_dashboard()
+        data = portfolio.model_dump() if hasattr(portfolio, "model_dump") else dict(portfolio or {})
+        for holding in data.get("holdings") or []:
+            if str(holding.get("symbol") or "").upper() != normalized:
+                continue
+            return {
+                "isHolding": True,
+                "mode": "holding",
+                "question": "The user already owns this stock. Analyze whether they should stay with it, buy more, trim, or sell. Focus on whether today's price is a reason to worry or whether they can keep holding.",
+                "symbol": normalized,
+                "shares": holding.get("shares"),
+                "averageCost": holding.get("averageCost"),
+                "currentValue": holding.get("value"),
+                "costBasis": holding.get("cost"),
+                "gainLoss": holding.get("gainLoss"),
+                "gainLossPct": holding.get("gainLossPct"),
+                "monthlyDca": holding.get("monthlyDca"),
+                "strategy": holding.get("strategy"),
+                "createdAt": holding.get("createdAt"),
+            }
+    except Exception as exc:
+        print(f"Warning: Portfolio context load failed for {normalized}: {exc}")
+
+    try:
+        for holding in list_holdings():
+            if holding.symbol.upper() != normalized:
+                continue
+            return {
+                "isHolding": True,
+                "mode": "holding",
+                "question": "The user already owns this stock. Analyze whether they should stay with it, buy more, trim, or sell. Focus on whether today's price is a reason to worry or whether they can keep holding.",
+                "symbol": normalized,
+                "shares": holding.shares,
+                "averageCost": holding.averageCost,
+                "monthlyDca": holding.monthlyDca,
+                "strategy": holding.strategy,
+                "createdAt": holding.createdAt,
+            }
+    except Exception as exc:
+        print(f"Warning: Stored holding context load failed for {normalized}: {exc}")
+
+    return {
+        "isHolding": False,
+        "mode": "candidate",
+        "question": "The user does not own this stock. Analyze whether they should buy it now, wait for a better entry, or avoid it.",
+        "symbol": normalized,
+    }
+
+
+def _position_cache_key(context: dict[str, Any]) -> str:
+    if not context.get("isHolding"):
+        return "candidate"
+    parts = [
+        "holding",
+        str(context.get("shares") or ""),
+        str(context.get("averageCost") or ""),
+        str(context.get("monthlyDca") or ""),
+        str(context.get("gainLossPct") or ""),
+    ]
+    return ":".join(parts)
+
+
 @router.post("/api/strategy/recommendations", response_model=StrategyPlaybookResponse)
 def strategy_recommendations(payload: StrategyRecommendationRequest, agent: str = Query("vera")) -> dict[str, Any]:
     strategy_prompt = payload.strategy.strip()
@@ -227,7 +296,7 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, agent: str 
     cache_digest = hashlib.sha256(
         f"{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}".encode("utf-8")
     ).hexdigest()[:24]
-    cache_key = f"strategy-playbook:v4:{cache_digest}"
+    cache_key = f"strategy-playbook:v5:{cache_digest}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached

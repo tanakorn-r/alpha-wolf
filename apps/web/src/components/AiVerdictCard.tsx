@@ -1,7 +1,8 @@
 import type { StockAnalysisResponse } from "../lib/api";
-import { formatMoney, formatPercent } from "../lib/format";
+import { formatPercent } from "../lib/format";
 import { Ring } from "../lib/ring";
 import { AgentByline, AgentSignoff } from "./agents/AgentByline";
+import { AgentRecap } from "./agents/AgentRecap";
 import { PremiumAiButton } from "./PremiumAiButton";
 
 const TONE_COLOR: Record<string, string> = { good: "#3ecf8e", warn: "#f5c451", bad: "#f2575c" };
@@ -20,10 +21,12 @@ function PriceBanner({
   target,
   entry,
   tone,
+  currency = "USD",
 }: {
   target?: StockAnalysisResponse["targetPrice"];
   entry?: StockAnalysisResponse["entryPrice"];
   tone: StockAnalysisResponse["tone"];
+  currency?: string;
 }) {
   const upside = target?.impliedUpsidePct;
   const upColor = typeof upside === "number" ? (upside >= 0 ? "#3ecf8e" : "#f2575c") : (TONE_COLOR[tone ?? "warn"] ?? "#f5c451");
@@ -37,12 +40,12 @@ function PriceBanner({
           <div className="flex items-center gap-[22px]">
             <div>
               <div className="text-[10px] uppercase tracking-[.5px] text-[#8c8c95]">Now</div>
-              <div className="mt-1 font-mono text-xl font-semibold">{formatMoney(target.currentPrice ?? undefined)}</div>
+              <div className="mt-1 font-mono text-xl font-semibold">{formatPrice(target.currentPrice, currency)}</div>
             </div>
             <div className="text-lg text-[#5a5a62]">→</div>
             <div>
               <div className="text-[10px] uppercase tracking-[.5px] text-[#8c8c95]">AI target · {target.timeHorizon}</div>
-              <div className="mt-1 font-mono text-xl font-semibold" style={{ color: upColor }}>{formatMoney(target.targetPrice ?? undefined)}</div>
+              <div className="mt-1 font-mono text-xl font-semibold" style={{ color: upColor }}>{formatPrice(target.targetPrice, currency)}</div>
             </div>
           </div>
           {typeof upside === "number" ? (
@@ -59,7 +62,7 @@ function PriceBanner({
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="text-[10px] uppercase tracking-[.5px] text-[#8c8c95]">Suggested entry price</div>
-            <div className="mt-1 font-mono text-xl font-semibold" style={{ color: entryColor }}>{formatMoney(entry.entryPrice ?? undefined)}</div>
+            <div className="mt-1 font-mono text-xl font-semibold" style={{ color: entryColor }}>{formatPrice(entry.entryPrice, currency)}</div>
           </div>
           {typeof entryDistance === "number" ? (
             <div className="text-right">
@@ -78,21 +81,34 @@ export function AiVerdictCard({
   value,
   onRerun,
   size = "modal",
+  currency = "USD",
+  accent = "tone",
+  bylineLabel,
+  showSignoff = true,
 }: {
   value: StockAnalysisResponse;
   onRerun?: () => void;
   size?: "modal" | "panel";
+  currency?: string;
+  accent?: "tone" | "agent";
+  bylineLabel?: string;
+  showSignoff?: boolean;
 }) {
-  const color = TONE_COLOR[value.tone ?? "warn"] ?? "#f5c451";
+  const tone = value.tone ?? "warn";
+  const color = accent === "agent" && value.agent?.color ? value.agent.color : (TONE_COLOR[tone] ?? "#f5c451");
+  const borderColor = accent === "agent" ? `${color}58` : TONE_BORDER[tone];
+  const background = accent === "agent"
+    ? `radial-gradient(circle at 4% 0%, ${color}24, transparent 33%), radial-gradient(circle at 92% 8%, ${color}1a, transparent 30%), linear-gradient(135deg, ${color}10, rgba(19,19,23,0.88) 58%, rgba(14,14,16,0.98))`
+    : TONE_BG[tone];
   const ringSize = size === "modal" ? 88 : 74;
 
   return (
     <div
       className="rounded-[14px] p-5"
-      style={{ border: `1px solid ${TONE_BORDER[value.tone ?? "warn"]}`, background: TONE_BG[value.tone ?? "warn"] }}
+      style={{ border: `1px solid ${borderColor}`, background }}
     >
-      <AgentByline agent={value.agent} />
-      {value.targetPrice || value.entryPrice ? <PriceBanner target={value.targetPrice} entry={value.entryPrice} tone={value.tone} /> : null}
+      <AgentByline agent={value.agent} label={bylineLabel} />
+      {value.targetPrice || value.entryPrice ? <PriceBanner target={value.targetPrice} entry={value.entryPrice} tone={value.tone} currency={currency} /> : null}
 
       <div className="flex flex-wrap items-center gap-5">
         {typeof value.confidence === "number" ? (
@@ -120,7 +136,7 @@ export function AiVerdictCard({
 
       {value.targetPrice ? (
         <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <TargetCell label="Target price" value={formatPrice(value.targetPrice.targetPrice)} color={color} />
+          <TargetCell label="Target price" value={formatPrice(value.targetPrice.targetPrice, currency)} color={color} />
           <TargetCell label="Implied move" value={formatMove(value.targetPrice.impliedUpsidePct)} color={moveColor(value.targetPrice.impliedUpsidePct)} />
           <TargetCell label="Time horizon" value={value.targetPrice.timeHorizon} color="#ececee" />
         </div>
@@ -169,7 +185,8 @@ export function AiVerdictCard({
           <PremiumAiButton label="Re-run" sublabel="AI" onClick={onRerun} size="xs" />
         </div>
       ) : null}
-      <AgentSignoff agent={value.agent} />
+      <AgentRecap agent={value.agent} recap={value.recap} fit={value.agentFit} reason={value.agentFitReason} />
+      {showSignoff ? <AgentSignoff agent={value.agent} /> : null}
     </div>
   );
 }
@@ -183,9 +200,9 @@ function TargetCell({ label, value, color }: { label: string; value: string; col
   );
 }
 
-function formatPrice(value?: number | null) {
+function formatPrice(value?: number | null, currency = "USD") {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
 }
 
 function formatMove(value?: number | null) {

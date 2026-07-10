@@ -20,8 +20,8 @@ export function AgentPickerModal({ activeAgentId, onUse, onClose }: Props) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4">
-      <div className="flex max-h-[calc(100dvh-32px)] w-full max-w-[1080px] flex-col overflow-hidden rounded-[14px] border border-[#34343c] bg-[#111114] shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[calc(0.75rem+env(safe-area-inset-top))] min-[720px]:items-center min-[720px]:p-4">
+      <div className="flex max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-[1080px] flex-col overflow-hidden rounded-t-[16px] border border-[#34343c] bg-[#111114] shadow-2xl min-[720px]:max-h-[calc(100dvh-32px)] min-[720px]:rounded-[14px]">
         <div className="flex flex-none items-center justify-between border-b border-[#2a2a31] bg-[#161619] px-5 py-3.5">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5a5a62]">AlphaWolf</div>
@@ -35,8 +35,8 @@ export function AgentPickerModal({ activeAgentId, onUse, onClose }: Props) {
         {isLoading ? (
           <div className="p-8 text-center text-[13px] text-[#8c8c95]">Loading agent profiles...</div>
         ) : (
-          <div className="grid min-h-0 flex-1 gap-0 overflow-hidden min-[860px]:grid-cols-[minmax(0,1fr)_340px]">
-            <div className="grid content-start gap-3 overflow-y-auto p-4 min-[620px]:grid-cols-2">
+          <div className="grid min-h-0 flex-1 gap-0 overflow-y-auto min-[860px]:grid-cols-[minmax(0,1fr)_340px] min-[860px]:overflow-hidden">
+            <div className="grid content-start gap-3 p-4 min-[620px]:grid-cols-2 min-[860px]:overflow-y-auto">
               {agents.map((agent) => (
                 <AgentCard
                   key={agent.id}
@@ -59,10 +59,19 @@ export function AgentPickerModal({ activeAgentId, onUse, onClose }: Props) {
 
 function AgentCard({ agent, active, selected, onProfile, onUse }: { agent: AgentProfile; active: boolean; selected: boolean; onProfile: () => void; onUse: () => void }) {
   return (
-    <button
-      type="button"
+    // Clickable card is a <div> (not <button>) because the "Use" control below is
+    // itself a button — an interactive element must not be nested inside a <button>.
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onProfile}
-      className="min-h-[142px] rounded-[11px] border bg-[#161619] p-3.5 text-left transition-colors hover:border-[#5a5a62]"
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onProfile();
+        }
+      }}
+      className="min-h-[142px] cursor-pointer rounded-[11px] border bg-[#161619] p-3.5 text-left transition-colors hover:border-[#5a5a62]"
       style={{ borderColor: active || selected ? agent.color : "#2a2a31", background: active ? `${agent.color}12` : "#161619" }}
     >
       <div className="flex items-start gap-3">
@@ -79,34 +88,26 @@ function AgentCard({ agent, active, selected, onProfile, onUse }: { agent: Agent
       </div>
       <p className="mt-2.5 line-clamp-2 text-[11.5px] leading-[1.5] text-[#bcbcc2]">{agent.bio}</p>
       <div className="mt-2.5 flex justify-end">
-        <span
-          role="button"
-          tabIndex={0}
+        <button
+          type="button"
           onClick={(event) => {
             event.stopPropagation();
             onUse();
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              event.stopPropagation();
-              onUse();
-            }
           }}
           className="rounded-[7px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.04em]"
           style={{ borderColor: `${agent.color}55`, color: active ? "#0e0e10" : agent.color, background: active ? agent.color : `${agent.color}12` }}
         >
           {active ? "Using" : "Use"}
-        </span>
+        </button>
       </div>
-    </button>
+    </div>
   );
 }
 
 function AgentProfileView({ agent, active, onUse }: { agent: AgentProfile; active: boolean; onUse: () => void }) {
   const styleEntries = Object.entries(agent.style) as Array<[keyof AgentProfile["style"], number]>;
   return (
-    <aside className="min-h-0 overflow-y-auto border-t border-[#2a2a31] bg-[#0e0e10] p-4 min-[860px]:border-l min-[860px]:border-t-0">
+    <aside className="min-h-0 border-t border-[#2a2a31] bg-[#0e0e10] p-4 min-[860px]:overflow-y-auto min-[860px]:border-l min-[860px]:border-t-0">
       <div className="rounded-[13px] p-[1.5px]" style={{ background: `linear-gradient(135deg,${agent.color},#2a2a31 45%,${agent.color}66)` }}>
         <div className="rounded-[11px] bg-[#161619] p-3.5">
           <div className="flex items-start gap-3">

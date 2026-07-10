@@ -15,6 +15,7 @@ import {
   type StrategyPlaybookResponse,
   type ValuationVerdictResponse,
 } from "../../lib/api";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { N100_QUOTA_LIMIT, useWolfStore } from "../../store/useWolfStore";
 import { STRAT_CARDS, type HuntTab, type N100Timeframe, type StratMode } from "./lib";
 
@@ -24,6 +25,14 @@ type AnalystReport = {
   detail: StockDetailResponse;
   analysis: StockAnalysisResponse;
 };
+
+type AgentStamped = {
+  agent?: { id?: string | null } | null;
+};
+
+function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentId: string) {
+  return data?.agent?.id === agentId;
+}
 
 export function useHuntAi() {
   const [tab, setTab] = useState<HuntTab>("signals");
@@ -65,6 +74,7 @@ export function useHuntAi() {
   const holdingSymbols = portfolioQuery.data?.holdings.map((holding) => holding.symbol) ?? [];
   const symbols = Array.from(new Set([...holdingSymbols, ...deepExtras]));
   const activeTicker = selectedTicker || symbols[0] || "";
+  const debouncedAddQuery = useDebouncedValue(addQuery.trim(), 350);
 
   useEffect(() => {
     if (selectedTicker && !symbols.includes(selectedTicker)) setSelectedTicker("");
@@ -82,9 +92,9 @@ export function useHuntAi() {
   }, [activeAgentId]);
 
   const addQueryResult = useQuery({
-    queryKey: ["hunt-add-search", addQuery],
-    queryFn: () => loadDiscoveries({ q: addQuery, kind: "stock", limit: 8 }),
-    enabled: addOpen && addQuery.trim().length >= 1,
+    queryKey: ["hunt-add-search", debouncedAddQuery],
+    queryFn: () => loadDiscoveries({ q: debouncedAddQuery, kind: "stock", limit: 8 }),
+    enabled: addOpen && debouncedAddQuery.length >= 1,
   });
   const addResults = (addQueryResult.data?.live ?? []).filter((item) => !symbols.includes(item.symbol));
 
@@ -100,9 +110,12 @@ export function useHuntAi() {
     valuationRunKey > 0 &&
     valuationSyncTicker === activeTicker &&
     valuationQuery.isSuccess &&
-    valuationQuery.data?.symbol === activeTicker;
+    valuationQuery.data?.symbol === activeTicker &&
+    matchesAgent(valuationQuery.data, activeAgentId);
   const valuationAnalyzedAt = valuationQuery.dataUpdatedAt ? new Date(valuationQuery.dataUpdatedAt).toISOString() : new Date().toISOString();
-  const valuationReport = valuationDone && valuationQuery.data ? { analyzedAt: valuationAnalyzedAt, data: valuationQuery.data } : valuationCached;
+  const valuationReport = valuationDone && valuationQuery.data
+    ? { analyzedAt: valuationAnalyzedAt, data: valuationQuery.data }
+    : matchesAgent(valuationCached?.data, activeAgentId) ? valuationCached : undefined;
 
   useEffect(() => {
     if (valuationDone && valuationQuery.data) {
@@ -118,9 +131,11 @@ export function useHuntAi() {
   });
   const timingCacheKey = `buy-timing:${activeTicker}:${activeAgentId}`;
   const timingCached = getHuntAiCache<BuyTimingResponse>(timingCacheKey);
-  const timingDone = timingQuery.isSuccess && timingQuery.data?.symbol === activeTicker;
+  const timingDone = timingQuery.isSuccess && timingQuery.data?.symbol === activeTicker && matchesAgent(timingQuery.data, activeAgentId);
   const timingAnalyzedAt = timingQuery.dataUpdatedAt ? new Date(timingQuery.dataUpdatedAt).toISOString() : new Date().toISOString();
-  const timingReport = timingDone && timingQuery.data ? { analyzedAt: timingAnalyzedAt, data: timingQuery.data } : timingCached;
+  const timingReport = timingDone && timingQuery.data
+    ? { analyzedAt: timingAnalyzedAt, data: timingQuery.data }
+    : matchesAgent(timingCached?.data, activeAgentId) ? timingCached : undefined;
 
   useEffect(() => {
     if (timingDone && timingQuery.data) {
@@ -145,16 +160,16 @@ export function useHuntAi() {
   const analystCacheKey = `analyst:${activeTicker}:${activeAgentId}`;
   const analystCached = getHuntAiCache<AnalystReport>(analystCacheKey);
   const analystLocalReport =
-    analystTicker === activeTicker && analystDetail && analystAnalysis
+    analystTicker === activeTicker && analystDetail && analystAnalysis && matchesAgent(analystAnalysis, activeAgentId)
       ? { analyzedAt: new Date().toISOString(), data: { detail: analystDetail, analysis: analystAnalysis } }
       : null;
-  const analystReport = analystLocalReport ?? analystCached;
+  const analystReport = analystLocalReport ?? (matchesAgent(analystCached?.data.analysis, activeAgentId) ? analystCached : undefined);
 
   const intradayAnalysisCacheKey = `intraday-ai:${activeTicker}:${activeAgentId}`;
   const intradayAnalysisCached = getHuntAiCache<StockAnalysisResponse>(intradayAnalysisCacheKey);
-  const intradayAnalysisReport = intradayAnalysis
+  const intradayAnalysisReport = matchesAgent(intradayAnalysis, activeAgentId)
     ? { analyzedAt: new Date().toISOString(), data: intradayAnalysis }
-    : intradayAnalysisCached;
+    : matchesAgent(intradayAnalysisCached?.data, activeAgentId) ? intradayAnalysisCached : undefined;
 
   const n100CacheKey = `${activeTicker}:${n100Timeframe}:${activeAgentId}`;
   const n100Cached = useWolfStore((s) => s.getNext10ReportCache(n100CacheKey));
@@ -168,9 +183,12 @@ export function useHuntAi() {
     n100SyncKey === n100CacheKey &&
     n100Query.isSuccess &&
     n100Query.data?.symbol === activeTicker &&
-    n100Query.data?.timeframe === n100Timeframe;
+    n100Query.data?.timeframe === n100Timeframe &&
+    matchesAgent(n100Query.data, activeAgentId);
   const n100AnalyzedAt = n100Query.dataUpdatedAt ? new Date(n100Query.dataUpdatedAt).toISOString() : new Date().toISOString();
-  const n100Report = n100Done && n100Query.data ? { analyzedAt: n100AnalyzedAt, data: n100Query.data } : n100Cached;
+  const n100Report = n100Done && n100Query.data
+    ? { analyzedAt: n100AnalyzedAt, data: n100Query.data }
+    : matchesAgent(n100Cached?.data, activeAgentId) ? n100Cached : undefined;
   const n100QuotaLeft = N100_QUOTA_LIMIT - n100QuotaUsed;
 
   useEffect(() => {
@@ -299,7 +317,7 @@ export function useHuntAi() {
       mode: stratMode,
       prompt: stratPrompt,
       setPrompt: setStratPrompt,
-      analysis: stratAnalysis,
+      analysis: matchesAgent(stratAnalysis, activeAgentId) ? stratAnalysis : null,
       loading: stratLoading,
       async run(mode: StratMode) {
         setStratMode(mode);

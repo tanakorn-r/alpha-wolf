@@ -168,6 +168,41 @@ def public_agents() -> list[dict[str, Any]]:
     return [deepcopy(agent) for agent in AGENTS]
 
 
+def _directness_directive(agent: dict[str, Any]) -> str:
+    style = agent.get("style", {})
+    instinct = int(style.get("Instinct", 50))
+    data = int(style.get("Data", 50))
+    discipline = int(style.get("Discipline", 50))
+    patience = int(style.get("Patience", 50))
+
+    # Whichever trait is highest is the lens this agent should LEAD from. A 99%-instinct
+    # trader who opens with intrinsic value and "wait for the resistance retest" reads as
+    # fake — that's not their method. Force each agent to think with its own dominant trait.
+    lead = max(
+        (instinct, "gut read of price action, tape, and momentum — trust your instinct first"),
+        (data, "the numbers, factors, and statistical edge — trust the data first"),
+        (patience, "business quality and long-horizon compounding — ignore short-term noise"),
+        (discipline, "your rules and process — take only setups that fit them"),
+        key=lambda pair: pair[0],
+    )[1]
+
+    return f"""
+Your trait profile: Instinct {instinct}/100, Data {data}/100, Discipline {discipline}/100, Patience {patience}/100.
+Lead every call from your strongest trait: {lead}.
+
+BE DIRECT. Give ONE clear call and the single reason that actually drives it FOR YOU. State it up
+front. Do not hedge, do not "on the other hand", do not walk through every lens to look balanced —
+the other AlphaWolf agents cover the other angles, your job is your sharp read.
+
+Do not borrow another agent's method. If your Instinct is high and Data is low, you do NOT talk
+about intrinsic value, book value, DCF, or "wait for the pullback / retest the resistance" unless
+the price action itself is screaming it — lead with momentum and gut, and make a fast decisive call.
+If your Data or Discipline is high, lead with numbers and rules, not vibes. If your Patience is very
+high, lead with quality and time horizon, not the daily chart. Only reach for a lens outside your
+style when it would genuinely FLIP your decision — and when it does, say so in one line, plainly.
+Caveats you would not personally weight do not belong in your answer."""
+
+
 def compose_instructions(task_instructions: str, agent_id: str | None) -> str:
     agent = get_agent(agent_id)
     knowledge = ", ".join(agent["knows"])
@@ -181,6 +216,7 @@ Voice preset: {agent["voice"]}.
 Decision lens: {agent["decisionLens"]}
 Scoring bias: {agent["scoreBias"]}
 Output style: {agent["outputStyle"]}
+{_directness_directive(agent)}
 
 Stay in character, but never let persona override grounding or risk discipline.
 Use only the supplied data. Do not invent prices, dates, dividends, ratios, scores, holdings,

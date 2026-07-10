@@ -1,8 +1,9 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { StockRecord, StrategyKey } from "../../data/market";
 import { loadDiscoveries, loadPortfolio, saveHolding, summarizeStock, type StockAnalysisResponse } from "../../lib/api";
 import { formatCurrency, formatPercent, formatShortDate } from "../../lib/format";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useWolfStore } from "../../store/useWolfStore";
 import type { StrategyIconKind } from "../../components/ui/icons";
 
@@ -82,7 +83,7 @@ export function useStockHunt() {
   const cashReserve = useWolfStore((state) => state.cashReserve);
   const spendCashReserve = useWolfStore((state) => state.spendCashReserve);
 
-  const query = useDeferredValue(searchQuery.trim());
+  const query = useDebouncedValue(searchQuery.trim(), 350);
   const [market, setMarketState] = useState<Market>("all");
   const [sector, setSectorState] = useState("all");
   const [sortBy, setSortByState] = useState<SortKey>("score");

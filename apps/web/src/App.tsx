@@ -4,7 +4,6 @@ import { AppLayout } from "./components/layout/AppLayout";
 import { DeepAnalysisPanel } from "./components/DeepAnalysisPanel";
 import { StockDetailDrawer } from "./features/stock-detail/StockDetailDrawer";
 import { DashboardPage } from "./pages/DashboardPage";
-import { DailyBriefPage } from "./pages/DailyBriefPage";
 import { StockHuntPage } from "./pages/StockHuntPage";
 import { HuntAiPage } from "./pages/HuntAiPage";
 import { DividendHuntPage } from "./pages/DividendHuntPage";
@@ -17,7 +16,7 @@ export default function App() {
     <AppLayout>
       <Routes>
         <Route path="/" element={<DashboardPage />} />
-        <Route path="/daily-brief" element={<DailyBriefPage />} />
+        <Route path="/daily-brief" element={<Navigate to="/hunt-ai?tab=brief" replace />} />
         <Route path="/live-trade" element={<LiveTradePage />} />
         <Route path="/scanner" element={<StockHuntPage />} />
         <Route path="/deep-ai" element={<Navigate to="/hunt-ai" replace />} />

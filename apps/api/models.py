@@ -237,6 +237,9 @@ class StockAnalysis(BaseModel):
     scores: list[StockAnalysisScore] = Field(min_length=5, max_length=5)
     bullets: list[str] = Field(min_length=2, max_length=4)
     dcaTiming: str
+    recap: str
+    agentFit: Literal["aligned", "neutral", "against"]
+    agentFitReason: str
 
 
 class AgentBadge(BaseModel):
@@ -254,6 +257,9 @@ class StockAnalysisResponse(StockAnalysis):
     model: str
     agent: AgentBadge | None = None
     generatedAt: str | None = None
+    recap: str | None = None
+    agentFit: Literal["aligned", "neutral", "against"] | None = None
+    agentFitReason: str | None = None
 
 
 class StrategyPick(BaseModel):
@@ -280,6 +286,9 @@ class StrategyPlaybook(BaseModel):
     headline: str
     marketRead: str
     picks: list[StrategyPick] = Field(min_length=1, max_length=5)
+    recap: str
+    agentFit: Literal["aligned", "neutral", "against"]
+    agentFitReason: str
 
 
 class StrategyPlaybookResponse(StrategyPlaybook):
@@ -287,6 +296,9 @@ class StrategyPlaybookResponse(StrategyPlaybook):
     model: str
     agent: AgentBadge | None = None
     generatedAt: str | None = None
+    recap: str | None = None
+    agentFit: Literal["aligned", "neutral", "against"] | None = None
+    agentFitReason: str | None = None
 
 
 class StrategyRecommendationRequest(BaseModel):
@@ -321,6 +333,9 @@ class QuantPerspective(BaseModel):
     risk: str
     checks: list[QuantCheck] = Field(min_length=4, max_length=6)
     tradingViewFocus: list[str] = Field(min_length=2, max_length=4)
+    recap: str
+    agentFit: Literal["aligned", "neutral", "against"]
+    agentFitReason: str
 
 
 class QuantPerspectiveResponse(QuantPerspective):
@@ -328,6 +343,9 @@ class QuantPerspectiveResponse(QuantPerspective):
     model: str
     agent: AgentBadge | None = None
     generatedAt: str | None = None
+    recap: str | None = None
+    agentFit: Literal["aligned", "neutral", "against"] | None = None
+    agentFitReason: str | None = None
 
 
 class ValuationRightNow(BaseModel):
@@ -382,6 +400,9 @@ class ValuationVerdict(BaseModel):
     structureBand: ValuationStructureBand
     whatAiSees: list[str] = Field(min_length=2, max_length=5)
     thePlay: ValuationPlay
+    recap: str
+    agentFit: Literal["aligned", "neutral", "against"]
+    agentFitReason: str
 
 
 class ValuationVerdictResponse(ValuationVerdict):
@@ -389,6 +410,9 @@ class ValuationVerdictResponse(ValuationVerdict):
     model: str
     agent: AgentBadge | None = None
     generatedAt: str | None = None
+    recap: str | None = None
+    agentFit: Literal["aligned", "neutral", "against"] | None = None
+    agentFitReason: str | None = None
 
 
 class TodayPerformance(BaseModel):

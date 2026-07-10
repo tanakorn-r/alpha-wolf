@@ -1,6 +1,6 @@
 import type { StockAnalysisResponse, StockDetailResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
-import { formatCompact, signalLevel } from "./lib";
+import { formatCompact } from "./lib";
 import { panel } from "./ui";
 
 export function AnalystPanels({ detail, analysis }: { detail: StockDetailResponse; analysis: StockAnalysisResponse }) {
@@ -8,9 +8,6 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
   const biz = detail.business;
   const stock = detail.stock;
   const currency = stock.currency ?? "USD";
-  const verdict = signalLevel(analysis.confidence, analysis.signal);
-  const verdictColor = verdict.color;
-
   const rsi = tech.rsi14 ?? 50;
   const rsiColor = rsi < 30 ? "#3ecf8e" : rsi > 70 ? "#f2575c" : "#f5c451";
   const rsiBadge = rsi < 30 ? "OVERSOLD" : rsi > 70 ? "OVERBOUGHT" : "NEUTRAL";
@@ -51,18 +48,18 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
     <div className="grid grid-cols-2 gap-[11px] max-[900px]:grid-cols-1">
 
       {/* Price Action */}
-      <div className={`${panel} p-4`}>
-        <div className="mb-3 flex items-center gap-[7px]">
+      <div className={`${panel} p-3.5`}>
+        <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 12l3-4 3 2 3-5 3 3" stroke="#3ecf8e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#3ecf8e]">Price Action</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
             <span className="text-[9.5px] font-bold" style={{ color: rsiColor }}>{rsiBadge}</span>
           </div>
         </div>
-        <div className="mb-3">
+        <div className="mb-2.5">
           <div className="mb-[3px] text-[10px] text-[#5a5a62]">RSI — Momentum Gauge</div>
-          <div className="mb-[4px] flex items-baseline gap-[5px]">
-            <span className="font-mono text-[28px] font-bold leading-none" style={{ color: rsiColor }}>{rsi.toFixed(0)}</span>
+          <div className="mb-[4px] flex items-baseline gap-1">
+            <span className="font-mono text-[24px] font-bold leading-none" style={{ color: rsiColor }}>{rsi.toFixed(0)}</span>
             <span className="text-[10px] text-[#4a4a52]">/ 100</span>
           </div>
           <div className="mb-[7px] text-[11px] text-[#8c8c95]">{rsiHint}</div>
@@ -75,7 +72,7 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
             <span>Oversold</span><span>Neutral</span><span>Overbought</span>
           </div>
         </div>
-        <div className="flex flex-col gap-[5px] border-t border-[#1d1d22] pt-[9px]">
+        <div className="flex flex-col gap-1 border-t border-[#1d1d22] pt-2">
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Trend</span><span className="font-medium" style={{ color: trendColor }}>{trend}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Volume</span><span className="font-medium text-[#ececee]">{tech.volumeRatio != null ? `${tech.volumeRatio.toFixed(1)}× avg` : "—"}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">MACD</span><span className="font-medium text-[#ececee]">{tech.macd != null ? tech.macd.toFixed(2) : "—"}</span></div>
@@ -83,20 +80,20 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
       </div>
 
       {/* Latest News */}
-      <div className={`${panel} p-4`}>
-        <div className="mb-3 flex items-center gap-[7px]">
+      <div className={`${panel} p-3.5`}>
+        <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" stroke="#74a4ff" strokeWidth="1.4"/><path d="M4 6h8M4 9h5" stroke="#74a4ff" strokeWidth="1.3" strokeLinecap="round"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#74a4ff]">Latest News</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
             <span className="text-[9.5px] font-bold" style={{ color: sentColor }}>{sentLabel}</span>
           </div>
         </div>
-        <div className="mb-3">
+        <div className="mb-2.5">
           <div className="mb-[3px] text-[10px] text-[#5a5a62]">Overall market mood</div>
           <div className="font-mono text-[22px] font-bold leading-[1.1]" style={{ color: sentColor }}>{sentLabel}</div>
           <div className="mt-[4px] text-[10px] text-[#8c8c95]">{rating || "Based on analyst consensus"}</div>
         </div>
-        <div className="flex flex-col gap-2 border-t border-[#1d1d22] pt-[9px]">
+        <div className="flex flex-col gap-2 border-t border-[#1d1d22] pt-2">
           {news.length ? news.map((item, index) => (
             <div key={index} className="flex items-start gap-2">
               <div className="mt-[5px] h-[5px] w-[5px] flex-none rounded-full" style={{ background: sentColor }} />
@@ -107,8 +104,8 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
       </div>
 
       {/* Revenue & Income */}
-      <div className={`${panel} p-4`}>
-        <div className="mb-3 flex items-center gap-[7px]">
+      <div className={`${panel} p-3.5`}>
+        <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="1" y="8" width="3.5" height="7" rx="0.8" fill="#3ecf8e" opacity="0.7"/><rect x="6.3" y="5" width="3.5" height="10" rx="0.8" fill="#3ecf8e"/><rect x="11.5" y="2" width="3.5" height="13" rx="0.8" fill="#3ecf8e" opacity="0.5"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#3ecf8e]">Revenue &amp; Income</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
@@ -117,14 +114,14 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
             </span>
           </div>
         </div>
-        <div className="mb-3">
+        <div className="mb-2.5">
           <div className="mb-[3px] text-[10px] text-[#5a5a62]">Earnings growth YoY</div>
-          <div className="font-mono text-[28px] font-bold leading-none" style={{ color: epsGrowth != null ? (epsGrowth > 0 ? "#3ecf8e" : "#f2575c") : "#8c8c95" }}>
+          <div className="font-mono text-[24px] font-bold leading-none" style={{ color: epsGrowth != null ? (epsGrowth > 0 ? "#3ecf8e" : "#f2575c") : "#8c8c95" }}>
             {formatPct(epsGrowth, { signed: true })}
           </div>
           <div className="mt-[4px] text-[11px] text-[#8c8c95]">Earnings per share change</div>
         </div>
-        <div className="flex flex-col gap-[5px] border-t border-[#1d1d22] pt-[9px]">
+        <div className="flex flex-col gap-1 border-t border-[#1d1d22] pt-2">
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Revenue Growth</span><span className="font-medium" style={{ color: revGrowthColor }}>{formatPct(revGrowth, { signed: true })}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Net Margin</span><span className="font-medium text-[#ececee]">{formatPct(profitMargin)}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Dividend Yield</span><span className="font-medium text-[#ececee]">{formatPct(dividendYield, { digits: 2 })}</span></div>
@@ -132,8 +129,8 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
       </div>
 
       {/* Cost Structure */}
-      <div className={`${panel} p-4`}>
-        <div className="mb-3 flex items-center gap-[7px]">
+      <div className={`${panel} p-3.5`}>
+        <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="#f5c451" strokeWidth="1.5" strokeLinecap="round"/><circle cx="8" cy="8" r="5.5" stroke="#f5c451" strokeWidth="1.2" opacity="0.4"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#f5c451]">Cost Structure</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
@@ -142,14 +139,14 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
             </span>
           </div>
         </div>
-        <div className="mb-3">
+        <div className="mb-2.5">
           <div className="mb-[3px] text-[10px] text-[#5a5a62]">Gross Margin</div>
-          <div className="font-mono text-[28px] font-bold leading-none text-[#3ecf8e]">
+          <div className="font-mono text-[24px] font-bold leading-none text-[#3ecf8e]">
             {formatPct(grossMargin)}
           </div>
           <div className="mt-[4px] text-[11px] text-[#8c8c95]">Revenue kept after direct costs</div>
         </div>
-        <div className="flex flex-col gap-[5px] border-t border-[#1d1d22] pt-[9px]">
+        <div className="flex flex-col gap-1 border-t border-[#1d1d22] pt-2">
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Operating Margin</span><span className="font-medium text-[#ececee]">{formatPct(operatingMargin)}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Debt / Equity</span><span className="font-medium" style={{ color: d2eColor }}>{d2e != null ? `${d2e.toFixed(1)}%` : "—"}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Beta</span><span className="font-medium text-[#ececee]">{beta != null ? beta.toFixed(2) : "—"}</span></div>
@@ -157,8 +154,8 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
       </div>
 
       {/* Company Structure */}
-      <div className={`${panel} p-4`}>
-        <div className="mb-3 flex items-center gap-[7px]">
+      <div className={`${panel} p-3.5`}>
+        <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5.5" y="1" width="5" height="3.5" rx="1" stroke="#c77dff" strokeWidth="1.3"/><rect x="1" y="10" width="5" height="3.5" rx="1" stroke="#c77dff" strokeWidth="1.3"/><rect x="10" y="10" width="5" height="3.5" rx="1" stroke="#c77dff" strokeWidth="1.3"/><path d="M8 4.5v2.5M8 7H4v3M8 7h4v3" stroke="#c77dff" strokeWidth="1.2" strokeLinecap="round"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#c77dff]">Company Structure</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
@@ -167,14 +164,14 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
             </span>
           </div>
         </div>
-        <div className="mb-3">
+        <div className="mb-2.5">
           <div className="mb-[3px] text-[10px] text-[#5a5a62]">P/E Ratio — price vs earnings</div>
-          <div className="font-mono text-[28px] font-bold leading-none" style={{ color: peColor }}>
+          <div className="font-mono text-[24px] font-bold leading-none" style={{ color: peColor }}>
             {pe != null ? `${pe.toFixed(1)}x` : "—"}
           </div>
           <div className="mt-[4px] text-[11px] text-[#8c8c95]">{pe != null ? (pe < 20 ? "Reasonably valued" : pe < 35 ? "Moderate premium" : "High growth expectations priced in") : "Valuation data unavailable"}</div>
         </div>
-        <div className="flex flex-col gap-[5px] border-t border-[#1d1d22] pt-[9px]">
+        <div className="flex flex-col gap-1 border-t border-[#1d1d22] pt-2">
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Market Cap</span><span className="font-medium text-[#ececee]">{biz?.marketCap != null ? formatCompact(biz.marketCap, currency) : "—"}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Sector</span><span className="font-medium text-[#ececee] truncate max-w-[120px]">{stock.sector || biz?.sector || "—"}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Analyst Target</span><span className="font-medium text-[#ececee]">{biz?.targetMeanPrice != null ? formatCurrency(biz.targetMeanPrice, currency) : "—"}</span></div>
@@ -182,51 +179,27 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
       </div>
 
       {/* Balance Sheet & Risk */}
-      <div className={`${panel} p-4`}>
-        <div className="mb-3 flex items-center gap-[7px]">
+      <div className={`${panel} p-3.5`}>
+        <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1.8l5.5 2.2v3.8c0 3.1-2.1 5.4-5.5 6.5-3.4-1.1-5.5-3.4-5.5-6.5V4L8 1.8z" stroke="#74a4ff" strokeWidth="1.4" strokeLinejoin="round"/><path d="M5.4 8.1l1.7 1.7 3.5-3.7" stroke="#74a4ff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#74a4ff]">Balance Sheet &amp; Risk</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
             <span className="text-[9.5px] font-bold" style={{ color: riskColor }}>{riskLabel}</span>
           </div>
         </div>
-        <div className="mb-3">
+        <div className="mb-2.5">
           <div className="mb-[3px] text-[10px] text-[#5a5a62]">Debt / Equity</div>
-          <div className="font-mono text-[28px] font-bold leading-none" style={{ color: d2eColor }}>
+          <div className="font-mono text-[24px] font-bold leading-none" style={{ color: d2eColor }}>
             {d2e != null ? `${d2e.toFixed(1)}%` : "—"}
           </div>
           <div className="mt-[4px] text-[11px] text-[#8c8c95]">{d2e != null ? (d2e > 200 ? "Leverage is heavy" : d2e > 100 ? "Debt load needs watching" : "Balance sheet is not debt-heavy") : "Debt data unavailable"}</div>
         </div>
-        <div className="flex flex-col gap-[5px] border-t border-[#1d1d22] pt-[9px]">
+        <div className="flex flex-col gap-1 border-t border-[#1d1d22] pt-2">
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">ROE</span><span className="font-medium text-[#ececee]">{formatPct(roe)}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">ROA</span><span className="font-medium text-[#ececee]">{formatPct(roa)}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Payout Ratio</span><span className="font-medium text-[#ececee]">{formatPct(payoutRatio)}</span></div>
         </div>
       </div>
-
-      {/* AlphaWolf Verdict — full width */}
-      <div className={`${panel} relative col-span-2 max-[900px]:col-span-1 overflow-hidden p-5`}>
-        <div className="pointer-events-none absolute inset-0" style={{ background: `linear-gradient(135deg,${verdictColor}0d,rgba(199,125,255,0.05))` }} />
-        <div className="relative flex items-center">
-          <div className="flex min-w-[130px] flex-col items-center justify-center gap-[5px] border-r border-[#252529] pr-7">
-            <div className="text-[10px] uppercase tracking-[0.5px] text-[#5a5a62]">Score</div>
-            <div className="font-mono text-[52px] font-extrabold leading-none" style={{ color: verdictColor }}>{analysis.confidence}</div>
-            <div className="text-[10px] text-[#5a5a62]">/100</div>
-            <div className="h-[5px] w-[80px] overflow-hidden rounded-[3px] bg-[#1a1a1f]">
-              <div className="h-full rounded-[3px]" style={{ width: `${analysis.confidence}%`, background: verdictColor }} />
-            </div>
-          </div>
-          <div className="flex flex-1 flex-col justify-center gap-[5px] pl-7">
-            <div className="flex items-center gap-[7px]">
-              <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.5 4L14 7l-4.5 1L8 12.5 6.5 8 2 7l4.5-1.5L8 1.5z" stroke="url(#awVG3)" strokeWidth="1.4"/><defs><linearGradient id="awVG3" x1="0" y1="0" x2="16" y2="16"><stop offset="0%" stopColor="#3ecf8e"/><stop offset="100%" stopColor="#c77dff"/></linearGradient></defs></svg>
-              <span className="text-[10px] font-bold uppercase tracking-[0.5px]" style={{ background: "linear-gradient(90deg,#3ecf8e,#c77dff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>AlphaWolf Verdict</span>
-            </div>
-            <div className="text-[22px] font-extrabold tracking-[-0.3px]" style={{ color: verdictColor }}>{verdict.label}</div>
-            <div className="max-w-[560px] text-[12.5px] leading-[1.65] text-[#bcbcc2]">{analysis.summary}</div>
-          </div>
-        </div>
-      </div>
-
     </div>
   );
 }

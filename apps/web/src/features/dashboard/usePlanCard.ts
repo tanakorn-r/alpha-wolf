@@ -3,6 +3,7 @@ import { useQueries } from "@tanstack/react-query";
 import { loadDiscoveries, loadStockDetail, saveDcaOrder, saveHolding, updateDcaOrderAmount, deleteDcaOrder, type DcaOrder } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 import { THB_PER_USD } from "../../lib/format";
+import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import type { Dashboard } from "./useDashboard";
 
 export type PlanCard = ReturnType<typeof usePlanCard>;
@@ -78,26 +79,29 @@ export function usePlanCard(dash: Dashboard) {
   useEffect(() => { setApplied(null); }, [month]);
 
   const planSymbols = items.map((order) => order.symbol).join(",");
+  const debouncedAddQuery = useDebouncedValue(addQuery.trim(), 350);
 
   useEffect(() => {
     if (!addOpen) return;
-    const handle = setTimeout(async () => {
-      setSearchingStocks(true);
-      try {
-        const payload = await loadDiscoveries({ q: addQuery || undefined, kind: "stock", limit: 6 });
+    let active = true;
+    setSearchingStocks(true);
+    void loadDiscoveries({ q: debouncedAddQuery || undefined, kind: "stock", limit: 6 })
+      .then((payload) => {
+        if (!active) return;
         setAddResults(
           (payload.live ?? [])
             .filter((item) => !planSymbols.split(",").includes(item.symbol))
             .map((item) => ({ symbol: item.symbol, name: item.name, market: item.symbol.endsWith(".BK") ? "Thai SET" : "US" })),
         );
-      } catch {
-        setAddResults([]);
-      } finally {
-        setSearchingStocks(false);
-      }
-    }, 200);
-    return () => clearTimeout(handle);
-  }, [addOpen, addQuery, month, planSymbols]);
+      })
+      .catch(() => {
+        if (active) setAddResults([]);
+      })
+      .finally(() => {
+        if (active) setSearchingStocks(false);
+      });
+    return () => { active = false; };
+  }, [addOpen, debouncedAddQuery, planSymbols]);
 
   return {
     months,

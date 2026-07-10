@@ -1,5 +1,6 @@
 import { EmptyPanel, LoadingPanel } from "../../components/ui/panels";
-import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
+import { AgentSignoff } from "../../components/agents/AgentByline";
+import { AgentRecap } from "../../components/agents/AgentRecap";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import type { ValuationVerdictResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
@@ -55,8 +56,8 @@ function ValuationState({
   }
 
   return (
-    <section className="overflow-hidden rounded-[13px] border border-[#2a2a31] bg-[#161619]">
-      <div className="border-b border-[#2a2a31] bg-[#1a1a1e] px-[18px] py-[13px]">
+    <section className="overflow-hidden rounded-[10px] border border-[#2a2a31] bg-[#161619]">
+      <div className="border-b border-[#2a2a31] bg-[#1a1a1e] px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-[11px]">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-[11px]">
             <span className="font-mono text-[16px] font-extrabold text-[#ececee]">{ticker}</span>
@@ -74,13 +75,13 @@ function ValuationState({
         </div>
       </div>
 
-      <div className="flex flex-col gap-4 p-[18px]">
+      <div className="flex flex-col gap-3 p-4">
         <div>
           <h2 className="text-[15px] font-bold tracking-[-0.2px] text-[#ececee]">Are you chasing? <span className="text-[#8c8c95]">{title}</span></h2>
           <p className="mt-[6px] max-w-[1320px] text-[12.5px] leading-[1.6] text-[#bcbcc2]">{body}</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4 rounded-[12px] border border-[#2a2a31] bg-[#0e0e10] px-4 py-[14px]">
+        <div className="flex flex-wrap items-center gap-3 rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] px-3.5 py-2.5">
           <div className="flex flex-none flex-col gap-0.5">
             <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#8c8c95]">Right now · Today</div>
             <div className="text-[18px] font-extrabold tracking-[-0.3px] text-[#8c8c95]">WAIT</div>
@@ -88,7 +89,7 @@ function ValuationState({
           <div className="min-w-[180px] flex-1 text-[12.5px] leading-[1.55] text-[#bcbcc2]">
             No buy signal is shown until the AI verdict has run.
           </div>
-          <div className="flex flex-none gap-5">
+          <div className="flex flex-none gap-3.5">
             <MiniMetric label="Entry" value="—" note="pending" color="#8c8c95" />
             <MiniMetric label="Conviction" value="—" note="/ 100" color="#8c8c95" />
           </div>
@@ -103,10 +104,10 @@ function ValuationVerdict({ verdict, analyzedAt, fetching, onRun, onOpen }: { ve
   const theme = verdictTheme(verdict.verdict, verdict.rightNow.action, band.currentZone);
   const zone = zoneMeta(band.currentZone);
   return (
-    <div className="flex flex-col gap-3">
-      <section className="overflow-hidden rounded-[13px] border bg-[#161619]" style={{ borderColor: theme.cardBorder }}>
+    <div className="flex flex-col gap-2.5">
+      <section className="overflow-hidden rounded-[10px] border bg-[#161619]" style={{ borderColor: theme.cardBorder }}>
         <div className="p-[1.5px]" style={{ background: theme.frame }}>
-        <div className="flex flex-wrap items-center gap-[11px] bg-[#1a1a1e] px-[18px] py-[13px]">
+        <div className="flex flex-wrap items-center gap-2.5 bg-[#1a1a1e] px-4 py-2.5">
           <div className="flex min-w-0 flex-wrap items-center gap-[11px]">
             <span className="font-mono text-[16px] font-extrabold text-[#ececee]">{verdict.symbol}</span>
             <span className="min-w-0 text-[11px] text-[#8c8c95]">{verdict.name}</span>
@@ -121,24 +122,15 @@ function ValuationVerdict({ verdict, analyzedAt, fetching, onRun, onOpen }: { ve
         </div>
         </div>
 
-        <div className="flex flex-col gap-4 p-[18px]">
-          <AgentByline agent={verdict.agent} label="Valuation agent" />
-          <div>
-          <h2 className="text-[15px] font-bold tracking-[-0.2px] text-[#ececee]">
-            Are you chasing? <span style={{ color: theme.accent }}>{verdict.chasingAnswer}</span>
-          </h2>
-          <p className="mt-[6px] max-w-[1320px] text-[12.5px] leading-[1.6] text-[#bcbcc2]">{verdict.narrative}</p>
-          </div>
-
-          <RightNow verdict={verdict} theme={theme} zone={band.currentZone} />
+        <div className="flex flex-col gap-2.5 p-3.5">
+          <AgentRecap agent={verdict.agent} recap={verdict.recap ?? verdict.narrative} fit={verdict.agentFit} reason={verdict.agentFitReason} className="" />
           <MetricGrid verdict={verdict} theme={theme} />
           <StructureBand band={band} />
           <Evidence verdict={verdict} theme={theme} />
-          <ThePlay verdict={verdict} theme={theme} />
           <AgentSignoff agent={verdict.agent} />
         </div>
       </section>
-      <div className="pb-1 text-center font-mono text-[11px] text-[#5a5a62]">
+      <div className="pb-0.5 text-center font-mono text-[10px] text-[#5a5a62]">
         AI valuation · cached {formatAnalyzedAt(analyzedAt)} · supplied fundamentals only · not financial advice
       </div>
     </div>
@@ -155,13 +147,13 @@ function RightNow({ verdict, theme, zone }: { verdict: ValuationVerdictResponse;
   const note = discountZone ? discountActionNote(verdict, meta.shortLabel) : verdict.rightNow.note;
   const metricLabel = discountZone ? "Add heavier near" : "Add only below";
   return (
-    <div className="flex flex-wrap items-center gap-4 rounded-[12px] border px-4 py-[14px]" style={{ borderColor: theme.todayBorder, background: theme.todayBg }}>
+    <div className="flex flex-wrap items-center gap-3 rounded-[10px] border px-3.5 py-2.5" style={{ borderColor: theme.todayBorder, background: theme.todayBg }}>
       <div className="flex flex-none flex-col gap-0.5">
         <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#8c8c95]">Right now · Today</div>
         <div className="text-[18px] font-extrabold tracking-[-0.3px]" style={{ color: actionColor }}>{action}</div>
       </div>
       <div className="min-w-[180px] flex-1 text-[12.5px] leading-[1.55] text-[#bcbcc2]">{note}</div>
-      <div className="flex flex-none gap-5">
+      <div className="flex flex-none gap-3.5">
       <MiniMetric label={metricLabel} value={formatNullableMoney(verdict.rightNow.entryOnlyAt, verdict.currency)} note={pctAwayText(verdict.rightNow.pctAway)} color={theme.accent} />
       <MiniMetric label="Conviction" value={String(verdict.rightNow.conviction)} note="/ 100" color={theme.accent} />
       </div>
@@ -172,7 +164,7 @@ function RightNow({ verdict, theme, zone }: { verdict: ValuationVerdictResponse;
 function MetricGrid({ verdict, theme }: { verdict: ValuationVerdictResponse; theme: VerdictTheme }) {
   const metrics = verdict.metrics;
   return (
-    <div className="grid gap-[10px] min-[760px]:grid-cols-2 min-[1120px]:grid-cols-4">
+    <div className="grid gap-2.5 min-[760px]:grid-cols-2 min-[1120px]:grid-cols-4">
       <MetricCard label="Current price" value={formatNullableMoney(metrics.currentPrice, verdict.currency)} note={metrics.ytdPct != null ? `${signed(metrics.ytdPct)}% YTD` : "live price"} color="#ececee" />
       <MetricCard label="Book value / sh" value={formatNullableMoney(metrics.bookValuePerShare, verdict.currency)} note="fair-value anchor" color="#ececee" />
       <MetricCard label="P / BV" value={metrics.pbv != null ? `${metrics.pbv.toFixed(2)}x` : "—"} note={metrics.pbvFloor != null ? `vs ${metrics.pbvFloor.toFixed(2)}x floor` : "valuation multiple"} color={theme.accent} />
@@ -185,12 +177,12 @@ type StructureBandModel = ReturnType<typeof buildStructureBand>;
 
 function StructureBand({ band }: { band: StructureBandModel }) {
   return (
-    <div className="rounded-[11px] border border-[#2a2a31] bg-[#0e0e10] px-[18px] pb-[14px] pt-4">
+    <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] px-4 pb-3 pt-3.5">
       <div className="flex flex-wrap items-baseline justify-between gap-[6px]">
         <div className="text-[12px] font-bold tracking-[0.02em] text-[#ececee]">Where the price sits vs structure</div>
         <div className="font-mono text-[10.5px] text-[#5a5a62]">{band.scaleLabel}</div>
       </div>
-      <div className="relative mx-1 mt-4 h-[86px]">
+      <div className="relative mx-1 mt-3 h-[78px]">
         <div className="absolute left-0 right-0 top-[34px] h-[14px] overflow-hidden rounded-[7px] border border-[#2a2a31] bg-[#161619]">
           <div className="absolute bottom-0 top-0 bg-[#3ecf8e]/35" style={{ left: `${band.deepDiscountLeft}%`, width: `${band.deepDiscountWidth}%` }} />
           <div className="absolute bottom-0 top-0 bg-[#78e6b8]/22" style={{ left: `${band.discountLeft}%`, width: `${band.discountWidth}%` }} />
@@ -239,14 +231,14 @@ function ThePlay({ verdict, theme }: { verdict: ValuationVerdictResponse; theme:
   const zone = addBackZone(verdict);
   const sub = addBackSub(verdict);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-4 rounded-[11px] border px-[18px] py-4" style={{ borderColor: theme.footBorder, background: theme.footBg }}>
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border px-4 py-3.5" style={{ borderColor: theme.footBorder, background: theme.footBg }}>
       <div className="min-w-[260px] flex-1">
         <div className="text-[10px] font-bold uppercase tracking-[0.06em]" style={{ color: theme.accent }}>The play this month</div>
-        <div className="mt-[6px] text-[12.5px] leading-[1.6] text-[#ececee]">{verdict.thePlay.text}</div>
+      <div className="mt-[5px] text-[12px] leading-[1.55] text-[#ececee]">{verdict.thePlay.text}</div>
       </div>
       <div className="text-right max-[760px]:text-left">
         <div className="text-[10px] font-bold uppercase tracking-[0.09em] text-[#5a5a62]">Add-back zone</div>
-        <div className="mt-1 font-mono text-[24px] font-extrabold" style={{ color: theme.accent }}>{zone}</div>
+        <div className="mt-0.5 font-mono text-[21px] font-extrabold" style={{ color: theme.accent }}>{zone}</div>
         {sub ? <div className="text-[10.5px] text-[#8c8c95]">{sub}</div> : null}
       </div>
     </div>
@@ -265,9 +257,9 @@ function MiniMetric({ label, value, note, color }: { label: string; value: strin
 
 function MetricCard({ label, value, note, color }: { label: string; value: string; note: string; color: string }) {
   return (
-    <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] px-[14px] py-3">
+    <div className="rounded-[9px] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2.5">
       <div className="text-[10px] uppercase tracking-[0.04em] text-[#8c8c95]">{label}</div>
-      <div className="mt-[5px] font-mono text-[18px] font-bold" style={{ color }}>{value}</div>
+      <div className="mt-1 font-mono text-[16px] font-bold" style={{ color }}>{value}</div>
       <div className="mt-0.5 text-[10.5px] text-[#8c8c95]">{note}</div>
     </div>
   );
@@ -391,8 +383,8 @@ function verdictLabel(verdict: ValuationVerdictResponse["verdict"], action?: Val
   if (zone === "discount") return action === "BUY" ? "DCA discount · accumulate" : "DCA discount · wait for setup";
   if (zone === "expensive") return "Expensive · wait for pullback";
   if (zone === "chasing" || verdict === "CHASING") return "Chase trap · pause / skip";
-  if (zone === "fair") return "Fair value · hold / wait";
   if (verdict === "INSUFFICIENT_DATA") return "Insufficient data";
+  if (zone === "fair") return "Fair value · hold / wait";
   return "Fair · hold / wait";
 }
 
@@ -415,12 +407,20 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
   const book = verdict.metrics.bookValuePerShare ?? verdict.structureBand.fairAnchor ?? null;
   const pbvFloor = verdict.metrics.pbvFloor ?? null;
   const now = verdict.metrics.currentPrice ?? verdict.structureBand.now ?? null;
-  const shouldShowBuyDiscount = verdict.verdict === "DISCOUNT" && verdict.rightNow.action === "BUY";
   const labelBetween = (left: number, right: number) => (left + right) / 2;
 
+  const discountFloor = book != null && pbvFloor != null ? book * pbvFloor : verdict.structureBand.discountAnchor;
+  const discountFair = book ?? verdict.structureBand.fairAnchor;
+  // The P/BV-floor visual assumes the floor sits BELOW fair (a real cheap anchor on the left). For
+  // development / deep-discount names the "floor" multiple can be >1x book (e.g. 1.40x) while price
+  // trades far under book — that inverts the scale and collapses the green slices. Only use it when
+  // the floor is genuinely cheaper than fair; otherwise fall through to the general entry/fair band.
+  const shouldShowBuyDiscount = verdict.verdict === "DISCOUNT" && verdict.rightNow.action === "BUY"
+    && discountFloor != null && discountFair != null && discountFloor < discountFair;
+
   if (shouldShowBuyDiscount) {
-    const floor = book != null && pbvFloor != null ? book * pbvFloor : verdict.structureBand.discountAnchor;
-    const fair = book ?? verdict.structureBand.fairAnchor;
+    const floor = discountFloor;
+    const fair = discountFair;
     const fairTop = fair != null ? fair * 1.1 : null;
     const values = validNumbers(floor, fair, fairTop, now);
     const lo = values.length ? Math.min(...values) * 0.93 : 0;
@@ -431,7 +431,7 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
     const nowPct = percentOnBand(now, lo, hi);
     const deepEndPct = labelBetween(floorPct, fairPct);
     const expensiveStartPct = labelBetween(fairPct, fairTopPct);
-    const currentZone = zoneForPct(nowPct, deepEndPct, fairPct, expensiveStartPct, fairTopPct);
+    const currentZone = zoneFromCall(verdict.verdict, verdict.rightNow.action, nowPct, floorPct);
     const currentMeta = zoneMeta(currentZone);
 
     return {
@@ -478,10 +478,13 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
   const stretchedPct = Math.max(fairPct, percentOnBand(stretched, lo, hi));
   const nowPct = percentOnBand(now, lo, hi);
   const pbv = verdict.metrics.pbv;
-  const chasingStartPct = chasingVerdict ? Math.max(fairPct + 6, Math.min(nowPct - 2, 97)) : stretchedPct;
-  const deepEndPct = labelBetween(entryPct, fairPct);
-  const expensiveStartPct = labelBetween(fairPct, chasingStartPct);
-  const currentZone = zoneForPct(nowPct, deepEndPct, fairPct, expensiveStartPct, chasingStartPct);
+  const chasingSeed = chasingVerdict ? Math.max(fairPct + 6, Math.min(nowPct - 2, 97)) : stretchedPct;
+  const currentZone = zoneFromCall(verdict.verdict, verdict.rightNow.action, nowPct, entryPct);
+  const [deepEndPct, fairStartPct, expensiveStartPct, chasingStartPct] = alignZoneBoundaries(
+    [labelBetween(entryPct, fairPct), fairPct, labelBetween(fairPct, chasingSeed), chasingSeed],
+    zoneIndex(currentZone),
+    nowPct,
+  );
   const currentMeta = zoneMeta(currentZone);
 
   return {
@@ -489,16 +492,16 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
     deepDiscountLeft: entryPct,
     deepDiscountWidth: Math.max(3, deepEndPct - entryPct),
     discountLeft: deepEndPct,
-    discountWidth: Math.max(3, fairPct - deepEndPct),
-    fairLeft: fairPct,
-    fairWidth: Math.max(3, expensiveStartPct - fairPct),
+    discountWidth: Math.max(3, fairStartPct - deepEndPct),
+    fairLeft: fairStartPct,
+    fairWidth: Math.max(3, expensiveStartPct - fairStartPct),
     expensiveLeft: expensiveStartPct,
     expensiveWidth: Math.max(3, chasingStartPct - expensiveStartPct),
     chasingLeft: chasingStartPct,
     chasingWidth: Math.max(0, 100 - chasingStartPct),
     deepDiscountLabelLeft: labelBetween(entryPct, deepEndPct),
-    discountLabelLeft: labelBetween(deepEndPct, fairPct),
-    fairLabelLeft: labelBetween(fairPct, expensiveStartPct),
+    discountLabelLeft: labelBetween(deepEndPct, fairStartPct),
+    fairLabelLeft: labelBetween(fairStartPct, expensiveStartPct),
     expensiveLabelLeft: labelBetween(expensiveStartPct, chasingStartPct),
     chasingLabelLeft: labelBetween(chasingStartPct, 100),
     entryPct,
@@ -544,13 +547,41 @@ function firstNumber(...values: Array<number | null | undefined>) {
   return values.find((value): value is number => typeof value === "number" && Number.isFinite(value)) ?? null;
 }
 
-function zoneForPct(nowPct: number, deepEndPct: number, fairStartPct: number, expensiveStartPct: number, chasingStartPct: number): StructureZone {
-  if (nowPct < deepEndPct) return "deep";
-  if (nowPct < fairStartPct) return "discount";
-  if (nowPct < expensiveStartPct) return "fair";
-  if (nowPct < chasingStartPct) return "expensive";
-  return "chasing";
+const ZONE_ORDER: StructureZone[] = ["deep", "discount", "fair", "expensive", "chasing"];
+
+function zoneIndex(zone: StructureZone): number {
+  return ZONE_ORDER.indexOf(zone);
 }
+
+// The zone is the AI's call, not geometry. Whatever the agent decided (its verdict + right-now
+// action) is the single source of truth for the badge, colors, and the marker — so "wait" can
+// never render under a green "discount" badge again.
+function zoneFromCall(
+  verdict: ValuationVerdictResponse["verdict"],
+  action: ValuationVerdictResponse["rightNow"]["action"],
+  nowPct: number,
+  entryPct: number,
+): StructureZone {
+  if (verdict === "CHASING" || action === "AVOID") return "chasing";
+  if (action === "TRIM") return "expensive";
+  if (action === "BUY") return nowPct <= entryPct + 1 ? "deep" : "discount";
+  return "fair"; // WAIT / anything else = not a buy today
+}
+
+// Nudge the colored-slice boundaries so the "now" marker lands inside the zone the AI called,
+// while entry/fair price markers keep their true positions.
+function alignZoneBoundaries(bounds: number[], zi: number, nowPct: number): number[] {
+  const gap = 1.5;
+  const out = bounds.slice();
+  for (let i = zi - 1; i >= 0; i--) {
+    out[i] = Math.min(out[i], (i === zi - 1 ? nowPct : out[i + 1]) - gap);
+  }
+  for (let i = zi; i < out.length; i++) {
+    out[i] = Math.max(out[i], (i === zi ? nowPct : out[i - 1]) + gap);
+  }
+  return out.map((value) => clamp(value, 3, 97));
+}
+
 
 function addBackZone(verdict: ValuationVerdictResponse) {
   const { addBackLow, addBackHigh } = verdict.thePlay;

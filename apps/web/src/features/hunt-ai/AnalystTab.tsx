@@ -1,5 +1,6 @@
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
+import { AgentRecap } from "../../components/agents/AgentRecap";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import type { StockAnalysisResponse, StockDetailResponse } from "../../lib/api";
 import { paddedDomain } from "../../lib/chart";
@@ -14,14 +15,14 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
 
   if (!hunt.premium) {
     return (
-      <div className="rounded-2xl p-[2px]" style={{ background: "linear-gradient(135deg,#74a4ff,#3ecf8e,#c77dff,#74a4ff)", backgroundSize: "300% 300%" }}>
-        <div className="flex flex-col items-center gap-5 rounded-[14px] bg-[#0a0c0f] px-10 py-12 text-center">
-          <div className="flex h-[60px] w-[60px] items-center justify-center rounded-[18px] border border-[#74a4ff]/30 bg-gradient-to-br from-[#74a4ff]/10 to-[#3ecf8e]/10">
+      <div className="rounded-[14px] p-[2px]" style={{ background: "linear-gradient(135deg,#74a4ff,#3ecf8e,#c77dff,#74a4ff)", backgroundSize: "300% 300%" }}>
+        <div className="flex flex-col items-center gap-4 rounded-[12px] bg-[#0a0c0f] px-6 py-8 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-[14px] border border-[#74a4ff]/30 bg-gradient-to-br from-[#74a4ff]/10 to-[#3ecf8e]/10">
             <svg width="26" height="26" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" stroke="url(#aLkG)" strokeWidth="1.4"/><path d="M4 6h8M4 9h5" stroke="url(#aLkG)" strokeWidth="1.3" strokeLinecap="round"/><defs><linearGradient id="aLkG" x1="0" y1="0" x2="16" y2="16"><stop offset="0%" stopColor="#74a4ff"/><stop offset="100%" stopColor="#3ecf8e"/></linearGradient></defs></svg>
           </div>
           <div>
-            <div className="mb-[9px] text-[22px] font-bold" style={{ background: "linear-gradient(90deg,#74a4ff,#3ecf8e,#c77dff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Stock Analyst</div>
-            <div className="mx-auto max-w-[400px] text-[13px] leading-[1.7] text-[#8c8c95]">Pick a ticker from the Hunt watchlist and AlphaWolf pulls price action, news, revenue, cost structure, and fundamentals.</div>
+            <div className="mb-2 text-[20px] font-bold" style={{ background: "linear-gradient(90deg,#74a4ff,#3ecf8e,#c77dff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Stock Analyst</div>
+            <div className="mx-auto max-w-[400px] text-[12.5px] leading-[1.6] text-[#8c8c95]">Pick a ticker from the Hunt watchlist and AlphaWolf pulls price action, news, revenue, cost structure, and fundamentals.</div>
           </div>
           <button type="button" onClick={hunt.unlockPremium} className="flex items-center gap-[9px] rounded-[11px] px-8 py-3 text-[14px] font-bold text-white hover:opacity-90" style={{ background: "linear-gradient(135deg,#74a4ff,#3ecf8e,#c77dff)" }}>
             Unlock Stock Analyst — from $29/mo
@@ -39,25 +40,25 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
   const inPortfolio = analyst.holdingSymbols.includes(analyst.ticker);
 
   return (
-    <div className="flex flex-col gap-3.5">
-      <div className={`${panel} flex flex-wrap items-center justify-between gap-3 px-4 py-3`}>
+    <div className="flex flex-col gap-3">
+      <div className={`${panel} flex flex-wrap items-center justify-between gap-2.5 px-3.5 py-2.5`}>
         <div className="flex min-w-0 flex-wrap items-center gap-3">
           <div>
-            <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#5a5a62]">Analyst target</div>
+            <div className="text-[8.5px] font-bold uppercase tracking-[0.12em] text-[#5a5a62]">Analyst target</div>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-2">
-              <span className="font-mono text-[18px] font-extrabold text-[#ececee]">{selectedTicker || "—"}</span>
+              <span className="font-mono text-[17px] font-extrabold text-[#ececee]">{selectedTicker || "—"}</span>
               {analyst.detail ? <span className="max-w-[220px] truncate text-[11px] text-[#8c8c95]">{analyst.detail.stock.name}</span> : null}
               {inPortfolio ? <span className="rounded-[5px] border border-[#3ecf8e]/25 bg-[#3ecf8e]/10 px-2 py-[2px] text-[9px] font-semibold text-[#3ecf8e]">IN PORTFOLIO</span> : null}
             </div>
           </div>
           {analyst.detail ? (
             <div className="flex items-baseline gap-1.5 border-l border-[#252529] pl-3">
-              <span className="font-mono text-[18px] font-bold">{price != null ? formatCurrency(price, currency) : "—"}</span>
+              <span className="font-mono text-[17px] font-bold">{price != null ? formatCurrency(price, currency) : "—"}</span>
               <span className={`font-mono text-[11px] ${change >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{change >= 0 ? "+" : ""}{change.toFixed(2)}%</span>
             </div>
           ) : null}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
           {analyst.analysis && analyst.analyzedAt ? (
             <span className="font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">Last sync {formatAnalyzedAt(analyst.analyzedAt)}</span>
           ) : null}
@@ -69,7 +70,8 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
 
       {hasResult && analyst.detail && analyst.analysis ? (
         <div className="flex flex-col gap-3">
-          <div><AgentByline agent={analyst.analysis.agent} label="Analyst agent" /></div>
+          <AgentRecap agent={analyst.analysis.agent} recap={analyst.analysis.recap} fit={analyst.analysis.agentFit} reason={analyst.analysis.agentFitReason} className="" />
+          <AnalystNoteCard analysis={analyst.analysis} />
           <AnalystDecisionMatrix analysis={analyst.analysis} />
           <AnalystScoreCard analysis={analyst.analysis} currency={currency} />
           <AnalystPriceChart detail={analyst.detail} analysis={analyst.analysis} />
@@ -80,7 +82,7 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
       ) : null}
 
       {!analyst.loading && !selectedTicker ? (
-        <div className={`${panel} px-10 py-10 text-center`}>
+        <div className={`${panel} px-6 py-6 text-center`}>
           <div className="text-[14px] font-semibold">The analyst is waiting for a ticker</div>
           <div className="mx-auto mt-2 max-w-[360px] text-[12.5px] leading-[1.7] text-[#8c8c95]">Add or select a stock in the Hunt watchlist above. The Analyst tab will use that same ticker.</div>
         </div>
@@ -89,11 +91,42 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
   );
 }
 
+function AnalystNoteCard({ analysis }: { analysis: StockAnalysisResponse }) {
+  const verdict = signalLevel(analysis.confidence, analysis.signal);
+  const color = analysis.agent?.color ?? verdict.color;
+  return (
+    <div
+      className="relative overflow-hidden rounded-[10px] border px-3.5 py-3.5 shadow-[0_18px_54px_rgba(0,0,0,0.28)]"
+      style={{
+        borderColor: `${color}58`,
+        background: `radial-gradient(circle at 4% 0%, ${color}24, transparent 33%), radial-gradient(circle at 92% 8%, ${color}1a, transparent 30%), linear-gradient(135deg, ${color}10, rgba(19,19,23,0.88) 58%, rgba(14,14,16,0.98))`,
+        boxShadow: `0 0 0 1px ${color}16 inset, 0 18px 54px rgba(0,0,0,0.32), 0 0 46px ${color}12`,
+      }}
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-3">
+        <AgentByline agent={analysis.agent} label="Analyst note" className="mb-0" />
+        <div className="flex items-center gap-2">
+          <span className="rounded-[7px] border px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.04em]" style={{ color, borderColor: `${color}66`, background: `${color}12` }}>
+            {verdict.label}
+          </span>
+          <span className="font-mono text-[18px] font-extrabold leading-none" style={{ color }}>{analysis.confidence}</span>
+          <span className="font-mono text-[10px] text-[#5a5a62]">/100</span>
+        </div>
+      </div>
+      <div className="h-[4px] overflow-hidden rounded-full bg-[#1a1a1f]">
+        <div className="h-full rounded-full" style={{ width: `${analysis.confidence}%`, background: color }} />
+      </div>
+      <p className="mt-3 max-w-[1120px] whitespace-pre-line text-[13px] leading-[1.65] text-[#d8d8dd]">{analysis.summary}</p>
+    </div>
+  );
+}
+
 function AnalystDecisionMatrix({ analysis }: { analysis: StockAnalysisResponse }) {
   const matrix = buildAnalystMatrix(analysis);
   return (
-    <div className={`${panel} overflow-hidden p-4`}>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <div className={`${panel} overflow-hidden p-3.5`}>
+      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2.5">
         <div>
           <div className="text-[13px] font-bold tracking-[-0.1px] text-[#ececee]">Analyst Matrix</div>
           <div className="mt-0.5 text-[11px] text-[#8c8c95]">Price now vs. business structure.</div>
@@ -103,13 +136,13 @@ function AnalystDecisionMatrix({ analysis }: { analysis: StockAnalysisResponse }
         </div>
       </div>
 
-      <div className="grid gap-3 min-[900px]:grid-cols-[0.82fr_1.18fr]">
+      <div className="grid gap-2.5 min-[900px]:grid-cols-[0.82fr_1.18fr]">
         <div className="grid gap-2 min-[560px]:grid-cols-2 min-[900px]:grid-cols-1">
           <MatrixAxisCard title="Price now" score={matrix.priceScore} label={matrix.priceLabel} color={matrix.priceColor} body={matrix.priceBody} />
           <MatrixAxisCard title="Structure" score={matrix.structureScore} label={matrix.structureLabel} color={matrix.structureColor} body={matrix.structureBody} />
         </div>
 
-        <div className="relative min-h-[168px] rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3">
+        <div className="relative min-h-[150px] rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3">
           <div className="absolute inset-x-4 top-1/2 h-px bg-[#252529]" />
           <div className="absolute inset-y-4 left-1/2 w-px bg-[#252529]" />
           <QuadrantLabel className="left-3 top-3" color="#3ecf8e" title="Buy / add" sub="good price + strong structure" />
@@ -133,18 +166,18 @@ function AnalystDecisionMatrix({ analysis }: { analysis: StockAnalysisResponse }
 
 function MatrixAxisCard({ title, score, label, color, body }: { title: string; score: number; label: string; color: string; body: string }) {
   return (
-    <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3">
-      <div className="mb-2 flex items-start justify-between gap-3">
+    <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-2.5">
+      <div className="mb-1.5 flex items-start justify-between gap-3">
         <div>
           <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#5a5a62]">{title}</div>
           <div className="mt-0.5 text-[12px] font-bold" style={{ color }}>{label}</div>
         </div>
-        <div className="font-mono text-[22px] font-extrabold leading-none" style={{ color }}>{score}</div>
+        <div className="font-mono text-[20px] font-extrabold leading-none" style={{ color }}>{score}</div>
       </div>
       <div className="mb-1.5 h-[5px] overflow-hidden rounded-full bg-[#1a1a1f]">
         <div className="h-full rounded-full" style={{ width: `${score}%`, background: color }} />
       </div>
-      <div className="text-[10.5px] leading-[1.45] text-[#8c8c95]">{body}</div>
+      <div className="text-[10px] leading-[1.4] text-[#8c8c95]">{body}</div>
     </div>
   );
 }
@@ -168,8 +201,8 @@ function AnalystPriceChart({ detail, analysis }: { detail: StockDetailResponse; 
   ], 0.12);
 
   return (
-    <div className={`${panel} px-5 py-4`}>
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+    <div className={`${panel} px-4 py-3.5`}>
+      <div className="mb-2.5 flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-[15px] font-semibold">Price Action</div>
           <div className="mt-1 text-[12px] text-[#8c8c95]">Recent closes with AI entry and target context.</div>
@@ -180,7 +213,7 @@ function AnalystPriceChart({ detail, analysis }: { detail: StockDetailResponse; 
           <span className="flex items-center gap-1.5"><span className="w-4 border-t-2 border-dashed border-[#74a4ff]" />Target</span>
         </div>
       </div>
-      <div className="h-[210px]">
+      <div className="h-[190px]">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 6, right: 8, bottom: 0, left: 0 }}>
             <defs>
@@ -274,16 +307,16 @@ function AnalystReasons({ analysis }: { analysis: StockAnalysisResponse }) {
 
   if (!reasons.length) return null;
   return (
-    <div className="rounded-[13px] border border-[#3ecf8e]/20 bg-[linear-gradient(135deg,rgba(62,207,142,0.04),rgba(77,150,255,0.03))] px-[18px] py-4">
-      <div className="mb-3 flex items-center gap-2">
+    <div className="rounded-[10px] border border-[#3ecf8e]/20 bg-[linear-gradient(135deg,rgba(62,207,142,0.04),rgba(77,150,255,0.03))] px-3.5 py-3">
+      <div className="mb-2.5 flex items-center gap-2">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.8 4.5 4.7 1.5-4.7 1.2L8 14 6.2 8.7 1.5 7.5 6.2 6z" stroke="#3ecf8e" strokeWidth="1.5" strokeLinejoin="round" /></svg>
         <span className="text-[11px] font-bold uppercase tracking-[0.6px] text-[#3ecf8e]">Why AlphaWolf says this</span>
       </div>
       <div className="grid grid-cols-2 gap-2 max-[820px]:grid-cols-1">
         {reasons.map((reason, index) => (
-          <div key={index} className="flex items-start gap-2.5 rounded-[10px] border border-[#252529] bg-white/[0.02] px-3 py-3">
+          <div key={index} className="flex items-start gap-2.5 rounded-[9px] border border-[#252529] bg-white/[0.02] px-3 py-2.5">
             <span className="grid h-5 w-5 flex-none place-items-center rounded-[5px] border text-[9px] font-bold" style={{ color, borderColor: `${color}40`, background: `${color}18` }}>{index + 1}</span>
-            <span className="text-[12px] leading-[1.6] text-[#c8c8d0]">{reason}</span>
+            <span className="text-[11.5px] leading-[1.5] text-[#c8c8d0]">{reason}</span>
           </div>
         ))}
       </div>
@@ -299,26 +332,26 @@ function AnalystScoreCard({ analysis, currency }: { analysis: StockAnalysisRespo
   const stop = entry ? entry * 0.985 : null;
   return (
     <div className="rounded-[12px] p-[2px]" style={{ background: `linear-gradient(135deg,${color},#4d96ff,#c77dff)` }}>
-      <div className="rounded-[10px] bg-[#0e0f12] px-5 py-[18px]">
-        <div className="flex flex-wrap items-stretch gap-[18px]">
+      <div className="rounded-[10px] bg-[#0e0f12] px-4 py-3.5">
+        <div className="flex flex-wrap items-stretch gap-3.5">
           <div className="flex min-w-[110px] flex-col justify-center gap-[2px]">
-            <div className="font-mono text-[48px] font-extrabold leading-none" style={{ color }}>{analysis.confidence}</div>
+            <div className="font-mono text-[42px] font-extrabold leading-none" style={{ color }}>{analysis.confidence}</div>
             <div className="text-[10px] text-[#5a5a62]">/100 AlphaWolf Score</div>
             <div className="mt-[5px] text-[13px] font-bold" style={{ color }}>{level.label}</div>
           </div>
           <div className="w-px self-stretch bg-[#2a2a31]" />
-          <div className="grid min-w-[260px] flex-1 grid-cols-3 gap-2.5 max-[760px]:grid-cols-1">
-            <div className="rounded-[9px] bg-[#161619] px-[13px] py-[11px]">
+          <div className="grid min-w-[260px] flex-1 grid-cols-3 gap-2 max-[760px]:grid-cols-1">
+            <div className="rounded-[9px] bg-[#161619] px-3 py-2.5">
               <div className="mb-[5px] text-[9px] uppercase tracking-[0.5px] text-[#5a5a62]">Entry Zone</div>
               <div className="font-mono text-[13px] font-bold text-[#f5c451]">{entry != null ? formatCurrency(entry, currency) : "—"}</div>
               <div className="mt-[3px] text-[10px] text-[#8c8c95]">{analysis.entryPrice?.why ?? "AI entry"}</div>
             </div>
-            <div className="rounded-[9px] bg-[#161619] px-[13px] py-[11px]">
+            <div className="rounded-[9px] bg-[#161619] px-3 py-2.5">
               <div className="mb-[5px] text-[9px] uppercase tracking-[0.5px] text-[#5a5a62]">Price Target</div>
               <div className="font-mono text-[13px] font-bold text-[#3ecf8e]">{target != null ? formatCurrency(target, currency) : "—"}</div>
               <div className="mt-[3px] text-[10px] text-[#8c8c95]">{analysis.targetPrice?.timeHorizon ?? "target"}</div>
             </div>
-            <div className="rounded-[9px] bg-[#161619] px-[13px] py-[11px]">
+            <div className="rounded-[9px] bg-[#161619] px-3 py-2.5">
               <div className="mb-[5px] text-[9px] uppercase tracking-[0.5px] text-[#5a5a62]">Stop Loss</div>
               <div className="font-mono text-[13px] font-bold text-[#f2575c]">{stop != null ? formatCurrency(stop, currency) : "—"}</div>
               <div className="mt-[3px] text-[10px] text-[#8c8c95]">−1.5% from entry</div>

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Area, AreaChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AiVerdictCard } from "../../components/AiVerdictCard";
 import { AgentByline } from "../../components/agents/AgentByline";
+import { AgentRecap } from "../../components/agents/AgentRecap";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
@@ -143,8 +144,8 @@ export function StockDetailDrawer() {
   return (
     <>
       <button type="button" aria-label="Close stock detail" onClick={closeDetail} className={`aw-overlay fixed inset-0 z-30 bg-slate-900/30 transition-opacity ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} />
-      <aside ref={drawerRef} onClick={closeDetail} className={`aw-drawer fixed inset-0 z-40 flex items-start justify-center overflow-y-auto px-6 py-8 transition-opacity ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} aria-label="Stock detail panel">
-        <div onClick={(event) => event.stopPropagation()} className="relative min-w-0 w-full max-w-[940px] overflow-hidden rounded-2xl border border-[#2a2a31] bg-[#0e0e10] shadow-[0_30px_90px_rgba(0,0,0,.55)]">
+      <aside ref={drawerRef} onClick={closeDetail} className={`aw-drawer fixed inset-0 z-40 flex items-end justify-center overflow-hidden px-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-opacity min-[720px]:items-start min-[720px]:overflow-y-auto min-[720px]:px-6 min-[720px]:py-8 ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} aria-label="Stock detail panel">
+        <div onClick={(event) => event.stopPropagation()} className="aw-detail-panel relative flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-w-0 w-full max-w-[940px] flex-col overflow-hidden rounded-t-2xl border border-[#2a2a31] bg-[#0e0e10] shadow-[0_30px_90px_rgba(0,0,0,.55)] min-[720px]:max-h-none min-[720px]:rounded-2xl">
           <DrawerHeader
             detail={detail}
             symbol={selectedSymbol}
@@ -153,7 +154,7 @@ export function StockDetailDrawer() {
             onAdd={() => addHoldingMutation.mutate()}
             onClose={closeDetail}
           />
-          <div className="flex min-w-0 max-h-[calc(100vh-180px)] flex-col gap-4 overflow-x-hidden overflow-y-auto p-[22px]">
+          <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 min-[720px]:max-h-[calc(100vh-180px)] min-[720px]:p-[22px]">
             {loading ? <DetailSkeleton symbol={selectedSymbol} /> : null}
             {detailQuery.isError ? <div className={`${panel} flex items-center justify-between text-sm text-[#f2575c]`}>Unable to load live stock detail.<button type="button" disabled={detailQuery.isFetching} onClick={() => detailQuery.refetch()} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">{detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button></div> : null}
             {error ? <div className={`${panel} text-sm text-rose-600`}>{error}</div> : null}
@@ -181,7 +182,7 @@ function ResearchTabs({ ref, active, onSelect }: { ref: React.Ref<HTMLDivElement
     { key: "news", label: "News" },
   ];
   return (
-    <div ref={ref} className="grid min-w-0 grid-cols-6 gap-1 rounded-[10px] border border-[#2a2a31] bg-[#111113]/95 p-1 backdrop-blur">
+    <div ref={ref} className="sticky top-0 z-20 flex min-w-0 flex-none gap-1 overflow-x-auto rounded-[10px] border border-[#2a2a31] bg-[#111113] p-1 backdrop-blur min-[720px]:grid min-[720px]:grid-cols-6 min-[720px]:overflow-visible">
       {tabs.map((item) => {
         const isActive = active === item.key;
         return (
@@ -189,7 +190,7 @@ function ResearchTabs({ ref, active, onSelect }: { ref: React.Ref<HTMLDivElement
             key={item.key}
             type="button"
             onClick={() => onSelect(item.key)}
-            className={`rounded-[7px] px-2 py-2 text-center transition-colors hover:bg-[#161619] ${isActive ? "bg-[#1c1c20]" : ""}`}
+            className={`min-w-[74px] rounded-[7px] px-2 py-2 text-center transition-colors hover:bg-[#161619] min-[720px]:min-w-0 ${isActive ? "bg-[#1c1c20]" : ""}`}
           >
             <TabIcon tab={item.key} active={isActive} />
             <span className={`mt-0.5 block text-[10.5px] font-semibold ${isActive ? "text-[#3ecf8e]" : "text-[#8c8c95]"}`}>{item.label}</span>
@@ -650,15 +651,23 @@ function DrawerHeader({
 }) {
   const hasHolding = typeof holdingShares === "number" && holdingShares > 0;
   return (
-    <div className="flex items-center justify-between gap-4 border-b border-[#2a2a31] bg-[#141417] px-[22px] py-[18px]">
-      <div><div className="flex items-center gap-[11px]"><strong className="font-mono text-xl">{detail?.stock.symbol ?? symbol ?? "Live data"}</strong><span className="text-sm text-[#8c8c95]">{detail?.stock.name ?? "Live data panel"}</span><span className="rounded-[5px] border border-[#2a2a31] px-[7px] py-0.5 text-[10px] text-[#8c8c95]">{detail?.stock.symbol.endsWith(".BK") ? "Thai SET" : "US"}</span></div>{detail ? <div className="mt-[3px] flex items-baseline gap-[9px]"><span className="font-mono text-lg font-semibold">{formatCurrency(detail.stock.price, detail.stock.currency)}</span><span className={`font-mono text-[13px] ${detail.stock.changePct >= 0 ? positive : negative}`}>{formatPercent(detail.stock.changePct)}</span></div> : null}</div>
-      <div className="flex items-center gap-3">
+    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#2a2a31] bg-[#141417] px-4 py-4 min-[720px]:items-center min-[720px]:gap-4 min-[720px]:px-[22px] min-[720px]:py-[18px]">
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 min-[720px]:gap-[11px]">
+          <strong className="min-w-0 max-w-full truncate font-mono text-lg min-[720px]:text-xl">{detail?.stock.symbol ?? symbol ?? "Live data"}</strong>
+          <span className="min-w-0 max-w-full truncate text-xs text-[#8c8c95] min-[720px]:text-sm">{detail?.stock.name ?? "Live data panel"}</span>
+          <span className="rounded-[5px] border border-[#2a2a31] px-[7px] py-0.5 text-[10px] text-[#8c8c95]">{detail?.stock.symbol.endsWith(".BK") ? "Thai SET" : "US"}</span>
+        </div>
+        {detail ? <div className="mt-[3px] flex items-baseline gap-[9px]"><span className="font-mono text-lg font-semibold">{formatCurrency(detail.stock.price, detail.stock.currency)}</span><span className={`font-mono text-[13px] ${detail.stock.changePct >= 0 ? positive : negative}`}>{formatPercent(detail.stock.changePct)}</span></div> : null}
+      </div>
+      <button type="button" onClick={onClose} aria-label="Close detail panel" className="grid h-9 w-9 flex-none place-items-center rounded-lg border border-[#2a2a31] bg-[#0e0e10] text-[22px] leading-none text-[#8c8c95] hover:text-[#ececee] min-[720px]:order-last min-[720px]:border-0 min-[720px]:bg-transparent">×</button>
+      <div className="flex w-full min-w-0 items-stretch gap-2 min-[720px]:w-auto min-[720px]:items-center min-[720px]:gap-3">
         {detail ? (
           <button
             type="button"
             onClick={onAdd}
             disabled={adding}
-            className="rounded-lg border border-[#34343c] bg-[#1c1c20] px-3 py-2 text-left text-xs font-semibold text-[#ececee] transition-colors hover:border-[#676771] hover:bg-[#24242a] disabled:cursor-not-allowed disabled:opacity-60"
+            className="min-w-0 flex-1 rounded-lg border border-[#34343c] bg-[#1c1c20] px-3 py-2 text-left text-xs font-semibold text-[#ececee] transition-colors hover:border-[#676771] hover:bg-[#24242a] disabled:cursor-not-allowed disabled:opacity-60 min-[720px]:flex-none"
           >
             <span className="block">{adding ? "Adding..." : hasHolding ? "Add 1 more" : "Add to port"}</span>
             <span className="mt-0.5 block font-mono text-[10px] font-medium text-[#a6a6af]">
@@ -667,7 +676,6 @@ function DrawerHeader({
           </button>
         ) : null}
         {detail ? <IndustryRankBadge detail={detail} /> : null}
-        <button type="button" onClick={onClose} aria-label="Close detail panel" className="px-2 py-1 text-[22px] leading-none text-[#8c8c95] hover:text-[#ececee]">×</button>
       </div>
     </div>
   );
@@ -687,7 +695,7 @@ function IndustryRankBadge({ detail }: { detail: StockDetailResponse }) {
   const industry = detail.peerRank?.industry ?? detail.business?.industry ?? "Industry";
 
   return (
-    <div className={`min-w-[150px] rounded-lg border px-3 py-2 ${tone}`}>
+    <div className={`min-w-0 flex-1 rounded-lg border px-3 py-2 min-[720px]:min-w-[150px] min-[720px]:flex-none ${tone}`}>
       <div className="flex items-baseline justify-between gap-3">
         <span className="text-[10px] font-semibold uppercase tracking-[.08em]">Industry rank</span>
         <strong className="font-mono text-sm">{rank && count ? `#${rank} / ${count}` : "Unavailable"}</strong>
@@ -798,6 +806,7 @@ function AlphaHuntDecisionDesk({ advice, loading, onHunt }: { advice: QuantPersp
             {advice.checks.slice(0, 4).map((check) => <Metric key={check.label} label={check.label} value={check.value} tone={check.status} hint={check.insight} />)}
           </div>
         </div>
+        <AgentRecap agent={advice.agent} recap={advice.recap} fit={advice.agentFit} reason={advice.agentFitReason} className="mt-3" />
         <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#242429] pt-3">
           <span className="text-[11px] text-[#8c8c95]">Swing investor read{advice.generatedAt ? ` · generated ${new Date(advice.generatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ", generated on request."}</span>
           <button type="button" onClick={onHunt} className="rounded-lg border border-[#2a2a31] bg-[#161619] px-3 py-2 text-xs font-semibold text-[#bcbcc2] hover:border-[#3ecf8e] hover:text-[#3ecf8e]">Re-hunt</button>

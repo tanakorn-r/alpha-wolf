@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Alpha Wolf</string>
+    <string name="title_activity_main">Alpha Wolf</string>
+    <string name="package_name">com.alphawolf.app</string>
+    <string name="custom_url_scheme">com.alphawolf.app</string>
+</resources>

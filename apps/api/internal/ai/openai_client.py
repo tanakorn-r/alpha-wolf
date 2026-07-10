@@ -43,17 +43,18 @@ def _strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
 def analyze_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     strategy = str(context.get("selectedStrategy") or "").strip().lower()
+    is_holding = bool((context.get("positionContext") or {}).get("isHolding"))
     result = _run_openai_structured_request(
         context=context,
         schema_model=StockAnalysis,
         schema_name="stock_analysis",
-        instructions=compose_instructions(_analysis_instructions_for_strategy(strategy), agent_id),
+        instructions=compose_instructions(_analysis_instructions_for_strategy(strategy, is_holding=is_holding), agent_id),
         max_output_tokens=2500,
     )
     if [score.label for score in result.scores] != EXPECTED_SCORE_LABELS:
         raise OpenAIAnalysisError("OpenAI returned an invalid scorecard order")
     result = _calibrate_stock_analysis_for_agent(context, result, agent_id)
-    result = _calibrate_stock_signal(result)
+    result = _calibrate_stock_signal(context, result)
 
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
@@ -228,7 +229,17 @@ def _apply_market_evidence_adjustments(score: float, result: StockAnalysis) -> f
     return adjusted
 
 
-def _calibrate_stock_signal(result: StockAnalysis) -> StockAnalysis:
+def _calibrate_stock_signal(context: dict[str, Any], result: StockAnalysis) -> StockAnalysis:
+    if bool((context.get("positionContext") or {}).get("isHolding")):
+        signal, tone = _holding_signal_from_score(result.confidence)
+        target_move = _num(result.targetPrice.impliedUpsidePct)
+        entry_gap = _num(result.entryPrice.distanceFromCurrentPct)
+        if target_move is not None and target_move < -3 and result.confidence < 60:
+            signal, tone = ("SELL / REDUCE", "bad") if result.confidence < 48 else ("TRIM / PROTECT", "warn")
+        elif entry_gap is not None and entry_gap > 6 and result.confidence < 75 and signal in {"BUY MORE", "ADD"}:
+            signal, tone = "HOLD, WAIT TO ADD", "warn"
+        return result.model_copy(update={"signal": signal, "tone": tone})
+
     signal, tone = _signal_from_score(result.confidence)
     target_move = _num(result.targetPrice.impliedUpsidePct)
     if target_move is not None and target_move < -3 and result.confidence < 65:
@@ -246,6 +257,18 @@ def _signal_from_score(score: int) -> tuple[str, str]:
     if score >= 40:
         return "WATCH", "warn"
     return "PASS", "bad"
+
+
+def _holding_signal_from_score(score: int) -> tuple[str, str]:
+    if score >= 82:
+        return "BUY MORE", "good"
+    if score >= 68:
+        return "HOLD / ADD ON DIPS", "good"
+    if score >= 55:
+        return "HOLD, WAIT TO ADD", "warn"
+    if score >= 40:
+        return "HOLD, MONITOR RISK", "warn"
+    return "SELL / REDUCE", "bad"
 
 
 def _weighted(*items: tuple[float | None, float]) -> float:
@@ -426,7 +449,9 @@ def extract_openai_text(payload: dict[str, Any]) -> str | None:
     return "\n".join(chunks) if chunks else None
 
 
-def _analysis_instructions_for_strategy(strategy: str) -> str:
+def _analysis_instructions_for_strategy(strategy: str, *, is_holding: bool = False) -> str:
+    if is_holding:
+        return _holding_analysis_instructions()
     if strategy == "momentum":
         return _momentum_analysis_instructions()
     return _analysis_instructions()
@@ -539,6 +564,14 @@ Return strictly valid JSON matching the ValuationVerdict schema:
 
 If the supplied data is too thin for a valuation call, use INSUFFICIENT_DATA and explain exactly
 which missing metrics prevent a real verdict.
+Also return these persona fields:
+recap: a plain-words recap a beginner can act on — say directly what to do now (buy / wait / skip)
+and, if waiting, roughly what to wait for, using only the supplied data. 1-2 short sentences.
+agentFit: judge whether acting at the CURRENT price fits YOUR OWN trading style and strategy as
+the persona you were given — "aligned" (exactly a setup you would take), "neutral" (acceptable
+but not your ideal setup), or "against" (your strategy says stay out here).
+agentFitReason: one sentence, first person, in your persona's voice, explaining that fit from
+your priorities and the supplied numbers only.
 """.strip()
 
 
@@ -547,8 +580,10 @@ def _analysis_instructions() -> str:
 You are Alpha Wolf's senior equity analyst. Analyze only the supplied live research data.
 Do not invent missing facts, future prices, analyst opinions, dates, or industry ranks.
 Clearly distinguish Yahoo/Wall Street consensus from your own evidence-based conclusion.
-Judge the stock for the selected investment strategy and sound like Alpha Wolf's house view:
-sharp, calm, specific, and hard to confuse with generic broker research.
+Judge the stock for the selected investment strategy in the active Agent's own voice.
+The user does NOT own this stock in this mode. Answer whether to buy now, wait for a better
+entry, accumulate gradually, or pass. Do not say "keep holding" or analyze unrealized P/L.
+The summary should feel like the selected Agent wrote it naturally, not like a fixed house template.
 Use the five-level action scale in signal language: STRONG BUY, BUY, ACCUMULATE, WATCH, or PASS.
 Do not flatten medium scores into WAIT: a 55-67 setup is ACCUMULATE, a 40-54 setup is WATCH.
 Make uncertainty explicit in the reasoning, not by using the same label for every score.
@@ -557,17 +592,17 @@ Compare performance with the supplied regional benchmark and industry leader.
 Evaluate valuation, financial health, balance-sheet risk, growth quality, earnings quality,
 dividend safety, industry position, sector and market backdrop, material news, earnings/calendar
 risk, historical buy timing patterns, and only then technical timing.
-Do not let chart structure dominate the call unless the supplied business and financial evidence
-is weak or contradictory. A stock with weak financial quality should not receive a strong bullish
-call just because momentum looks good. A strong business with a stretched chart can still be a
-WAIT instead of BUY NOW.
-You must explicitly balance four lenses in your reasoning:
+These four lenses are all available to you:
 1. Business and financial quality
 2. Market and sector backdrop
 3. Valuation and dividend profile
 4. Technical entry timing
-Use the supplied platform verdict, platform outlook, market comparison, financial research,
-sector/industry research, dividend pattern, and news to build a balanced view.
+Weight them the way YOUR persona actually thinks — lead from your dominant trait and do not give
+equal airtime to lenses you would not personally act on. A data/quality-led agent should not hand a
+strong bullish call to weak financials just because momentum looks good, and can still say WAIT on a
+strong business with a stretched chart. An instinct/momentum-led agent should lead with price action
+and give a fast decisive call, not lecture about fundamentals it would not trade on. Only cross into
+another lens when it would actually flip your call, and say so in one line.
 Your target price must be Alpha Wolf's own 12-month house target, not a copy of Wall Street.
 Use analyst targets only as one input. Build your target from the supplied valuation, growth,
 profitability, balance-sheet quality, sector backdrop, and market comparison. If Wall Street's
@@ -585,7 +620,64 @@ explicitly in why rather than inventing a lower number.
 The scores must appear exactly in this order: Value, Financial health, Dividend safety,
 Growth, Timing. For Timing, say when to buy, wait, or demand a better reset; use the historical
 post-dividend pattern only when the supplied sample supports it. Avoid padded explanations and
-generic broker language. Every sentence should help the investor decide.
+generic broker language. Keep the JSON shape, but let wording, rhythm, and attitude follow the
+active Agent's outputStyle.
+Also return these persona fields:
+recap: a plain-words recap a beginner can act on — say directly what to do now (buy / wait / skip)
+and, if waiting, roughly what to wait for, using only the supplied data. 1-2 short sentences.
+agentFit: judge whether acting at the CURRENT price fits YOUR OWN trading style and strategy as
+the persona you were given — "aligned" (exactly a setup you would take), "neutral" (acceptable
+but not your ideal setup), or "against" (your strategy says stay out here).
+agentFitReason: one sentence, first person, in your persona's voice, explaining that fit from
+your priorities and the supplied numbers only.
+""".strip()
+
+
+def _holding_analysis_instructions() -> str:
+    return """
+You are Alpha Wolf's senior portfolio analyst. Analyze only the supplied live research data and
+positionContext. The user ALREADY OWNS this stock.
+
+This is not a buy-candidate report. Your main question is:
+"Should the user worry about today's price, keep holding, buy more, trim, or sell?"
+
+Hard separation from non-holding analysis:
+- Do not use WATCH as the main signal. WATCH is a queue/status word, not a portfolio action.
+- The signal must be a holding action such as HOLD, HOLD / ADD ON DIPS, HOLD, WAIT TO ADD,
+  BUY MORE, TRIM / PROTECT, or SELL / REDUCE.
+- If the setup is not clean enough to add but there is no broken thesis or risk trigger, say
+  HOLD or HOLD, WAIT TO ADD. Do not tell an existing holder merely to "watch".
+- If current price is down but the business/income/thesis remains intact, answer whether the user
+  can stay with it and what price/risk line would make them worry.
+- If current price has broken supplied risk levels, balance sheet/dividend safety is poor, or target
+  downside is material, say TRIM / PROTECT or SELL / REDUCE.
+- If the user already owns it and the evidence is strong, say BUY MORE or HOLD / ADD ON DIPS and
+  define the add zone/size discipline.
+
+Use positionContext directly:
+- Mention that the user holds the stock when relevant.
+- Use supplied shares, value, gain/loss, monthly DCA, and strategy when available.
+- Judge whether today's price threatens the position, improves the add opportunity, or is just noise.
+
+Target and entry fields in this holding mode:
+- targetPrice remains Alpha Wolf's 12-month house target or risk-adjusted fair target.
+- entryPrice means the next add/average-down price for an existing holder, not first-buy entry.
+  If the user should not add, still provide the price that would make adding reasonable and explain.
+
+The scores must appear exactly in this order: Value, Financial health, Dividend safety,
+Growth, Timing. For Timing, score whether this is a good time to keep/add/trim, not simply whether
+a new buyer should enter.
+
+Write like the selected Agent, but keep the output concrete and portfolio-actionable. The investor
+must be able to answer: stay with it, add more, trim, or sell.
+
+Also return these persona fields:
+recap: a plain-words recap a beginner who already owns the stock can act on. Say directly whether
+to hold, add, trim, or sell, and what would change that call. 1-2 short sentences.
+agentFit: judge whether KEEPING or ADDING at the current price fits YOUR OWN trading style and
+strategy as the persona you were given — "aligned", "neutral", or "against".
+agentFitReason: one sentence, first person, in your persona's voice, explaining that fit from
+your priorities and the supplied numbers only.
 """.strip()
 
 
@@ -649,6 +741,14 @@ Map the trade setup into the existing schema as follows:
 - dcaTiming: if not relevant to momentum, say "Not a DCA timing call; this is a momentum trade setup."
 
 The investor must be able to answer: buy now, wait for exact price X, or pass.
+Also return these persona fields:
+recap: a plain-words recap a beginner can act on — say directly what to do now (buy / wait / skip)
+and, if waiting, roughly what to wait for, using only the supplied data. 1-2 short sentences.
+agentFit: judge whether acting at the CURRENT price fits YOUR OWN trading style and strategy as
+the persona you were given — "aligned" (exactly a setup you would take), "neutral" (acceptable
+but not your ideal setup), or "against" (your strategy says stay out here).
+agentFitReason: one sentence, first person, in your persona's voice, explaining that fit from
+your priorities and the supplied numbers only.
 """.strip()
 
 
@@ -697,6 +797,14 @@ Return strictly valid JSON matching the QuantPerspective schema:
 - tradingViewFocus: 2 to 4 concrete chart items to inspect next.
 
 Keep it concise, tactical, and specific. If there is no edge, say so plainly.
+Also return these persona fields:
+recap: a plain-words recap a beginner can act on — say directly what to do now (buy / wait / skip)
+and, if waiting, roughly what to wait for, using only the supplied data. 1-2 short sentences.
+agentFit: judge whether acting at the CURRENT price fits YOUR OWN trading style and strategy as
+the persona you were given — "aligned" (exactly a setup you would take), "neutral" (acceptable
+but not your ideal setup), or "against" (your strategy says stay out here).
+agentFitReason: one sentence, first person, in your persona's voice, explaining that fit from
+your priorities and the supplied numbers only.
 """.strip()
 
 
@@ -753,6 +861,14 @@ Rules:
 Return strictly valid JSON matching the StrategyPlaybook schema. Do not add extra keys.
 The headline should summarize the strategy result. marketRead should say what the candidate set
 currently favors and what risk would invalidate the top picks.
+Also return these persona fields:
+recap: a plain-words recap a beginner can act on — say directly what to do now (buy / wait / skip)
+and, if waiting, roughly what to wait for, using only the supplied data. 1-2 short sentences.
+agentFit: judge whether acting at the CURRENT price fits YOUR OWN trading style and strategy as
+the persona you were given — "aligned" (exactly a setup you would take), "neutral" (acceptable
+but not your ideal setup), or "against" (your strategy says stay out here).
+agentFitReason: one sentence, first person, in your persona's voice, explaining that fit from
+your priorities and the supplied numbers only.
 """.strip()
 
 
