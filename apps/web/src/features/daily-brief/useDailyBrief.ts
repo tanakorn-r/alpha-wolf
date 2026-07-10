@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   loadMarketCalendar,
   loadPortfolio,
-  loadStockDetail,
+  loadStockDetailsBatch,
   type DcaOrder,
   type MarketCalendarEvent,
   type PortfolioHolding,
@@ -74,13 +74,12 @@ export function useDailyBrief() {
   });
 
   const holdings = portfolio.data?.holdings ?? [];
-  const details = useQueries({
-    queries: holdings.map((holding) => ({
-      queryKey: ["stock-detail", holding.symbol, holding.strategy, "daily-brief"],
-      queryFn: () => loadStockDetail(holding.symbol, holding.strategy),
-      staleTime: 180_000,
-      enabled: Boolean(holding.symbol),
-    })),
+  const detailRequestKey = holdings.map((holding) => `${holding.symbol}:${holding.strategy}`).sort().join("|");
+  const details = useQuery({
+    queryKey: ["stock-details-batch", detailRequestKey, "daily-brief"],
+    queryFn: () => loadStockDetailsBatch(holdings.map((holding) => ({ symbol: holding.symbol, strategy: holding.strategy }))),
+    staleTime: 180_000,
+    enabled: holdings.length > 0,
   });
 
   const model = useMemo(() => {
@@ -91,10 +90,10 @@ export function useDailyBrief() {
     const ordersBySymbol = groupOrders(dcaOrders);
 
     const rows = holdings
-      .map((holding, index) => buildHoldingRow({
+      .map((holding) => buildHoldingRow({
         holding,
-        detail: details[index]?.data,
-        detailLoading: details[index]?.isLoading || details[index]?.isFetching || false,
+        detail: details.data?.[holding.symbol],
+        detailLoading: details.isLoading || details.isFetching,
         events: eventsBySymbol.get(holding.symbol) ?? [],
         dcaOrders: ordersBySymbol.get(holding.symbol) ?? [],
       }))
@@ -114,12 +113,12 @@ export function useDailyBrief() {
       counts,
       stats: portfolio.data?.summary,
       calendarFailed: calendar.isError,
-      detailsLoading: details.some((query) => query.isLoading),
-      detailsFetching: details.some((query) => query.isFetching),
+      detailsLoading: details.isLoading,
+      detailsFetching: details.isFetching,
       totalPl: holdings.reduce((sum, holding) => sum + holding.gainLoss, 0),
       summary: buildSummary(rows, counts),
     };
-  }, [calendar.data?.events, calendar.isError, details, filter, holdings, portfolio.data?.dcaOrders, portfolio.data?.summary]);
+  }, [calendar.data?.events, calendar.isError, details.data, details.isFetching, details.isLoading, filter, holdings, portfolio.data?.dcaOrders, portfolio.data?.summary]);
 
   return {
     loading: portfolio.isPending,
@@ -129,7 +128,7 @@ export function useDailyBrief() {
     retry() {
       void portfolio.refetch();
       void calendar.refetch();
-      details.forEach((query) => void query.refetch());
+      void details.refetch();
     },
     ...model,
   };

@@ -17,6 +17,7 @@ from models import BuyTimingNarrative, PortfolioReview, QuantPerspective, StockA
 
 OPENAI_TIMEOUT_SECONDS = 45
 DEFAULT_OPENAI_MODEL = "gpt-5.5"
+DEFAULT_FAST_MODEL = "gpt-5.4-mini"
 EXPECTED_SCORE_LABELS = ["Value", "Financial health", "Dividend safety", "Growth", "Timing"]
 
 
@@ -49,7 +50,7 @@ def analyze_with_openai(context: dict[str, Any], agent_id: str | None = None) ->
         schema_model=StockAnalysis,
         schema_name="stock_analysis",
         instructions=compose_instructions(_analysis_instructions_for_strategy(strategy, is_holding=is_holding), agent_id),
-        max_output_tokens=2500,
+        max_output_tokens=1800,
     )
     if [score.label for score in result.scores] != EXPECTED_SCORE_LABELS:
         raise OpenAIAnalysisError("OpenAI returned an invalid scorecard order")
@@ -66,7 +67,7 @@ def analyze_quant_with_openai(context: dict[str, Any], agent_id: str | None = No
         schema_model=QuantPerspective,
         schema_name="quant_perspective",
         instructions=compose_instructions(_quant_instructions(), agent_id),
-        max_output_tokens=2200,
+        max_output_tokens=1400,
     )
     result = _calibrate_quant_result(context, result)
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
@@ -74,14 +75,16 @@ def analyze_quant_with_openai(context: dict[str, Any], agent_id: str | None = No
 
 
 def analyze_valuation_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
+    model = _selected_model(fast=True)
     result = _run_openai_structured_request(
         context=context,
         schema_model=ValuationVerdict,
         schema_name="valuation_verdict",
         instructions=compose_instructions(_valuation_instructions(), agent_id),
-        max_output_tokens=1800,
+        max_output_tokens=1100,
+        model=model,
+        reasoning_effort=_fast_reasoning_effort(),
     )
-    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
@@ -295,26 +298,30 @@ def _clamp(value: float, low: int, high: int) -> float:
 
 
 def analyze_today_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
+    model = _selected_model(fast=True)
     result = _run_openai_structured_request(
         context=context,
         schema_model=TodayPerformance,
         schema_name="today_performance",
         instructions=compose_instructions(_today_performance_instructions(), agent_id),
-        max_output_tokens=1600,
+        max_output_tokens=800,
+        model=model,
+        reasoning_effort=_fast_reasoning_effort(),
     )
-    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
 def analyze_buy_timing_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
+    model = _selected_model(fast=True)
     result = _run_openai_structured_request(
         context=context,
         schema_model=BuyTimingNarrative,
         schema_name="buy_timing_narrative",
         instructions=compose_instructions(_buy_timing_instructions(), agent_id),
-        max_output_tokens=900,
+        max_output_tokens=600,
+        model=model,
+        reasoning_effort=_fast_reasoning_effort(),
     )
-    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
@@ -375,12 +382,14 @@ def _run_openai_structured_request(
     instructions: str,
     max_output_tokens: int,
     tools: list[dict[str, Any]] | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
 ) -> Any:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise OpenAIAnalysisError("OPENAI_API_KEY is not configured")
 
-    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
+    model = model or _selected_model()
     payload = {
         "model": model,
         "instructions": instructions,
@@ -397,6 +406,8 @@ def _run_openai_structured_request(
     }
     if tools:
         payload["tools"] = tools
+    if reasoning_effort:
+        payload["reasoning"] = {"effort": reasoning_effort}
     request = urllib_request.Request(
         "https://api.openai.com/v1/responses",
         data=json.dumps(payload).encode("utf-8"),
@@ -430,6 +441,17 @@ def _run_openai_structured_request(
         return schema_model.model_validate(parsed)
     except ValidationError as exc:
         raise OpenAIAnalysisError("OpenAI returned an invalid analysis shape") from exc
+
+
+def _selected_model(*, fast: bool = False) -> str:
+    if fast:
+        configured_fast = os.getenv("OPENAI_FAST_MODEL", "").strip()
+        return configured_fast or DEFAULT_FAST_MODEL
+    return os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
+
+
+def _fast_reasoning_effort() -> str:
+    return os.getenv("OPENAI_FAST_REASONING_EFFORT", "none").strip() or "none"
 
 
 def extract_openai_text(payload: dict[str, Any]) -> str | None:
@@ -757,9 +779,10 @@ def _quant_instructions() -> str:
 You are Alpha Wolf's real-money investing agent. Analyze only the supplied live research data.
 Do not invent missing facts, prices, indicators, ranks, signals, or news.
 
-Use agentProfile only as the role and decision framework. The UI already supplies section titles;
-you write the actual wording naturally from the data. Do not copy template phrases from the
-prompt, the agent profile, or quantScorecard.
+Use strategyMandate only to understand which page/setup the user asked to inspect. It is not your
+identity and must not override the selected Agent's decision contract. The UI already supplies
+section titles; write the actual wording naturally from the data. Do not copy template phrases
+from the prompt, strategyMandate, or quantScorecard.
 
 Think privately like a professional investor:
 1. Classify the setup and decide whether it is actionable now.

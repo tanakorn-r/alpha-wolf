@@ -733,6 +733,19 @@ export async function loadDeepAnalysis(symbol: string): Promise<DeepAnalysisResp
   return (await response.json()) as DeepAnalysisResponse;
 }
 
+export async function loadStockDetailsBatch(
+  items: Array<{ symbol: string; strategy: string }>,
+): Promise<Record<string, StockDetailResponse>> {
+  const response = await fetch(`${API_BASE}/details/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!response.ok) throw new Error(`Failed to load stock detail batch: ${response.status}`);
+  const payload = (await response.json()) as { items?: Record<string, StockDetailResponse> };
+  return payload.items ?? {};
+}
+
 export async function loadAgents(): Promise<AgentProfile[]> {
   const response = await fetch(`${API_BASE}/agents`);
   if (!response.ok) throw new Error(`Failed to load agents: ${response.status}`);
@@ -915,6 +928,7 @@ export async function loadDiscoveries(params?: {
   region?: "all" | "us" | "th";
   page?: number;
   limit?: number;
+  signal?: AbortSignal;
 }): Promise<DiscoveryResponse> {
   const query = new URLSearchParams();
   if (params?.q) {
@@ -932,7 +946,9 @@ export async function loadDiscoveries(params?: {
     query.set("limit", String(params.limit));
   }
 
-  const response = await fetch(`${API_BASE}/discover${query.toString() ? `?${query}` : ""}`);
+  const response = await fetch(`${API_BASE}/discover${query.toString() ? `?${query}` : ""}`, {
+    signal: params?.signal,
+  });
   if (!response.ok) {
     throw new Error(`Failed to load discovery data: ${response.status}`);
   }

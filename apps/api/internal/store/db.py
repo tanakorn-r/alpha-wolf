@@ -56,11 +56,21 @@ class LibsqlConnection:
         pass  # libsql connections are managed by the library
 
 
+class ClosingSQLiteConnection(sqlite3.Connection):
+    """SQLite transaction context that also closes its file descriptor on exit."""
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
+
 def connect() -> sqlite3.Connection | LibsqlConnection:
     if DATABASE_URL and DATABASE_URL.startswith(("libsql://", "https://", "http://")):
         return LibsqlConnection()
 
-    db = sqlite3.connect(DB_PATH)
+    db = sqlite3.connect(DB_PATH, factory=ClosingSQLiteConnection)
     db.row_factory = sqlite3.Row
     # WAL lets readers (e.g. preset queries) proceed while a batch write commits,
     # instead of every connection blocking on the same file lock.
@@ -109,6 +119,22 @@ def migrate() -> None:
                 expires_at TEXT NOT NULL
             )
             """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS yahoo_data_cache (
+                cache_key TEXT PRIMARY KEY,
+                symbol TEXT NOT NULL,
+                data_type TEXT NOT NULL,
+                period TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_yahoo_data_cache_symbol ON yahoo_data_cache(symbol, data_type)"
         )
         db.execute("DROP TABLE IF EXISTS market_presets")
         db.execute("DROP TABLE IF EXISTS snapshots")

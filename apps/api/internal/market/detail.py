@@ -14,7 +14,8 @@ from internal.market.technicals import (
     year_to_date_return,
 )
 from internal.market.catalog import get_industry_peers
-from internal.store.cache import cache_get, cache_set
+from internal.store.cache import cache_compute_lock, cache_get, cache_set
+from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
 from internal.news.kaohoon import market_news as fetch_kaohoon_news
 from internal.yahoo.client import fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
@@ -35,6 +36,23 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None 
     cached = cache_get(DETAIL_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
+
+    with cache_compute_lock(DETAIL_CACHE_NAMESPACE, cache_key):
+        cached = cache_get(DETAIL_CACHE_NAMESPACE, cache_key)
+        if cached is not None:
+            return cached
+        result = _build_detail_bundle_uncached(symbol, strategy, selected_mode=selected_mode)
+        if result is not None:
+            cache_set(DETAIL_CACHE_NAMESPACE, cache_key, result, DETAIL_TTL_SECONDS)
+        return result
+
+
+def _build_detail_bundle_uncached(
+    symbol: str,
+    strategy: StrategyKey,
+    *,
+    selected_mode: str | None,
+) -> dict[str, Any] | None:
 
     stock = fetch_symbol_record(symbol)
     if not stock:
@@ -110,7 +128,6 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None 
         "mode": selected_mode,
         "dividendPattern": dividend_pattern,
     }
-    cache_set(DETAIL_CACHE_NAMESPACE, cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
 
@@ -123,6 +140,10 @@ def get_financials(symbol: str) -> dict[str, Any] | None:
     cached = cache_get(FINANCIALS_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
+    persistent = load_yahoo_data(normalized, "financials", "full")
+    if persistent and persistent.is_fresh and isinstance(persistent.payload, dict):
+        cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, persistent.payload, DETAIL_TTL_SECONDS)
+        return persistent.payload
 
     # 1. Mute the Deprecation warning completely
     with warnings.catch_warnings():
@@ -154,8 +175,40 @@ def get_financials(symbol: str) -> dict[str, Any] | None:
                 # we must return None cleanly so OpenAI knows there are no fundamentals.
                 result = None
 
-    cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, result, DETAIL_TTL_SECONDS)
-    return result
+    if _has_research_data(result):
+        save_yahoo_data(normalized, "financials", result, period="full", ttl_seconds=21_600)
+        cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, result, DETAIL_TTL_SECONDS)
+        return result
+    return persistent.payload if persistent and isinstance(persistent.payload, dict) else result
+
+
+def get_ai_financials(symbol: str) -> dict[str, Any] | None:
+    """Small, parallel financial pack for model context.
+
+    The full financial endpoint makes many Yahoo calls for UI drill-down tables. AI analysis
+    needs the core statements, dividend history, calendar, and analyst targets—not every raw
+    estimate/recommendation table—so keep that expensive path out of interactive AI requests.
+    """
+    normalized = symbol.upper().strip()
+    if not normalized:
+        return None
+
+    cache_key = f"ai:v1:{normalized}"
+    cached = cache_get(FINANCIALS_CACHE_NAMESPACE, cache_key)
+    if cached is not None:
+        return cached
+    persistent = load_yahoo_data(normalized, "financials", "ai")
+    if persistent and persistent.is_fresh and isinstance(persistent.payload, dict):
+        cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, persistent.payload, DOMAIN_TTL_SECONDS)
+        return persistent.payload
+
+    ticker = make_ticker(normalized)
+    result = build_ai_financial_snapshot(ticker)
+    if _has_research_data(result):
+        save_yahoo_data(normalized, "financials", result, period="ai", ttl_seconds=21_600)
+        cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
+        return result
+    return persistent.payload if persistent and isinstance(persistent.payload, dict) else result
 
 def get_domain_insights(symbol: str) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
@@ -165,15 +218,23 @@ def get_domain_insights(symbol: str) -> dict[str, Any] | None:
     cached = cache_get(INSIGHTS_CACHE_NAMESPACE, normalized)
     if cached is not None:
         return cached
+    persistent = load_yahoo_data(normalized, "domain_insights")
+    if persistent and persistent.is_fresh and isinstance(persistent.payload, dict):
+        cache_set(INSIGHTS_CACHE_NAMESPACE, normalized, persistent.payload, DOMAIN_TTL_SECONDS)
+        return persistent.payload
 
     from internal.market.symbol import fetch_symbol_record
 
     stock = fetch_symbol_record(normalized)
     if not stock:
-        return None
+        return persistent.payload if persistent and isinstance(persistent.payload, dict) else None
     sector_insight = fetch_sector_insight(stock.get("sectorKey") or stock.get("sector") or "")
     industry_insight = fetch_industry_insight(stock.get("industryKey") or stock.get("industry") or "")
     result = {"sectorInsight": sector_insight, "industryInsight": industry_insight}
+    if _has_research_data(result):
+        save_yahoo_data(normalized, "domain_insights", result, ttl_seconds=21_600)
+    elif persistent and isinstance(persistent.payload, dict):
+        return persistent.payload
     cache_set(INSIGHTS_CACHE_NAMESPACE, normalized, result, DOMAIN_TTL_SECONDS)
     return result
 
@@ -758,6 +819,42 @@ def build_financial_snapshot(ticker) -> dict[str, Any]:
     except Exception: snapshot["growthEstimates"] = []
 
     return snapshot
+
+
+def build_ai_financial_snapshot(ticker) -> dict[str, Any]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    jobs = {
+        "incomeStatement": lambda: statement_bundle(safe_call(ticker.get_income_stmt, pretty=True, freq="yearly")),
+        "balanceSheet": lambda: statement_bundle(safe_call(ticker.get_balance_sheet, pretty=True, freq="yearly")),
+        "cashFlow": lambda: statement_bundle(safe_call(ticker.get_cash_flow, pretty=True, freq="yearly")),
+        "dividends": lambda: _ai_dividend_records(safe_call(ticker.get_dividends, period="5y")),
+        "calendar": lambda: safe_dict(safe_call(ticker.get_calendar)),
+        "analystPriceTargets": lambda: safe_dict(safe_call(ticker.get_analyst_price_targets)),
+    }
+    result: dict[str, Any] = {}
+    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+        futures = {key: pool.submit(job) for key, job in jobs.items()}
+        for key, future in futures.items():
+            try:
+                result[key] = future.result()
+            except Exception:
+                result[key] = [] if key == "dividends" else {}
+    return result
+
+
+def _ai_dividend_records(dividends: Any) -> list[dict[str, Any]]:
+    if not isinstance(dividends, pd.Series) or dividends.empty:
+        return []
+    return dividends.tail(20).rename("amount").reset_index().to_dict(orient="records")
+
+
+def _has_research_data(value: Any) -> bool:
+    if isinstance(value, dict):
+        return any(_has_research_data(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_has_research_data(item) for item in value)
+    return value is not None and value != ""
 
 
 def statement_bundle(frame: Any) -> dict[str, Any]:

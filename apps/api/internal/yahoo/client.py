@@ -5,8 +5,17 @@ from typing import Any
 import pandas as pd
 import yfinance as yf
 
+from internal.store.cache import cache_compute_lock
 from internal.store.utils import as_float
 from internal.store.utils import safe_dict
+from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
+
+MODULES_TTL_SECONDS = 180
+HISTORY_TTL_SECONDS = 900
+LONG_HISTORY_TTL_SECONDS = 3600
+FULL_HISTORY_REFRESH_SECONDS = 604_800
+NEWS_TTL_SECONDS = 900
+DIVIDENDS_TTL_SECONDS = 21_600
 
 
 def ticker(symbol: str) -> yf.Ticker:
@@ -168,17 +177,67 @@ def build_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
 
 
 def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
-    return build_ticker_modules(t, symbol)
+    normalized = symbol.upper().strip()
+    cached = load_yahoo_data(normalized, "modules")
+    if cached and cached.is_fresh and isinstance(cached.payload, dict):
+        return cached.payload
+
+    with cache_compute_lock("yahoo_modules", normalized):
+        current = load_yahoo_data(normalized, "modules")
+        if current and current.is_fresh and isinstance(current.payload, dict):
+            return current.payload
+        result = build_ticker_modules(t, normalized)
+        if _modules_have_market_data(result, normalized):
+            save_yahoo_data(normalized, "modules", result, ttl_seconds=MODULES_TTL_SECONDS)
+            return result
+        return current.payload if current and isinstance(current.payload, dict) else result
 
 
 def fetch_history(t: yf.Ticker, period: str = "1y") -> pd.DataFrame:
-    try:
-        return normalize_history_frame(t.history(period=period, interval="1d"))
-    except (KeyError, Exception):
-        # Some tickers raise KeyError('exchangeTimezoneName') inside yfinance when
-        # Yahoo returns incomplete metadata. Fall back to an empty frame so callers
-        # can still produce a partial record using live price from fast_info.
-        return pd.DataFrame()
+    symbol = _ticker_symbol(t)
+    cached = load_yahoo_data(symbol, "history", period) if symbol else None
+    if cached and cached.is_fresh:
+        frame = _history_from_payload(cached.payload)
+        if not frame.empty:
+            return frame
+
+    lock_key = f"{symbol}:{period}" if symbol else f"anonymous:{id(t)}:{period}"
+    with cache_compute_lock("yahoo_history", lock_key):
+        current = load_yahoo_data(symbol, "history", period) if symbol else None
+        if current and current.is_fresh:
+            frame = _history_from_payload(current.payload)
+            if not frame.empty:
+                return frame
+        is_long_history = period.lower() in {"5y", "10y", "max"}
+        full_refresh = load_yahoo_data(symbol, "history_full_refresh", period) if symbol and is_long_history else None
+        live_period = "1mo" if current and is_long_history and full_refresh and full_refresh.is_fresh else period
+        try:
+            result = normalize_history_frame(t.history(period=live_period, interval="1d"))
+        except Exception:
+            result = pd.DataFrame()
+        if not result.empty:
+            if live_period != period and current:
+                result = _merge_history(_history_from_payload(current.payload), result)
+            if symbol:
+                save_yahoo_data(
+                    symbol,
+                    "history",
+                    _history_to_payload(result),
+                    period=period,
+                    ttl_seconds=_history_ttl(period),
+                )
+                if live_period == period and is_long_history:
+                    save_yahoo_data(
+                        symbol,
+                        "history_full_refresh",
+                        {"period": period},
+                        period=period,
+                        ttl_seconds=FULL_HISTORY_REFRESH_SECONDS,
+                    )
+            return result
+        # Preserve the last successful dataset across Yahoo outages, even after its freshness TTL.
+        stale = _history_from_payload(current.payload) if current else pd.DataFrame()
+        return stale
 
 
 def normalize_history_frame(history: Any) -> pd.DataFrame:
@@ -201,6 +260,25 @@ def normalize_history_frame(history: Any) -> pd.DataFrame:
 
 
 def fetch_news(t: yf.Ticker) -> list[dict[str, Any]]:
+    symbol = _ticker_symbol(t)
+    cached = load_yahoo_data(symbol, "news") if symbol else None
+    if cached and cached.is_fresh and isinstance(cached.payload, list):
+        return cached.payload
+
+    lock_key = symbol or f"anonymous:{id(t)}"
+    with cache_compute_lock("yahoo_news", lock_key):
+        current = load_yahoo_data(symbol, "news") if symbol else None
+        if current and current.is_fresh and isinstance(current.payload, list):
+            return current.payload
+        result = _fetch_news_live(t)
+        if symbol and result:
+            save_yahoo_data(symbol, "news", result, ttl_seconds=NEWS_TTL_SECONDS)
+        if result:
+            return result
+        return current.payload if current and isinstance(current.payload, list) else []
+
+
+def _fetch_news_live(t: yf.Ticker) -> list[dict[str, Any]]:
     try:
         raw_news = getattr(t, "news", []) or []
     except Exception:
@@ -271,11 +349,123 @@ def _publisher_name(value: Any) -> str | None:
 
 
 def fetch_dividends(t: yf.Ticker, period: str = "ytd") -> pd.Series:
-    try:
-        dividends = t.get_dividends(period=period)
-        return dividends if isinstance(dividends, pd.Series) else pd.Series(dtype="float64")
-    except Exception:
+    symbol = _ticker_symbol(t)
+    cached = load_yahoo_data(symbol, "dividends", period) if symbol else None
+    if cached and cached.is_fresh:
+        series = _dividends_from_payload(cached.payload)
+        if not series.empty:
+            return series
+
+    lock_key = f"{symbol}:{period}" if symbol else f"anonymous:{id(t)}:{period}"
+    with cache_compute_lock("yahoo_dividends", lock_key):
+        current = load_yahoo_data(symbol, "dividends", period) if symbol else None
+        if current and current.is_fresh:
+            series = _dividends_from_payload(current.payload)
+            if not series.empty:
+                return series
+        try:
+            dividends = t.get_dividends(period=period)
+            result = dividends if isinstance(dividends, pd.Series) else pd.Series(dtype="float64")
+        except Exception:
+            result = pd.Series(dtype="float64")
+        if not result.empty:
+            if symbol:
+                save_yahoo_data(
+                    symbol,
+                    "dividends",
+                    _dividends_to_payload(result),
+                    period=period,
+                    ttl_seconds=DIVIDENDS_TTL_SECONDS,
+                )
+            return result
+        return _dividends_from_payload(current.payload) if current else result
+
+
+def _ticker_symbol(t: Any) -> str:
+    return str(getattr(t, "ticker", None) or getattr(t, "symbol", None) or "").upper().strip()
+
+
+def _modules_have_market_data(value: dict[str, Any], symbol: str) -> bool:
+    modules = value.get(symbol) if isinstance(value, dict) else None
+    if not isinstance(modules, dict):
+        return False
+    price = modules.get("price") or {}
+    details = modules.get("summaryDetail") or {}
+    quote = modules.get("quoteType") or {}
+    return any(
+        item is not None and item != ""
+        for item in (
+            price.get("currentPrice"),
+            price.get("regularMarketPrice"),
+            details.get("marketCap"),
+            quote.get("quoteType"),
+            quote.get("exchange"),
+        )
+    )
+
+
+def _history_ttl(period: str) -> int:
+    return LONG_HISTORY_TTL_SECONDS if period.lower() in {"5y", "10y", "max"} else HISTORY_TTL_SECONDS
+
+
+def _history_to_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, row in normalize_history_frame(frame).iterrows():
+        item: dict[str, Any] = {"date": index.isoformat() if hasattr(index, "isoformat") else str(index)}
+        for column, value in row.items():
+            item[str(column)] = None if pd.isna(value) else float(value)
+        rows.append(item)
+    return rows
+
+
+def _history_from_payload(payload: Any) -> pd.DataFrame:
+    if not isinstance(payload, list) or not payload:
+        return pd.DataFrame()
+    frame = pd.DataFrame(payload)
+    if "date" not in frame.columns:
+        return pd.DataFrame()
+    index = pd.to_datetime(frame.pop("date"), utc=True, errors="coerce")
+    frame.index = index
+    frame = frame[~frame.index.isna()]
+    return normalize_history_frame(frame)
+
+
+def _merge_history(base: pd.DataFrame, update: pd.DataFrame) -> pd.DataFrame:
+    if base.empty:
+        return normalize_history_frame(update)
+    if update.empty:
+        return normalize_history_frame(base)
+    merged = pd.concat([normalize_history_frame(base), normalize_history_frame(update)])
+    merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+    return merged
+
+
+def _dividends_to_payload(series: pd.Series) -> list[dict[str, Any]]:
+    return [
+        {
+            "date": index.isoformat() if hasattr(index, "isoformat") else str(index),
+            "amount": None if pd.isna(value) else float(value),
+        }
+        for index, value in series.items()
+        if not pd.isna(value)
+    ]
+
+
+def _dividends_from_payload(payload: Any) -> pd.Series:
+    if not isinstance(payload, list) or not payload:
         return pd.Series(dtype="float64")
+    dates: list[pd.Timestamp] = []
+    values: list[float] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        date = pd.to_datetime(item.get("date"), utc=True, errors="coerce")
+        amount = as_float(item.get("amount"))
+        if pd.isna(date) or amount is None:
+            continue
+        dates.append(date)
+        values.append(amount)
+    return pd.Series(values, index=pd.DatetimeIndex(dates), dtype="float64")
 
 
 def safe_call(func: Any, *args: Any, **kwargs: Any) -> Any:

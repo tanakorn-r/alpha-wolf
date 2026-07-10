@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   loadBuyTiming,
   loadDiscoveries,
@@ -15,7 +15,7 @@ import {
   type StrategyPlaybookResponse,
   type ValuationVerdictResponse,
 } from "../../lib/api";
-import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import { N100_QUOTA_LIMIT, useWolfStore } from "../../store/useWolfStore";
 import { STRAT_CARDS, type HuntTab, type N100Timeframe, type StratMode } from "./lib";
 
@@ -30,11 +30,16 @@ type AgentStamped = {
   agent?: { id?: string | null } | null;
 };
 
+// Bump when persona reasoning changes so persisted browser reports cannot make a newly fixed
+// Agent appear to repeat an older, generic answer.
+const AGENT_REASONING_CACHE_VERSION = "persona-v2";
+
 function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentId: string) {
   return data?.agent?.id === agentId;
 }
 
 export function useHuntAi() {
+  const queryClient = useQueryClient();
   const [tab, setTab] = useState<HuntTab>("signals");
   const [selectedTicker, setSelectedTicker] = useState("");
   const [addOpen, setAddOpen] = useState(false);
@@ -74,7 +79,13 @@ export function useHuntAi() {
   const holdingSymbols = portfolioQuery.data?.holdings.map((holding) => holding.symbol) ?? [];
   const symbols = Array.from(new Set([...holdingSymbols, ...deepExtras]));
   const activeTicker = selectedTicker || symbols[0] || "";
-  const debouncedAddQuery = useDebouncedValue(addQuery.trim(), 350);
+  const debouncedAddQuery = useDebouncedValue(addQuery.trim(), DISCOVERY_DEBOUNCE_MS);
+
+  useEffect(() => {
+    if (addQuery.trim() !== debouncedAddQuery) {
+      void queryClient.cancelQueries({ queryKey: ["hunt-add-search"] });
+    }
+  }, [addQuery, debouncedAddQuery, queryClient]);
 
   useEffect(() => {
     if (selectedTicker && !symbols.includes(selectedTicker)) setSelectedTicker("");
@@ -93,8 +104,10 @@ export function useHuntAi() {
 
   const addQueryResult = useQuery({
     queryKey: ["hunt-add-search", debouncedAddQuery],
-    queryFn: () => loadDiscoveries({ q: debouncedAddQuery, kind: "stock", limit: 8 }),
-    enabled: addOpen && debouncedAddQuery.length >= 1,
+    queryFn: ({ signal }) => loadDiscoveries({ q: debouncedAddQuery, kind: "stock", limit: 8, signal }),
+    enabled: addOpen && debouncedAddQuery.length >= 2,
+    staleTime: 60_000,
+    retry: 0,
   });
   const addResults = (addQueryResult.data?.live ?? []).filter((item) => !symbols.includes(item.symbol));
 
@@ -104,7 +117,7 @@ export function useHuntAi() {
     staleTime: 900_000,
     enabled: tab === "signals" && Boolean(activeTicker) && valuationRunKey > 0 && valuationSyncTicker === activeTicker,
   });
-  const valuationCacheKey = `signals:${activeTicker}:stable_dca:${activeAgentId}`;
+  const valuationCacheKey = `${AGENT_REASONING_CACHE_VERSION}:signals:${activeTicker}:stable_dca:${activeAgentId}`;
   const valuationCached = getHuntAiCache<ValuationVerdictResponse>(valuationCacheKey);
   const valuationDone =
     valuationRunKey > 0 &&
@@ -129,7 +142,7 @@ export function useHuntAi() {
     staleTime: 900_000,
     enabled: tab === "timing" && Boolean(activeTicker),
   });
-  const timingCacheKey = `buy-timing:${activeTicker}:${activeAgentId}`;
+  const timingCacheKey = `${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
   const timingCached = getHuntAiCache<BuyTimingResponse>(timingCacheKey);
   const timingDone = timingQuery.isSuccess && timingQuery.data?.symbol === activeTicker && matchesAgent(timingQuery.data, activeAgentId);
   const timingAnalyzedAt = timingQuery.dataUpdatedAt ? new Date(timingQuery.dataUpdatedAt).toISOString() : new Date().toISOString();
@@ -157,7 +170,7 @@ export function useHuntAi() {
     setAnalystDetail(null);
     setAnalystAnalysis(null);
   }, [activeTicker]);
-  const analystCacheKey = `analyst:${activeTicker}:${activeAgentId}`;
+  const analystCacheKey = `${AGENT_REASONING_CACHE_VERSION}:analyst:${activeTicker}:${activeAgentId}`;
   const analystCached = getHuntAiCache<AnalystReport>(analystCacheKey);
   const analystLocalReport =
     analystTicker === activeTicker && analystDetail && analystAnalysis && matchesAgent(analystAnalysis, activeAgentId)
@@ -165,13 +178,13 @@ export function useHuntAi() {
       : null;
   const analystReport = analystLocalReport ?? (matchesAgent(analystCached?.data.analysis, activeAgentId) ? analystCached : undefined);
 
-  const intradayAnalysisCacheKey = `intraday-ai:${activeTicker}:${activeAgentId}`;
+  const intradayAnalysisCacheKey = `${AGENT_REASONING_CACHE_VERSION}:intraday-ai:${activeTicker}:${activeAgentId}`;
   const intradayAnalysisCached = getHuntAiCache<StockAnalysisResponse>(intradayAnalysisCacheKey);
   const intradayAnalysisReport = matchesAgent(intradayAnalysis, activeAgentId)
     ? { analyzedAt: new Date().toISOString(), data: intradayAnalysis }
     : matchesAgent(intradayAnalysisCached?.data, activeAgentId) ? intradayAnalysisCached : undefined;
 
-  const n100CacheKey = `${activeTicker}:${n100Timeframe}:${activeAgentId}`;
+  const n100CacheKey = `${AGENT_REASONING_CACHE_VERSION}:${activeTicker}:${n100Timeframe}:${activeAgentId}`;
   const n100Cached = useWolfStore((s) => s.getNext10ReportCache(n100CacheKey));
   const n100Query = useQuery({
     queryKey: ["hunt-next-100", activeTicker, n100Timeframe, activeAgentId, n100SyncKey, n100RunKey],
@@ -357,11 +370,11 @@ export function useHuntAi() {
         try {
           const [detail, analysis] = await Promise.all([
             loadStockDetail(sym, "capitalized"),
-            summarizeStock(sym, "stable_dca", activeAgentId),
+            summarizeStock(sym, "capitalized", activeAgentId),
           ]);
           setAnalystDetail(detail);
           setAnalystAnalysis(analysis);
-          setHuntAiCache(`analyst:${sym}:${activeAgentId}`, { analyzedAt: new Date().toISOString(), data: { detail, analysis } });
+          setHuntAiCache(`${AGENT_REASONING_CACHE_VERSION}:analyst:${sym}:${activeAgentId}`, { analyzedAt: new Date().toISOString(), data: { detail, analysis } });
         } catch {
           setAiError("Stock Analyst could not generate a report for this ticker.");
         } finally {

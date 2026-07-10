@@ -9,7 +9,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from internal.ai.agents import normalize_agent_id
 from internal.ai.context import build_analysis_context
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_quant_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
-from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials, get_market_comparison
+from internal.market.detail import build_detail_bundle, get_ai_financials, get_domain_insights, get_market_comparison
 from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
 from internal.market.universe import build_market_page
@@ -27,6 +27,9 @@ def _fetch_analysis_data(
     strategy: StrategyKey,
     *,
     mode: str | None = None,
+    include_financials: bool = True,
+    include_market: bool = True,
+    include_insights: bool = True,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Fetch bundle + financials + market comparison + domain insights in parallel.
 
@@ -43,7 +46,7 @@ def _fetch_analysis_data(
 
     def _financials() -> dict[str, Any]:
         try:
-            return get_financials(symbol) or {}
+            return get_ai_financials(symbol) or {}
         except Exception as exc:
             print(f"Warning: Financials load failed for {symbol}: {exc}")
             return {}
@@ -63,12 +66,13 @@ def _fetch_analysis_data(
             return {}
 
     with ThreadPoolExecutor(max_workers=4) as pool:
-        futures = {
-            pool.submit(_bundle): "bundle",
-            pool.submit(_financials): "financials",
-            pool.submit(_market): "market",
-            pool.submit(_insights): "insights",
-        }
+        futures = {pool.submit(_bundle): "bundle"}
+        if include_financials:
+            futures[pool.submit(_financials)] = "financials"
+        if include_market:
+            futures[pool.submit(_market)] = "market"
+        if include_insights:
+            futures[pool.submit(_insights)] = "insights"
         for future in as_completed(futures):
             key = futures[future]
             try:
@@ -95,7 +99,7 @@ def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), a
     agent_id = normalize_agent_id(agent)
     position_context = _position_context(normalized)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"v13:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"v14:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -129,12 +133,18 @@ def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     agent_id = normalize_agent_id(agent)
     mode = str((payload or {}).get("mode") or "").strip().lower()
     mode = mode if mode in {"swing", "day", "long", "value", "fomo"} else None
-    cache_key = f"quant:v13:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
+    cache_key = f"quant:v14:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
 
-    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy, mode=mode)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
+        normalized,
+        strategy,
+        mode=mode,
+        include_financials=False,
+        include_insights=False,
+    )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
 
@@ -160,12 +170,16 @@ def valuation_analysis(symbol: str, payload: dict[str, Any] | None = Body(defaul
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    cache_key = f"valuation:v8:{normalized}:{strategy}:{agent_id}"
+    cache_key = f"valuation:v9:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
 
-    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
+        normalized,
+        strategy,
+        include_market=False,
+    )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
 
@@ -191,12 +205,18 @@ def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    cache_key = f"today:v5:{normalized}:{strategy}:{agent_id}"
+    cache_key = f"today:v6:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
 
-    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
+        normalized,
+        strategy,
+        include_financials=False,
+        include_market=False,
+        include_insights=False,
+    )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
 
@@ -290,7 +310,7 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, agent: str 
     cache_digest = hashlib.sha256(
         f"{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}".encode("utf-8")
     ).hexdigest()[:24]
-    cache_key = f"strategy-playbook:v5:{cache_digest}"
+    cache_key = f"strategy-playbook:v6:{cache_digest}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
@@ -333,7 +353,7 @@ def portfolio_review(agent: str = Query("vera")) -> dict[str, Any]:
     cache_digest = hashlib.sha256(
         f"{agent_id}:{context.get('totalValue')}:{context.get('gainLossPct')}:{context.get('forwardYield')}:{','.join(item.get('symbol', '') for item in context.get('holdings', []))}".encode("utf-8")
     ).hexdigest()[:24]
-    cache_key = f"portfolio-review:v3:{cache_digest}"
+    cache_key = f"portfolio-review:v4:{cache_digest}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached

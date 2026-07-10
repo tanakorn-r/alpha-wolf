@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import type { StockRecord, StrategyKey } from "../../data/market";
 import { loadDiscoveries, loadPortfolio, saveHolding, summarizeStock, type StockAnalysisResponse } from "../../lib/api";
 import { formatCurrency, formatPercent, formatShortDate } from "../../lib/format";
-import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useWolfStore } from "../../store/useWolfStore";
 import type { StrategyIconKind } from "../../components/ui/icons";
 
@@ -72,6 +72,7 @@ export type MatchVM = {
 export type StockHunt = ReturnType<typeof useStockHunt>;
 
 export function useStockHunt() {
+  const queryClient = useQueryClient();
   const searchQuery = useWolfStore((state) => state.searchQuery);
   const setSearchQuery = useWolfStore((state) => state.setSearchQuery);
   const openDetail = useWolfStore((state) => state.openDetail);
@@ -83,7 +84,13 @@ export function useStockHunt() {
   const cashReserve = useWolfStore((state) => state.cashReserve);
   const spendCashReserve = useWolfStore((state) => state.spendCashReserve);
 
-  const query = useDebouncedValue(searchQuery.trim(), 350);
+  const query = useDebouncedValue(searchQuery.trim(), DISCOVERY_DEBOUNCE_MS);
+
+  useEffect(() => {
+    if (searchQuery.trim() !== query) {
+      void queryClient.cancelQueries({ queryKey: ["discoveries"] });
+    }
+  }, [query, queryClient, searchQuery]);
   const [market, setMarketState] = useState<Market>("all");
   const [sector, setSectorState] = useState("all");
   const [sortBy, setSortByState] = useState<SortKey>("score");
@@ -94,6 +101,14 @@ export function useStockHunt() {
   const [top5Applied, setTop5Applied] = useState<{ count: number; amount: number } | null>(null);
   const [applyingTop5, setApplyingTop5] = useState(false);
   const [applyTop5Error, setApplyTop5Error] = useState("");
+  const [discoveryReady, setDiscoveryReady] = useState(false);
+
+  useEffect(() => {
+    // React Strict Mode intentionally performs a throwaway mount in development. Defer the
+    // initial network query past that cycle so it never becomes a duplicate backend request.
+    const handle = window.setTimeout(() => setDiscoveryReady(true), 50);
+    return () => window.clearTimeout(handle);
+  }, []);
 
   useEffect(() => {
     setStrategy(baseStrategy);
@@ -103,10 +118,13 @@ export function useStockHunt() {
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const discoveryQuery = useInfiniteQuery({
     queryKey: ["discoveries", query, market, baseStrategy, strategyMode, sortBy],
-    queryFn: ({ pageParam }) => loadDiscoveries({ q: query || undefined, kind: "stock", region: market, strategy: baseStrategy, mode: strategyMode, sort: sortBy, page: pageParam, limit: 40 }),
+    queryFn: ({ pageParam, signal }) => loadDiscoveries({ q: query || undefined, kind: "stock", region: market, strategy: baseStrategy, mode: strategyMode, sort: sortBy, page: pageParam, limit: 40, signal }),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined),
-    refetchOnMount: "always",
+    staleTime: 60_000,
+    refetchOnMount: false,
+    retry: 1,
+    enabled: discoveryReady,
   });
   const items = useMemo(() => discoveryQuery.data?.pages.flatMap((page) => page.live) ?? [], [discoveryQuery.data]);
   const total = discoveryQuery.data?.pages[0]?.total ?? 0;

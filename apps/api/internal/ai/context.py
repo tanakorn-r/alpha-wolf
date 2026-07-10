@@ -4,7 +4,7 @@ from typing import Any
 
 from internal.store.utils import json_safe
 
-MAX_PRICE_POINTS = 120
+MAX_PRICE_POINTS = 72
 
 
 def build_analysis_context(
@@ -16,6 +16,9 @@ def build_analysis_context(
     position_context: dict[str, Any] | None = None,
     agent_id: str | None = None,
 ) -> dict[str, Any]:
+    financials = _compact_financial_research(financials or {})
+    market_comparison = _compact_market_comparison(market_comparison or {})
+    domain_insights = _compact_domain_insights(domain_insights or {})
     context = {
         "stock": bundle.get("stock"),
         "selectedStrategy": bundle.get("strategy"),
@@ -33,10 +36,49 @@ def build_analysis_context(
         "financialResearch": financials,
         "marketComparison": market_comparison,
         "sectorAndIndustryResearch": domain_insights,
-        "agentProfile": _agent_profile(bundle.get("strategy"), bundle.get("mode")),
+        # This is the requested page/setup strategy, not the selected AI persona. Keeping the
+        # concepts separate prevents every Agent from being overwritten by the same swing role.
+        "strategyMandate": _strategy_mandate(bundle.get("strategy"), bundle.get("mode")),
         "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
     }
     return json_safe(context)
+
+
+def _compact_financial_research(value: dict[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key, item in value.items():
+        if isinstance(item, dict) and "history" in item:
+            compact[key] = {
+                **item,
+                "history": (item.get("history") or [])[:3],
+            }
+        elif isinstance(item, list):
+            compact[key] = item[-12:] if key == "dividends" else item[:6]
+        else:
+            compact[key] = item
+    return compact
+
+
+def _compact_market_comparison(value: dict[str, Any]) -> dict[str, Any]:
+    if not value:
+        return {}
+    return {**value, "points": (value.get("points") or [])[-18:]}
+
+
+def _compact_domain_insights(value: dict[str, Any]) -> dict[str, Any]:
+    compact = dict(value)
+    sector = dict(compact.get("sectorInsight") or {})
+    industry = dict(compact.get("industryInsight") or {})
+    if sector:
+        sector["industries"] = (sector.get("industries") or [])[:5]
+        sector["topEtfs"] = (sector.get("topEtfs") or [])[:5]
+        sector["topMutualFunds"] = (sector.get("topMutualFunds") or [])[:5]
+        compact["sectorInsight"] = sector
+    if industry:
+        industry["topPerformingCompanies"] = (industry.get("topPerformingCompanies") or [])[:5]
+        industry["topGrowthCompanies"] = (industry.get("topGrowthCompanies") or [])[:5]
+        compact["industryInsight"] = industry
+    return compact
 
 
 def _agent_input_pack(
@@ -295,7 +337,7 @@ def _risk_map(price: float | None, support: float | None, resistance: float | No
 def _compact_price_history(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if len(history) <= MAX_PRICE_POINTS:
         return history
-    step = max(1, len(history) // MAX_PRICE_POINTS)
+    step = max(1, (len(history) + MAX_PRICE_POINTS - 1) // MAX_PRICE_POINTS)
     sampled = history[::step]
     if sampled[-1] != history[-1]:
         sampled.append(history[-1])
@@ -440,13 +482,13 @@ def _build_quant_scorecard(bundle: dict[str, Any], market_comparison: dict[str, 
     }
 
 
-def _agent_profile(strategy: Any, mode: Any = None) -> dict[str, Any]:
+def _strategy_mandate(strategy: Any, mode: Any = None) -> dict[str, Any]:
     selected = str(strategy or "").strip().lower()
     selected_mode = str(mode or "").strip().lower()
     if selected == "momentum" and selected_mode != "fomo":
         return {
-            "name": "Alpha Wolf Swing Investor",
-            "role": "A real swing-trading investor who looks for a support/low-zone turn, not an already-extended winner.",
+            "name": "Momentum / swing setup requested by the page",
+            "purpose": "Describe the setup being inspected. This is not the selected Agent's identity or decision method.",
             "decisionOrder": [
                 "Classify the setup: support turn, pullback base, early reversal, failed reversal, extended breakout, exhaustion, or no-trade.",
                 "Check swing entry quality: closeness to support/low zone, evidence that the turn has started, distance to resistance, volume confirmation, and reward/risk.",
@@ -463,8 +505,8 @@ def _agent_profile(strategy: Any, mode: Any = None) -> dict[str, Any]:
             ],
         }
     return {
-        "name": "Alpha Wolf Investor",
-        "role": "A practical investor who decides whether the stock fits the selected strategy and whether the current price is worth deploying capital.",
+        "name": "Selected page strategy",
+        "purpose": "Describe the setup being inspected. This is not the selected Agent's identity or decision method.",
         "decisionOrder": [
             "Judge the current entry, not only company quality.",
             "Compare upside, downside, valuation, trend, and catalyst support.",

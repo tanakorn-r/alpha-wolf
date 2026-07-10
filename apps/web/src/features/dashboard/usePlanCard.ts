@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { loadDiscoveries, loadStockDetail, saveDcaOrder, saveHolding, updateDcaOrderAmount, deleteDcaOrder, type DcaOrder } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 import { THB_PER_USD } from "../../lib/format";
-import { useDebouncedValue } from "../../lib/useDebouncedValue";
+import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import type { Dashboard } from "./useDashboard";
 
 export type PlanCard = ReturnType<typeof usePlanCard>;
@@ -17,17 +17,16 @@ function monthOptions(): Array<{ key: string; label: string }> {
 }
 
 export function usePlanCard(dash: Dashboard) {
+  const queryClient = useQueryClient();
   const months = useMemo(monthOptions, []);
   const [month, setMonth] = useState(months[0].key);
   const [addOpen, setAddOpen] = useState(false);
   const [addQuery, setAddQuery] = useState("");
-  const [addResults, setAddResults] = useState<Array<{ symbol: string; name: string; market: string }>>([]);
   const [addFundsOpen, setAddFundsOpen] = useState(false);
   const [addFundsAmount, setAddFundsAmount] = useState("");
   const [applied, setApplied] = useState<{ month: string; amount: number; count: number } | null>(null);
   const [applying, setApplying] = useState(false);
   const [applyError, setApplyError] = useState("");
-  const [searchingStocks, setSearchingStocks] = useState(false);
   const [addingSymbol, setAddingSymbol] = useState("");
   const [savingOrderId, setSavingOrderId] = useState<number | null>(null);
 
@@ -79,29 +78,25 @@ export function usePlanCard(dash: Dashboard) {
   useEffect(() => { setApplied(null); }, [month]);
 
   const planSymbols = items.map((order) => order.symbol).join(",");
-  const debouncedAddQuery = useDebouncedValue(addQuery.trim(), 350);
-
+  const debouncedAddQuery = useDebouncedValue(addQuery.trim(), DISCOVERY_DEBOUNCE_MS);
   useEffect(() => {
-    if (!addOpen) return;
-    let active = true;
-    setSearchingStocks(true);
-    void loadDiscoveries({ q: debouncedAddQuery || undefined, kind: "stock", limit: 6 })
-      .then((payload) => {
-        if (!active) return;
-        setAddResults(
-          (payload.live ?? [])
-            .filter((item) => !planSymbols.split(",").includes(item.symbol))
-            .map((item) => ({ symbol: item.symbol, name: item.name, market: item.symbol.endsWith(".BK") ? "Thai SET" : "US" })),
-        );
-      })
-      .catch(() => {
-        if (active) setAddResults([]);
-      })
-      .finally(() => {
-        if (active) setSearchingStocks(false);
-      });
-    return () => { active = false; };
-  }, [addOpen, debouncedAddQuery, planSymbols]);
+    if (addQuery.trim() !== debouncedAddQuery) {
+      void queryClient.cancelQueries({ queryKey: ["plan-add-search"] });
+    }
+  }, [addQuery, debouncedAddQuery, queryClient]);
+  const addSearch = useQuery({
+    queryKey: ["plan-add-search", debouncedAddQuery],
+    queryFn: ({ signal }) => loadDiscoveries({ q: debouncedAddQuery, kind: "stock", limit: 6, signal }),
+    enabled: addOpen && debouncedAddQuery.length >= 2,
+    staleTime: 60_000,
+    retry: 0,
+  });
+  const addResults = useMemo(
+    () => (addSearch.data?.live ?? [])
+      .filter((item) => !planSymbols.split(",").includes(item.symbol))
+      .map((item) => ({ symbol: item.symbol, name: item.name, market: item.symbol.endsWith(".BK") ? "Thai SET" : "US" })),
+    [addSearch.data?.live, planSymbols],
+  );
 
   return {
     months,
@@ -121,7 +116,7 @@ export function usePlanCard(dash: Dashboard) {
     applied,
     applying,
     applyError,
-    searchingStocks,
+    searchingStocks: addSearch.isFetching,
     addingSymbol,
     savingOrderId,
     orderShares,

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 
+export const DISCOVERY_DEBOUNCE_MS = 500;
+
 export function useDebouncedValue<T>(value: T, delay = 300) {
   const [debounced, setDebounced] = useState(value);
 

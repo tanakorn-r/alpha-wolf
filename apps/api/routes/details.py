@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query
 
 from internal.ai.agents import agent_badge, normalize_agent_id
 from internal.ai.context import build_analysis_context
@@ -19,6 +19,40 @@ from models import MarketComparison, TechnicalMovesPredictionResponse
 router = APIRouter()
 
 UPWARD_MOVES_TTL_SECONDS = 900
+
+
+@router.post("/api/details/batch")
+def details_batch(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+    requested = payload.get("items") or []
+    jobs: list[tuple[str, StrategyKey]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in requested[:30]:
+        if not isinstance(item, dict):
+            continue
+        symbol = str(item.get("symbol") or "").upper().strip()
+        strategy = str(item.get("strategy") or "capitalized")
+        if not symbol or strategy not in {"capitalized", "stable_dca", "yield", "momentum"}:
+            continue
+        key = (symbol, strategy)
+        if key not in seen:
+            seen.add(key)
+            jobs.append((symbol, strategy))  # type: ignore[arg-type]
+
+    results: dict[str, Any] = {}
+    # Bound concurrency here. The detail builder already performs four Yahoo calls in parallel;
+    # firing every holding at once creates a thread/request storm and makes the whole brief slower.
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(build_detail_bundle, symbol, strategy): symbol for symbol, strategy in jobs}
+        for future in as_completed(futures):
+            symbol = futures[future]
+            try:
+                value = future.result()
+            except Exception as exc:
+                print(f"Warning: batch detail failed for {symbol}: {exc}")
+                value = None
+            if value is not None:
+                results[symbol] = value
+    return {"items": results}
 
 
 @router.get("/api/details/{symbol}")
@@ -77,6 +111,11 @@ def details_buy_timing(
 ) -> dict[str, Any]:
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
+    ai_cache_key = f"ai-buy-timing:v3:{normalized}:{strategy}:{agent_id}"
+    cached = cache_get("analysis", ai_cache_key)
+    if cached is not None:
+        return cached
+
     result = build_buy_timing(normalized, strategy)
     if not result:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
@@ -85,7 +124,9 @@ def details_buy_timing(
         narrative = analyze_buy_timing_with_openai({"buyTiming": result}, agent_id)
     except OpenAIAnalysisError:
         return result
-    return {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
+    response = {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
+    cache_set("analysis", ai_cache_key, response, UPWARD_MOVES_TTL_SECONDS)
+    return response
 
 
 @router.get("/api/details/{symbol}/upward-moves", response_model=TechnicalMovesPredictionResponse)
@@ -97,7 +138,7 @@ def details_upward_moves(
 ) -> dict[str, Any]:
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
-    cache_key = f"ai-next-10-technical:v10:{normalized}:{timeframe}:{strategy}:{agent_id}"
+    cache_key = f"ai-next-10-technical:v11:{normalized}:{timeframe}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None:
         return cached
