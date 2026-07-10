@@ -31,10 +31,37 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
         return None
 
     ticker = make_ticker(normalized)
-    history = fetch_history(ticker, period="5y")
-    dividends = fetch_dividends(ticker, period="5y")
-    detail = build_detail_bundle(normalized, strategy) or {}
-    deep = deep_analysis(normalized) or {}
+
+    # Fetch all four data sources in parallel — each is an independent network call.
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+
+    history = pd.DataFrame()
+    dividends = None
+    detail: dict[str, Any] = {}
+    deep: dict[str, Any] = {}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = {
+            pool.submit(fetch_history, ticker, "5y"): "history",
+            pool.submit(fetch_dividends, ticker, "5y"): "dividends",
+            pool.submit(build_detail_bundle, normalized, strategy): "detail",
+            pool.submit(deep_analysis, normalized): "deep",
+        }
+        for fut in _as_completed(futs):
+            key = futs[fut]
+            try:
+                val = fut.result()
+            except Exception as exc:
+                print(f"Warning: buy_timing {key} fetch failed for {normalized}: {exc}")
+                val = None
+            if key == "history":
+                history = val if val is not None else pd.DataFrame()
+            elif key == "dividends":
+                dividends = val
+            elif key == "detail":
+                detail = val or {}
+            elif key == "deep":
+                deep = val or {}
 
     closes = _close_series(history)
     current_price = _latest_close(closes) or as_float(stock.get("price")) or as_float(deep.get("price"))

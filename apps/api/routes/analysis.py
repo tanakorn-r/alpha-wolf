@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
@@ -21,6 +22,72 @@ router = APIRouter()
 DETAIL_TTL_SECONDS = 180
 
 
+def _fetch_analysis_data(
+    symbol: str,
+    strategy: StrategyKey,
+    *,
+    mode: str | None = None,
+) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """Fetch bundle + financials + market comparison + domain insights in parallel.
+
+    Returns (bundle, financials, market_data, insights). Any secondary fetch that
+    fails returns an empty dict so the OpenAI call still proceeds with partial data.
+    """
+    bundle: dict[str, Any] | None = None
+    financials: dict[str, Any] = {}
+    market: dict[str, Any] = {}
+    insights: dict[str, Any] = {}
+
+    def _bundle() -> dict[str, Any] | None:
+        return build_detail_bundle(symbol, strategy, mode=mode)
+
+    def _financials() -> dict[str, Any]:
+        try:
+            return get_financials(symbol) or {}
+        except Exception as exc:
+            print(f"Warning: Financials load failed for {symbol}: {exc}")
+            return {}
+
+    def _market() -> dict[str, Any]:
+        try:
+            return get_market_comparison(symbol) or {}
+        except Exception as exc:
+            print(f"Warning: Market comparison load failed for {symbol}: {exc}")
+            return {}
+
+    def _insights() -> dict[str, Any]:
+        try:
+            return get_domain_insights(symbol) or {}
+        except Exception as exc:
+            print(f"Warning: Domain insights load failed for {symbol}: {exc}")
+            return {}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {
+            pool.submit(_bundle): "bundle",
+            pool.submit(_financials): "financials",
+            pool.submit(_market): "market",
+            pool.submit(_insights): "insights",
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                print(f"Warning: {key} fetch failed for {symbol}: {exc}")
+                result = None if key == "bundle" else {}
+            if key == "bundle":
+                bundle = result
+            elif key == "financials":
+                financials = result or {}
+            elif key == "market":
+                market = result or {}
+            elif key == "insights":
+                insights = result or {}
+
+    return bundle, financials, market, insights
+
+
 @router.post("/api/analysis/{symbol}", response_model=StockAnalysisResponse)
 def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
     normalized = symbol.upper().strip()
@@ -33,27 +100,9 @@ def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), a
     if cached is not None:
         return cached
 
-    bundle = build_detail_bundle(normalized, strategy)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
-
-    try:
-        financials_data = get_financials(normalized)
-    except Exception as exc:
-        print(f"Warning: Financials load failed for {normalized}: {exc}")
-        financials_data = {}
-
-    try:
-        market_data = get_market_comparison(normalized)
-    except Exception as exc:
-        print(f"Warning: Market comparison load failed for {normalized}: {exc}")
-        market_data = {}
-
-    try:
-        insights_data = get_domain_insights(normalized)
-    except Exception as exc:
-        print(f"Warning: Domain insights load failed for {normalized}: {exc}")
-        insights_data = {}
 
     context = build_analysis_context(
         bundle,
@@ -64,12 +113,11 @@ def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), a
         agent_id=agent_id,
     )
 
-    # --- OPENAI EVALUATION ---
     try:
         result = analyze_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-        
+
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -86,27 +134,9 @@ def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     if cached is not None:
         return cached
 
-    bundle = build_detail_bundle(normalized, strategy, mode=mode)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy, mode=mode)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
-
-    try:
-        financials_data = get_financials(normalized)
-    except Exception as exc:
-        print(f"Warning: Financials load failed for {normalized}: {exc}")
-        financials_data = {}
-
-    try:
-        market_data = get_market_comparison(normalized)
-    except Exception as exc:
-        print(f"Warning: Market comparison load failed for {normalized}: {exc}")
-        market_data = {}
-
-    try:
-        insights_data = get_domain_insights(normalized)
-    except Exception as exc:
-        print(f"Warning: Domain insights load failed for {normalized}: {exc}")
-        insights_data = {}
 
     context = build_analysis_context(
         bundle,
@@ -135,27 +165,9 @@ def valuation_analysis(symbol: str, payload: dict[str, Any] | None = Body(defaul
     if cached is not None:
         return cached
 
-    bundle = build_detail_bundle(normalized, strategy)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
-
-    try:
-        financials_data = get_financials(normalized)
-    except Exception as exc:
-        print(f"Warning: Financials load failed for {normalized}: {exc}")
-        financials_data = {}
-
-    try:
-        market_data = get_market_comparison(normalized)
-    except Exception as exc:
-        print(f"Warning: Market comparison load failed for {normalized}: {exc}")
-        market_data = {}
-
-    try:
-        insights_data = get_domain_insights(normalized)
-    except Exception as exc:
-        print(f"Warning: Domain insights load failed for {normalized}: {exc}")
-        insights_data = {}
 
     context = build_analysis_context(
         bundle,
@@ -184,27 +196,9 @@ def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     if cached is not None:
         return cached
 
-    bundle = build_detail_bundle(normalized, strategy)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
-
-    try:
-        financials_data = get_financials(normalized)
-    except Exception as exc:
-        print(f"Warning: Financials load failed for {normalized}: {exc}")
-        financials_data = {}
-
-    try:
-        market_data = get_market_comparison(normalized)
-    except Exception as exc:
-        print(f"Warning: Market comparison load failed for {normalized}: {exc}")
-        market_data = {}
-
-    try:
-        insights_data = get_domain_insights(normalized)
-    except Exception as exc:
-        print(f"Warning: Domain insights load failed for {normalized}: {exc}")
-        insights_data = {}
 
     context = build_analysis_context(
         bundle,

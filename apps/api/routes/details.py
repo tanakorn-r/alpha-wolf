@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -109,23 +110,50 @@ def details_upward_moves(
     if not historical:
         raise HTTPException(status_code=404, detail=f"Not enough history for {normalized}")
 
-    try:
-        financials_data = get_financials(normalized)
-    except Exception as exc:
-        print(f"Warning: Financials load failed for {normalized}: {exc}")
-        financials_data = {}
+    def _financials() -> dict[str, Any]:
+        try:
+            return get_financials(normalized) or {}
+        except Exception as exc:
+            print(f"Warning: Financials load failed for {normalized}: {exc}")
+            return {}
 
-    try:
-        market_data = get_market_comparison(normalized)
-    except Exception as exc:
-        print(f"Warning: Market comparison load failed for {normalized}: {exc}")
-        market_data = {}
+    def _market() -> dict[str, Any]:
+        try:
+            return get_market_comparison(normalized) or {}
+        except Exception as exc:
+            print(f"Warning: Market comparison load failed for {normalized}: {exc}")
+            return {}
 
-    try:
-        insights_data = get_domain_insights(normalized)
-    except Exception as exc:
-        print(f"Warning: Domain insights load failed for {normalized}: {exc}")
-        insights_data = {}
+    def _insights() -> dict[str, Any]:
+        try:
+            return get_domain_insights(normalized) or {}
+        except Exception as exc:
+            print(f"Warning: Domain insights load failed for {normalized}: {exc}")
+            return {}
+
+    financials_data: dict[str, Any] = {}
+    market_data: dict[str, Any] = {}
+    insights_data: dict[str, Any] = {}
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futs = {
+            pool.submit(_financials): "financials",
+            pool.submit(_market): "market",
+            pool.submit(_insights): "insights",
+        }
+        for fut in as_completed(futs):
+            key = futs[fut]
+            try:
+                val = fut.result()
+            except Exception as exc:
+                print(f"Warning: {key} fetch failed for {normalized}: {exc}")
+                val = {}
+            if key == "financials":
+                financials_data = val
+            elif key == "market":
+                market_data = val
+            elif key == "insights":
+                insights_data = val
 
     context = build_analysis_context(
         bundle,

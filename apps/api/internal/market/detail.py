@@ -41,11 +41,52 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None 
         return None
 
     ticker = make_ticker(symbol)
-    modules = load_ticker_modules(ticker, symbol)
 
-    history = fetch_history(ticker, period="5y")
-    news = merge_thai_market_news(fetch_news(ticker), symbol)
-    dividends = fetch_dividends(ticker, period="5y")
+    # Fetch yfinance data in parallel — modules, history, news, dividends are
+    # all independent network calls and used to take 4-6 s sequentially.
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+
+    def _modules():
+        return load_ticker_modules(ticker, symbol)
+
+    def _history():
+        return fetch_history(ticker, period="5y")
+
+    def _news():
+        return fetch_news(ticker)
+
+    def _dividends():
+        return fetch_dividends(ticker, period="5y")
+
+    modules = {}
+    history = pd.DataFrame()
+    raw_news: list = []
+    dividends = None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futs = {
+            pool.submit(_modules): "modules",
+            pool.submit(_history): "history",
+            pool.submit(_news): "news",
+            pool.submit(_dividends): "dividends",
+        }
+        for fut in _as_completed(futs):
+            key = futs[fut]
+            try:
+                val = fut.result()
+            except Exception as exc:
+                print(f"Warning: {key} fetch failed for {symbol}: {exc}")
+                val = {} if key == "modules" else pd.DataFrame() if key in ("history", "dividends") else []
+            if key == "modules":
+                modules = val
+            elif key == "history":
+                history = val
+            elif key == "news":
+                raw_news = val
+            elif key == "dividends":
+                dividends = val
+
+    news = merge_thai_market_news(raw_news, symbol)
 
     technicals = build_technicals(history)
     business = build_business_profile(modules, history, stock)
