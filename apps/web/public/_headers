@@ -9,3 +9,6 @@
 
 /icon-*.png
   Cache-Control: public, max-age=31536000, immutable
+
+/apple-touch-icon.png
+  Cache-Control: public, max-age=31536000, immutable
