@@ -1,0 +1,58 @@
+from __future__ import annotations
+
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from internal.store import db as store_db
+from internal.store.portfolio import add_watchlist_symbols, delete_watchlist_symbol, list_holdings, list_watchlist, upsert_holding
+from models import HoldingInput
+
+
+class PortfolioAccountScopeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.db_patch = patch.object(store_db, "DB_PATH", Path(self.tempdir.name) / "portfolio.sqlite3")
+        self.url_patch = patch.object(store_db, "DATABASE_URL", None)
+        self.db_patch.start()
+        self.url_patch.start()
+        store_db.migrate()
+
+    def tearDown(self) -> None:
+        self.url_patch.stop()
+        self.db_patch.stop()
+        self.tempdir.cleanup()
+
+    def test_same_symbol_is_isolated_by_user_id(self) -> None:
+        upsert_holding(HoldingInput(symbol="AAPL", shares=1, averageCost=100), user_id=1)
+        upsert_holding(HoldingInput(symbol="AAPL", shares=2, averageCost=200), user_id=2)
+
+        user_one = list_holdings(user_id=1)
+        user_two = list_holdings(user_id=2)
+        guest = list_holdings(user_id=0)
+
+        self.assertEqual(len(user_one), 1)
+        self.assertEqual(user_one[0].shares, 1)
+        self.assertEqual(len(user_two), 1)
+        self.assertEqual(user_two[0].shares, 2)
+        self.assertEqual(guest, [])
+
+    def test_watchlist_is_isolated_by_user_id(self) -> None:
+        add_watchlist_symbols(["GC=F", "GLD"], user_id=1)
+        add_watchlist_symbols(["GLD", "CL=F"], user_id=2)
+
+        self.assertEqual(list_watchlist(user_id=1), ["GC=F", "GLD"])
+        self.assertEqual(list_watchlist(user_id=2), ["GLD", "CL=F"])
+
+        delete_watchlist_symbol("GLD", user_id=1)
+
+        self.assertEqual(list_watchlist(user_id=1), ["GC=F"])
+        self.assertEqual(list_watchlist(user_id=2), ["GLD", "CL=F"])
+
+
+if __name__ == "__main__":
+    unittest.main()

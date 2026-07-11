@@ -7,3 +7,4 @@ certifi
 python-dotenv
 tradingview-screener
 libsql
+google-auth

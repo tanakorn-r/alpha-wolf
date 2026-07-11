@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "dev": "vite --host 127.0.0.1 --port 4200",
+    "dev": "vite --host localhost --port 4200",
     "build:mobile": "vite build",
     "cap:sync": "npm run build:mobile && cap sync",
     "cap:add:ios": "cap add ios",

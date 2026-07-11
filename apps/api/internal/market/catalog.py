@@ -17,6 +17,23 @@ from models import MarketCatalogStatus, MarketUniverseCache, UniverseEntry
 CATALOG_TTL_SECONDS = 86_400
 CATALOG_PAGE_SIZE = 250
 CATALOG_REGIONS = ("us", "th")
+# yfinance's screener never returns a `sector` field on quotes, so we screen one
+# sector at a time and tag every result with the sector we queried for. These are
+# the valid EquityQuery sector values (GICS-style).
+CATALOG_SECTORS = (
+    "Technology",
+    "Financial Services",
+    "Healthcare",
+    "Consumer Cyclical",
+    "Consumer Defensive",
+    "Industrials",
+    "Communication Services",
+    "Energy",
+    "Utilities",
+    "Real Estate",
+    "Basic Materials",
+)
+CATALOG_SECTOR_SIZE = 35
 SCORING_VERSION = 5
 _REFRESH_LOCK = threading.Lock()
 
@@ -55,16 +72,24 @@ def _canonical_industry_name(industry: str) -> str:
 def get_market_catalog() -> list[dict[str, Any]]:
     now = datetime.now(timezone.utc)
     cached = [load_market_universe(region) for region in CATALOG_REGIONS]
-    if all(value and datetime.fromisoformat(value.expiresAt) > now for value in cached):
+    if all(_catalog_fresh(value, now) for value in cached):
         return [record for value in cached if value for record in _sanitize_cached_records(value)]
 
     with _REFRESH_LOCK:
         cached = [load_market_universe(region) for region in CATALOG_REGIONS]
         now = datetime.now(timezone.utc)
-        if all(value and datetime.fromisoformat(value.expiresAt) > now for value in cached):
+        if all(_catalog_fresh(value, now) for value in cached):
             return [record for value in cached if value for record in _sanitize_cached_records(value)]
         refreshed = [_refresh_region(region) for region in CATALOG_REGIONS]
         return [record for value in refreshed for record in value.records]
+
+
+def _catalog_fresh(value: MarketUniverseCache | None, now: datetime) -> bool:
+    """Fresh = present, unexpired, and sector-tagged. Caches built before per-sector
+    screening have every record at sector 'Unknown', so force those to rebuild."""
+    if not value or datetime.fromisoformat(value.expiresAt) <= now:
+        return False
+    return any(str(record.get("sector") or "Unknown") != "Unknown" for record in value.records)
 
 
 def ensure_market_catalog() -> MarketCatalogStatus:
@@ -83,12 +108,18 @@ def ensure_market_catalog() -> MarketCatalogStatus:
 
 
 def _refresh_region(region: str) -> MarketUniverseCache:
-    query = yf.EquityQuery("eq", ["region", region])
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
-    page_count = 2 if region == "th" else 1
-    for page in range(page_count):
-        payload = yf.screen(query, offset=page * CATALOG_PAGE_SIZE, size=CATALOG_PAGE_SIZE, sortField="intradaymarketcap", sortAsc=False)
+    for sector in CATALOG_SECTORS:
+        query = yf.EquityQuery("and", [
+            yf.EquityQuery("eq", ["region", region]),
+            yf.EquityQuery("eq", ["sector", sector]),
+        ])
+        try:
+            payload = yf.screen(query, size=CATALOG_SECTOR_SIZE, sortField="intradaymarketcap", sortAsc=False)
+        except Exception as exc:
+            print(f"Warning: sector screen failed for {region}/{sector}: {exc}")
+            continue
         quotes = payload.get("quotes", []) if isinstance(payload, dict) else []
         for quote in quotes:
             if not isinstance(quote, dict) or not quote.get("symbol"):
@@ -97,11 +128,8 @@ def _refresh_region(region: str) -> MarketUniverseCache:
             if symbol in seen or not _is_supported_quote(quote, region):
                 continue
             seen.add(symbol)
-            records.append(_record_from_quote(quote, region))
-            if len(records) == CATALOG_PAGE_SIZE:
-                break
-        if len(records) == CATALOG_PAGE_SIZE:
-            break
+            # The screener omits `sector` on the quote; the query guarantees it, so tag it.
+            records.append(_record_from_quote(quote, region, sector))
     if not records:
         raise RuntimeError(f"yfinance returned an empty {region.upper()} market universe")
     now = datetime.now(timezone.utc)
@@ -195,10 +223,10 @@ def _is_supported_quote(quote: dict[str, Any], region: str) -> bool:
     return "_DR" not in name and "DEPOSITARY RECEIPT" not in name
 
 
-def _record_from_quote(quote: dict[str, Any], region: str) -> dict[str, Any]:
+def _record_from_quote(quote: dict[str, Any], region: str, sector_hint: str | None = None) -> dict[str, Any]:
     symbol = str(quote["symbol"]).upper()
     name = str(quote.get("longName") or quote.get("shortName") or symbol)
-    sector = str(quote.get("sector") or "Unknown")
+    sector = str(quote.get("sector") or sector_hint or "Unknown")
     price = as_float(quote.get("regularMarketPrice")) or 0.0
     previous = as_float(quote.get("regularMarketPreviousClose"))
     change_pct = as_float(quote.get("regularMarketChangePercent"))

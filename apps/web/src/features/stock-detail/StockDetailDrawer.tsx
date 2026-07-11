@@ -6,10 +6,11 @@ import { AgentByline } from "../../components/agents/AgentByline";
 import { AgentRecap } from "../../components/agents/AgentRecap";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { Modal } from "../../components/ui/Modal";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
-import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate } from "../../lib/format";
-import { loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, saveHolding, summarizeStock, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
+import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
+import { loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, saveHolding, summarizeStock, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
 import { negative, panel, positive } from "../../lib/ui";
 import { useWolfStore } from "../../store/useWolfStore";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
@@ -35,6 +36,9 @@ export function StockDetailDrawer() {
   const [researchLoading, setResearchLoading] = useState(false);
   const [market, setMarket] = useState<MarketComparisonResponse | null>(null);
   const [addStatus, setAddStatus] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [addShares, setAddShares] = useState("");
+  const [addPrice, setAddPrice] = useState("");
   const drawerRef = useRef<HTMLElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
@@ -45,16 +49,20 @@ export function StockDetailDrawer() {
   });
   const detail = detailQuery.data ?? null;
   const loading = detailQuery.isPending && detailOpen;
-  const planQuery = useQuery({ queryKey: ["portfolio"], queryFn: loadPortfolio, enabled: detailOpen });
+  const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
+  const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
+  const planQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: detailOpen && Boolean(authQuery.data?.id) });
   const portfolioHolding = planQuery.data?.holdings.find((item) => item.symbol === selectedSymbol);
   const addHoldingMutation = useMutation({
     mutationFn: async () => {
       if (!detail) throw new Error("Stock detail is not loaded.");
-      const price = detail.stock.price;
-      if (!Number.isFinite(price) || price <= 0) throw new Error("This stock does not have a valid live price.");
+      const boughtShares = Number(addShares);
+      if (!(boughtShares > 0)) throw new Error("Enter how many units you bought.");
+      if (!(Number(addPrice) > 0)) throw new Error("Enter the price you paid.");
+      // The price is in the stock's native currency (THB for .BK); the store keeps USD base.
+      const price = priceToUsdBase(Number(addPrice), detail.stock.currency ?? detail.stock.symbol);
       const portfolio = planQuery.data ?? await loadPortfolio();
       const existing = portfolio.holdings.find((holding) => holding.symbol === detail.stock.symbol);
-      const boughtShares = 1;
       const totalShares = (existing?.shares ?? 0) + boughtShares;
       const totalCost = (existing?.shares ?? 0) * (existing?.averageCost ?? 0) + price * boughtShares;
       return saveHolding({
@@ -66,14 +74,24 @@ export function StockDetailDrawer() {
       });
     },
     onMutate: () => setAddStatus(""),
-    onSuccess: () => {
-      setAddStatus("Added 1 share to portfolio.");
+    onSuccess: (_data, _vars) => {
+      setAddStatus(`Added ${formatNumber(Number(addShares))} ${Number(addShares) === 1 ? "share" : "shares"} to portfolio.`);
+      setAddOpen(false);
+      setAddShares("");
+      setAddPrice("");
       queryClient.invalidateQueries({ queryKey: ["portfolio"] });
     },
     onError: (err) => {
       setAddStatus(err instanceof Error ? err.message : "Could not add this stock to portfolio.");
     },
   });
+
+  function openAddForm() {
+    setAddStatus("");
+    setAddShares("");
+    setAddPrice(detail && Number.isFinite(detail.stock.price) && detail.stock.price > 0 ? String(detail.stock.price) : "");
+    setAddOpen(true);
+  }
 
   useEffect(() => {
     if (!detailOpen || !selectedSymbol) return;
@@ -106,7 +124,7 @@ export function StockDetailDrawer() {
     setError("");
     setAnalyzing(true);
     try {
-      setAnalysis(await summarizeStock(selectedSymbol, selectedStrategy, activeAgentId));
+      setAnalysis(await summarizeStock(selectedSymbol, selectedStrategy, activeAgentId, true));
     } catch {
       setError("AI analysis is unavailable. Check the API configuration.");
     } finally {
@@ -151,9 +169,31 @@ export function StockDetailDrawer() {
             symbol={selectedSymbol}
             holdingShares={portfolioHolding?.shares}
             adding={addHoldingMutation.isPending}
-            onAdd={() => addHoldingMutation.mutate()}
+            onAdd={openAddForm}
             onClose={closeDetail}
           />
+          {addOpen && detail ? (
+            <Modal title={portfolioHolding?.shares ? `Add more ${detail.stock.symbol}` : `Add ${detail.stock.symbol} to portfolio`} onClose={() => setAddOpen(false)}>
+              <form
+                onSubmit={(event) => { event.preventDefault(); addHoldingMutation.mutate(); }}
+                className="grid gap-3"
+              >
+                <label className="grid gap-1 text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">
+                  Units bought
+                  <input autoFocus required type="number" min="0" step="any" value={addShares} onChange={(event) => setAddShares(event.target.value)} placeholder="Number of shares" className="h-10 rounded-lg border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]" />
+                </label>
+                <label className="grid gap-1 text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">
+                  Price paid (per share)
+                  <input required type="number" min="0" step="any" value={addPrice} onChange={(event) => setAddPrice(event.target.value)} placeholder="Your buy price" className="h-10 rounded-lg border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]" />
+                </label>
+                <p className="text-[11px] leading-[1.5] text-[#5a5a62]">Prefilled with the live price ({formatCurrency(detail.stock.price, detail.stock.currency)}) — change it to what you actually paid. Adding more averages into your existing position.</p>
+                {addHoldingMutation.isError ? <p className="text-[11px] text-[#f2575c]">{addStatus}</p> : null}
+                <button disabled={addHoldingMutation.isPending} className="mt-1 flex items-center justify-center gap-2 rounded-lg bg-[#3ecf8e] py-3 text-sm font-bold text-[#06120c] disabled:opacity-60">
+                  {addHoldingMutation.isPending ? <LoadingSpinner size={14} /> : null}Add to portfolio
+                </button>
+              </form>
+            </Modal>
+          ) : null}
           <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 min-[720px]:max-h-[calc(100vh-180px)] min-[720px]:p-[22px]">
             {loading ? <DetailSkeleton symbol={selectedSymbol} /> : null}
             {detailQuery.isError ? <div className={`${panel} flex items-center justify-between text-sm text-[#f2575c]`}>Unable to load live stock detail.<button type="button" disabled={detailQuery.isFetching} onClick={() => detailQuery.refetch()} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">{detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button></div> : null}
@@ -669,7 +709,7 @@ function DrawerHeader({
             disabled={adding}
             className="min-w-0 flex-1 rounded-lg border border-[#34343c] bg-[#1c1c20] px-3 py-2 text-left text-xs font-semibold text-[#ececee] transition-colors hover:border-[#676771] hover:bg-[#24242a] disabled:cursor-not-allowed disabled:opacity-60 min-[720px]:flex-none"
           >
-            <span className="block">{adding ? "Adding..." : hasHolding ? "Add 1 more" : "Add to port"}</span>
+            <span className="block">{adding ? "Adding..." : hasHolding ? "Add more" : "Add to port"}</span>
             <span className="mt-0.5 block font-mono text-[10px] font-medium text-[#a6a6af]">
               {hasHolding ? `${formatNumber(holdingShares)} shares` : formatCurrency(detail.stock.price, detail.stock.currency)}
             </span>

@@ -9,7 +9,7 @@ export default defineConfig({
   root: appRoot,
   plugins: [react(), tailwindcss()],
   server: {
-    host: "127.0.0.1",
+    host: "localhost",
     port: 4200,
     proxy: {
       "/api": "http://127.0.0.1:8000"

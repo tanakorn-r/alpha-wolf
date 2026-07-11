@@ -72,11 +72,10 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
         <div className="flex flex-col gap-3">
           <AgentRecap agent={analyst.analysis.agent} recap={analyst.analysis.recap} fit={analyst.analysis.agentFit} reason={analyst.analysis.agentFitReason} className="" />
           <AnalystNoteCard analysis={analyst.analysis} />
-          <AnalystDecisionMatrix analysis={analyst.analysis} />
-          <AnalystScoreCard analysis={analyst.analysis} currency={currency} />
-          <AnalystPriceChart detail={analyst.detail} analysis={analyst.analysis} />
-          <AnalystReasons analysis={analyst.analysis} />
+          <LongTermStructureView analysis={analyst.analysis} />
           <AnalystPanels detail={analyst.detail} analysis={analyst.analysis} />
+          <AnalystReasons analysis={analyst.analysis} />
+          <AnalystPriceChart detail={analyst.detail} analysis={analyst.analysis} />
           <AgentSignoff agent={analyst.analysis.agent} />
         </div>
       ) : null}
@@ -91,9 +90,94 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
   );
 }
 
+function LongTermStructureView({ analysis }: { analysis: StockAnalysisResponse }) {
+  const view = analysis.longTermView;
+  const allocation = view.allocationPlan;
+  const tone = view.outlookRating === "STRONG" ? "#3ecf8e" : view.outlookRating === "FAVORABLE" ? "#74a4ff" : view.outlookRating === "NO_EDGE" ? "#f5c451" : "#f2575c";
+  const sectionTone = (rating: StockAnalysisResponse["longTermView"]["perspectiveSections"][number]["rating"]) =>
+    rating === "STRENGTH" ? "#3ecf8e" : rating === "POSITIVE" ? "#74a4ff" : rating === "WATCH" || rating === "UNPROVEN" ? "#f5c451" : "#f2575c";
+
+  return (
+    <section className={`${panel} overflow-hidden p-3.5`}>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#252529] pb-3">
+        <div>
+          <div className="text-[9px] font-bold uppercase tracking-[0.1em] text-[#8c8c95]">Company structure + Agent outlook</div>
+          <div className="mt-1 text-[16px] font-bold text-[#ececee]">Same company data, different decision method</div>
+          {analysis.agent?.analystFocus ? <div className="mt-1 text-[10.5px] text-[#8c8c95]">{analysis.agent.name} lens · {analysis.agent.analystFocus}</div> : null}
+        </div>
+        <span className="rounded-[6px] border px-2 py-[3px] font-mono text-[9.5px] font-bold" style={{ color: tone, borderColor: `${tone}55`, background: `${tone}10` }}>Structure {view.structureScore}/100</span>
+      </div>
+
+      <div className="mt-3 grid gap-2.5 min-[820px]:grid-cols-2">
+        {view.perspectiveSections.map((section, index) => {
+          const color = sectionTone(section.rating);
+          return (
+            <div key={`${section.title}-${index}`} className="rounded-[10px] border border-[#252529] bg-[#0e0e10] px-3.5 py-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-[10px] font-bold uppercase tracking-[0.05em]" style={{ color }}>{section.title}</div>
+                <span className="rounded-[5px] border px-1.5 py-0.5 font-mono text-[8.5px] font-bold" style={{ color, borderColor: `${color}45`, background: `${color}0d` }}>{section.rating}</span>
+              </div>
+              <div className="mt-1.5 text-[12px] leading-[1.6] text-[#c8c8d0]">{section.body}</div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {section.evidence.map((item, evidenceIndex) => <span key={evidenceIndex} className="rounded-[5px] border border-[#252529] bg-white/[0.025] px-1.5 py-1 text-[9.5px] text-[#8c8c95]">{item}</span>)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-2.5 rounded-[10px] border px-3.5 py-3" style={{ borderColor: `${tone}45`, background: `${tone}09` }}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-[10px] font-bold uppercase tracking-[0.05em]" style={{ color: tone }}>{view.outlookTitle}</div>
+          <span className="rounded-[5px] border border-[#2a2a31] bg-[#0e0e10] px-2 py-1 font-mono text-[9.5px] text-[#8c8c95]">Horizon · {view.outlookHorizon}</span>
+        </div>
+        <div className="mt-2 text-[12.5px] leading-[1.65] text-[#d8d8dd]">{view.agentOutlook}</div>
+        <div className="mt-2.5 rounded-[8px] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2.5">
+          <div className="text-[9px] font-bold uppercase tracking-[0.06em] text-[#8c8c95]">Agent action</div>
+          <div className="mt-1 text-[12px] font-semibold leading-[1.55]" style={{ color: tone }}>{view.actionPlan}</div>
+        </div>
+        <div className="mt-2.5 rounded-[9px] border border-[#2a2a31] bg-[#0e0e10] px-3 py-3">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <div className="text-[9px] font-bold uppercase tracking-[0.06em] text-[#8c8c95]">Position tier · {allocation.tier}</div>
+              <div className="mt-1 text-[13px] font-bold text-[#ececee]">{allocation.label}</div>
+            </div>
+            <div className="text-right">
+              <div className="font-mono text-[22px] font-extrabold leading-none" style={{ color: tone }}>{allocation.plannedPositionPct}%</div>
+              <div className="mt-1 text-[8.5px] text-[#5a5a62]">of planned position</div>
+            </div>
+          </div>
+          <div className="mt-2 h-[6px] overflow-hidden rounded-full bg-[#1a1a1f]"><div className="h-full rounded-full" style={{ width: `${allocation.plannedPositionPct}%`, background: tone }} /></div>
+          <div className="mt-2 text-[11px] leading-[1.55] text-[#bcbcc2]">{allocation.rationale}</div>
+          <div className="mt-2 grid gap-2 min-[760px]:grid-cols-2">
+            <div className="rounded-[7px] border border-[#3ecf8e]/20 bg-[#3ecf8e]/[0.04] px-2.5 py-2"><span className="text-[8.5px] font-bold uppercase text-[#3ecf8e]">Scale up</span><div className="mt-1 text-[10.5px] leading-[1.45] text-[#bcbcc2]">{allocation.scaleUpTrigger}</div></div>
+            <div className="rounded-[7px] border border-[#f2575c]/20 bg-[#f2575c]/[0.04] px-2.5 py-2"><span className="text-[8.5px] font-bold uppercase text-[#f2575c]">Cut down</span><div className="mt-1 text-[10.5px] leading-[1.45] text-[#bcbcc2]">{allocation.cutTrigger}</div></div>
+          </div>
+          <div className="mt-2 text-[8.5px] text-[#5a5a62]">FULL means the full pre-planned position—not all portfolio cash.</div>
+        </div>
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {view.keySignals.map((signal, index) => <span key={index} className="rounded-[6px] border border-[#2a2a31] bg-white/[0.03] px-2 py-1 text-[10px] text-[#bcbcc2]">{signal}</span>)}
+        </div>
+      </div>
+
+      <div className="mt-3">
+        <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#f2575c]">What invalidates this Agent view</div>
+        <div className="mt-2 grid gap-2 min-[760px]:grid-cols-2">
+          {view.thesisBreakers.map((item, index) => (
+            <div key={index} className="flex gap-2 rounded-[8px] border border-[#f2575c]/20 bg-[#f2575c]/[0.04] px-3 py-2 text-[11.5px] leading-[1.5] text-[#bcbcc2]">
+              <span className="font-mono font-bold text-[#f2575c]">{index + 1}</span><span>{item}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AnalystNoteCard({ analysis }: { analysis: StockAnalysisResponse }) {
   const verdict = signalLevel(analysis.confidence, analysis.signal);
   const color = analysis.agent?.color ?? verdict.color;
+  const perspectiveScore = analysis.confidence;
   return (
     <div
       className="relative overflow-hidden rounded-[10px] border px-3.5 py-3.5 shadow-[0_18px_54px_rgba(0,0,0,0.28)]"
@@ -108,85 +192,16 @@ function AnalystNoteCard({ analysis }: { analysis: StockAnalysisResponse }) {
         <AgentByline agent={analysis.agent} label="Analyst note" className="mb-0" />
         <div className="flex items-center gap-2">
           <span className="rounded-[7px] border px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.04em]" style={{ color, borderColor: `${color}66`, background: `${color}12` }}>
-            {verdict.label}
+            {analysis.longTermView.outlookRating}
           </span>
-          <span className="font-mono text-[18px] font-extrabold leading-none" style={{ color }}>{analysis.confidence}</span>
-          <span className="font-mono text-[10px] text-[#5a5a62]">/100</span>
+          <span className="font-mono text-[18px] font-extrabold leading-none" style={{ color }}>{perspectiveScore ?? "N/A"}</span>
+          {perspectiveScore != null ? <span className="font-mono text-[10px] text-[#5a5a62]">/100 Agent fit</span> : null}
         </div>
       </div>
       <div className="h-[4px] overflow-hidden rounded-full bg-[#1a1a1f]">
-        <div className="h-full rounded-full" style={{ width: `${analysis.confidence}%`, background: color }} />
+        <div className="h-full rounded-full" style={{ width: `${perspectiveScore ?? 0}%`, background: color }} />
       </div>
       <p className="mt-3 max-w-[1120px] whitespace-pre-line text-[13px] leading-[1.65] text-[#d8d8dd]">{analysis.summary}</p>
-    </div>
-  );
-}
-
-function AnalystDecisionMatrix({ analysis }: { analysis: StockAnalysisResponse }) {
-  const matrix = buildAnalystMatrix(analysis);
-  return (
-    <div className={`${panel} overflow-hidden p-3.5`}>
-      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2.5">
-        <div>
-          <div className="text-[13px] font-bold tracking-[-0.1px] text-[#ececee]">Analyst Matrix</div>
-          <div className="mt-0.5 text-[11px] text-[#8c8c95]">Price now vs. business structure.</div>
-        </div>
-        <div className="rounded-[7px] border px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.05em]" style={{ color: matrix.color, borderColor: `${matrix.color}66`, background: `${matrix.color}12` }}>
-          {matrix.action}
-        </div>
-      </div>
-
-      <div className="grid gap-2.5 min-[900px]:grid-cols-[0.82fr_1.18fr]">
-        <div className="grid gap-2 min-[560px]:grid-cols-2 min-[900px]:grid-cols-1">
-          <MatrixAxisCard title="Price now" score={matrix.priceScore} label={matrix.priceLabel} color={matrix.priceColor} body={matrix.priceBody} />
-          <MatrixAxisCard title="Structure" score={matrix.structureScore} label={matrix.structureLabel} color={matrix.structureColor} body={matrix.structureBody} />
-        </div>
-
-        <div className="relative min-h-[150px] rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3">
-          <div className="absolute inset-x-4 top-1/2 h-px bg-[#252529]" />
-          <div className="absolute inset-y-4 left-1/2 w-px bg-[#252529]" />
-          <QuadrantLabel className="left-3 top-3" color="#3ecf8e" title="Buy / add" sub="good price + strong structure" />
-          <QuadrantLabel className="right-3 top-3 text-right" color="#74a4ff" title="Watch entry" sub="strong structure, price needs help" />
-          <QuadrantLabel className="bottom-3 left-3" color="#f5c451" title="Trade only" sub="price ok, structure not proven" />
-          <QuadrantLabel className="bottom-3 right-3 text-right" color="#f2575c" title="Pass" sub="weak price + weak structure" />
-
-          <div
-            className="absolute grid h-[28px] w-[28px] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-2 bg-[#161619] font-mono text-[9px] font-extrabold shadow-[0_10px_28px_rgba(0,0,0,0.35)] transition-all"
-            style={{ left: `${matrix.x}%`, top: `${matrix.y}%`, color: matrix.color, borderColor: matrix.color }}
-          >
-            {analysis.agent?.mono ?? "AI"}
-          </div>
-          <div className="absolute bottom-1.5 left-1/2 -translate-x-1/2 text-[8px] uppercase tracking-[0.08em] text-[#5a5a62]">Price</div>
-          <div className="absolute left-1.5 top-1/2 -translate-y-1/2 -rotate-90 text-[8px] uppercase tracking-[0.08em] text-[#5a5a62]">Structure</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MatrixAxisCard({ title, score, label, color, body }: { title: string; score: number; label: string; color: string; body: string }) {
-  return (
-    <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-2.5">
-      <div className="mb-1.5 flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#5a5a62]">{title}</div>
-          <div className="mt-0.5 text-[12px] font-bold" style={{ color }}>{label}</div>
-        </div>
-        <div className="font-mono text-[20px] font-extrabold leading-none" style={{ color }}>{score}</div>
-      </div>
-      <div className="mb-1.5 h-[5px] overflow-hidden rounded-full bg-[#1a1a1f]">
-        <div className="h-full rounded-full" style={{ width: `${score}%`, background: color }} />
-      </div>
-      <div className="text-[10px] leading-[1.4] text-[#8c8c95]">{body}</div>
-    </div>
-  );
-}
-
-function QuadrantLabel({ className, color, title, sub }: { className: string; color: string; title: string; sub: string }) {
-  return (
-    <div className={`absolute max-w-[128px] ${className}`}>
-      <div className="text-[10px] font-bold" style={{ color }}>{title}</div>
-      <div className="mt-0.5 text-[8.5px] leading-[1.25] text-[#5a5a62]">{sub}</div>
     </div>
   );
 }
@@ -204,8 +219,8 @@ function AnalystPriceChart({ detail, analysis }: { detail: StockDetailResponse; 
     <div className={`${panel} px-4 py-3.5`}>
       <div className="mb-2.5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[15px] font-semibold">Price Action</div>
-          <div className="mt-1 text-[12px] text-[#8c8c95]">Recent closes with AI entry and target context.</div>
+          <div className="text-[15px] font-semibold">Price Context · Secondary</div>
+          <div className="mt-1 text-[12px] text-[#8c8c95]">Recent closes shown after the Agent-specific investigation.</div>
         </div>
         <div className="flex flex-wrap gap-3 text-[11px] text-[#8c8c95]">
           <span className="flex items-center gap-1.5"><span className="h-[2px] w-4 rounded bg-[#3ecf8e]" />Price</span>
@@ -243,66 +258,12 @@ function AnalystPriceChart({ detail, analysis }: { detail: StockDetailResponse; 
   );
 }
 
-function buildAnalystMatrix(analysis: StockAnalysisResponse) {
-  const value = scoreOf(analysis, "Value");
-  const timing = scoreOf(analysis, "Timing");
-  const health = scoreOf(analysis, "Financial health");
-  const dividend = scoreOf(analysis, "Dividend safety");
-  const growth = scoreOf(analysis, "Growth");
-  const upside = analysis.targetPrice?.impliedUpsidePct;
-  const entryGap = analysis.entryPrice?.distanceFromCurrentPct;
-
-  const upsideScore = typeof upside === "number" ? clampNumber(50 + upside * 1.55, 5, 95) : 50;
-  const entryScore = typeof entryGap === "number" ? clampNumber(72 - Math.max(entryGap, -8) * 3.1, 5, 95) : 50;
-  const priceScore = Math.round(clampNumber(value * 0.38 + timing * 0.28 + upsideScore * 0.22 + entryScore * 0.12, 1, 99));
-  const structureScore = Math.round(clampNumber(health * 0.42 + dividend * 0.25 + growth * 0.23 + value * 0.10, 1, 99));
-  const strongPrice = priceScore >= 64;
-  const strongStructure = structureScore >= 64;
-  const color = strongPrice && strongStructure ? "#3ecf8e" : !strongPrice && strongStructure ? "#74a4ff" : strongPrice ? "#f5c451" : "#f2575c";
-  const action = strongPrice && strongStructure ? "Buy / add zone" : !strongPrice && strongStructure ? "Good company, wait price" : strongPrice ? "Cheap but fragile" : "Pass / avoid";
-
-  return {
-    priceScore,
-    structureScore,
-    priceColor: bandColor(priceScore),
-    structureColor: bandColor(structureScore),
-    priceLabel: priceScore >= 72 ? "Attractive now" : priceScore >= 58 ? "Fair / selective" : priceScore >= 42 ? "Wait for reset" : "Too expensive",
-    structureLabel: structureScore >= 72 ? "Strong structure" : structureScore >= 58 ? "Acceptable structure" : structureScore >= 42 ? "Fragile structure" : "Weak structure",
-    priceBody: priceBody(upside, entryGap),
-    structureBody: `Health ${health}/100 · dividend ${dividend}/100 · growth ${growth}/100.`,
-    color,
-    action,
-    x: clampNumber(priceScore, 10, 90),
-    y: clampNumber(100 - structureScore, 10, 90),
-  };
-}
-
-function scoreOf(analysis: StockAnalysisResponse, label: StockAnalysisResponse["scores"][number]["label"]) {
-  return analysis.scores.find((score) => score.label === label)?.score ?? 50;
-}
-
-function bandColor(score: number) {
-  if (score >= 68) return "#3ecf8e";
-  if (score >= 52) return "#f5c451";
-  return "#f2575c";
-}
-
-function priceBody(upside?: number | null, entryGap?: number | null) {
-  const upsideText = typeof upside === "number" ? `${upside >= 0 ? "+" : ""}${upside.toFixed(1)}% target gap` : "target gap unavailable";
-  const entryText = typeof entryGap === "number" ? `${entryGap >= 0 ? "+" : ""}${entryGap.toFixed(1)}% vs entry` : "entry gap unavailable";
-  return `${upsideText} · ${entryText}.`;
-}
-
-function clampNumber(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
 function AnalystReasons({ analysis }: { analysis: StockAnalysisResponse }) {
   const color = signalLevel(analysis.confidence, analysis.signal).color;
   const reasons = [
-    analysis.entryPrice?.why,
-    analysis.targetPrice?.basis,
     ...analysis.bullets,
+    analysis.targetPrice?.basis,
+    analysis.entryPrice?.why,
   ].filter(Boolean).slice(0, 4);
 
   if (!reasons.length) return null;
@@ -310,7 +271,7 @@ function AnalystReasons({ analysis }: { analysis: StockAnalysisResponse }) {
     <div className="rounded-[10px] border border-[#3ecf8e]/20 bg-[linear-gradient(135deg,rgba(62,207,142,0.04),rgba(77,150,255,0.03))] px-3.5 py-3">
       <div className="mb-2.5 flex items-center gap-2">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.8 4.5 4.7 1.5-4.7 1.2L8 14 6.2 8.7 1.5 7.5 6.2 6z" stroke="#3ecf8e" strokeWidth="1.5" strokeLinejoin="round" /></svg>
-        <span className="text-[11px] font-bold uppercase tracking-[0.6px] text-[#3ecf8e]">Why AlphaWolf says this</span>
+        <span className="text-[11px] font-bold uppercase tracking-[0.6px] text-[#3ecf8e]">Evidence behind the structure view</span>
       </div>
       <div className="grid grid-cols-2 gap-2 max-[820px]:grid-cols-1">
         {reasons.map((reason, index) => (
@@ -324,41 +285,3 @@ function AnalystReasons({ analysis }: { analysis: StockAnalysisResponse }) {
   );
 }
 
-function AnalystScoreCard({ analysis, currency }: { analysis: StockAnalysisResponse; currency: string }) {
-  const level = signalLevel(analysis.confidence, analysis.signal);
-  const color = level.color;
-  const entry = analysis.entryPrice?.entryPrice;
-  const target = analysis.targetPrice?.targetPrice;
-  const stop = entry ? entry * 0.985 : null;
-  return (
-    <div className="rounded-[12px] p-[2px]" style={{ background: `linear-gradient(135deg,${color},#4d96ff,#c77dff)` }}>
-      <div className="rounded-[10px] bg-[#0e0f12] px-4 py-3.5">
-        <div className="flex flex-wrap items-stretch gap-3.5">
-          <div className="flex min-w-[110px] flex-col justify-center gap-[2px]">
-            <div className="font-mono text-[42px] font-extrabold leading-none" style={{ color }}>{analysis.confidence}</div>
-            <div className="text-[10px] text-[#5a5a62]">/100 AlphaWolf Score</div>
-            <div className="mt-[5px] text-[13px] font-bold" style={{ color }}>{level.label}</div>
-          </div>
-          <div className="w-px self-stretch bg-[#2a2a31]" />
-          <div className="grid min-w-[260px] flex-1 grid-cols-3 gap-2 max-[760px]:grid-cols-1">
-            <div className="rounded-[9px] bg-[#161619] px-3 py-2.5">
-              <div className="mb-[5px] text-[9px] uppercase tracking-[0.5px] text-[#5a5a62]">Entry Zone</div>
-              <div className="font-mono text-[13px] font-bold text-[#f5c451]">{entry != null ? formatCurrency(entry, currency) : "—"}</div>
-              <div className="mt-[3px] text-[10px] text-[#8c8c95]">{analysis.entryPrice?.why ?? "AI entry"}</div>
-            </div>
-            <div className="rounded-[9px] bg-[#161619] px-3 py-2.5">
-              <div className="mb-[5px] text-[9px] uppercase tracking-[0.5px] text-[#5a5a62]">Price Target</div>
-              <div className="font-mono text-[13px] font-bold text-[#3ecf8e]">{target != null ? formatCurrency(target, currency) : "—"}</div>
-              <div className="mt-[3px] text-[10px] text-[#8c8c95]">{analysis.targetPrice?.timeHorizon ?? "target"}</div>
-            </div>
-            <div className="rounded-[9px] bg-[#161619] px-3 py-2.5">
-              <div className="mb-[5px] text-[9px] uppercase tracking-[0.5px] text-[#5a5a62]">Stop Loss</div>
-              <div className="font-mono text-[13px] font-bold text-[#f2575c]">{stop != null ? formatCurrency(stop, currency) : "—"}</div>
-              <div className="mt-[3px] text-[10px] text-[#8c8c95]">−1.5% from entry</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}

@@ -4,11 +4,11 @@ import type { UpwardMovesResponse } from "../lib/api";
 
 const RESERVE_STORAGE_KEY = "aw_cash_reserve";
 const PREMIUM_STORAGE_KEY = "aw_premium";
-const DEEP_EXTRAS_STORAGE_KEY = "aw_deep_extras";
 const N100_QUOTA_STORAGE_KEY = "aw_n100_quota_used";
 const N100_REPORT_CACHE_STORAGE_KEY = "aw_n100_report_cache";
 const HUNT_AI_CACHE_STORAGE_KEY = "aw_hunt_ai_cache";
 const ACTIVE_AGENT_STORAGE_KEY = "aw_active_agent";
+const LANGUAGE_STORAGE_KEY = "aw_language";
 const DEFAULT_AGENT_ID = "vera";
 export const N100_QUOTA_LIMIT = 100;
 
@@ -37,11 +37,11 @@ type WolfState = {
   portfolioGainPct: number;
   cashReserve: number;
   premium: boolean;
-  deepExtras: string[];
   n100QuotaUsed: number;
   next10ReportCache: Record<string, Next10ReportCacheEntry>;
   huntAiCache: Record<string, HuntAiCacheEntry>;
   activeAgentId: string;
+  language: "en" | "th";
   setStrategy: (strategy: StrategyKey) => void;
   setSelectedMode: (mode: DetailMode | null) => void;
   setSelectedSymbol: (symbol: string) => void;
@@ -56,14 +56,14 @@ type WolfState = {
   addCashReserve: (usdAmount: number) => void;
   spendCashReserve: (usdAmount: number) => void;
   unlockPremium: () => void;
-  addDeepExtra: (symbol: string) => void;
-  removeDeepExtra: (symbol: string) => void;
   useN100Quota: () => void;
   setNext10ReportCache: (key: string, entry: Next10ReportCacheEntry) => void;
   getNext10ReportCache: (key: string) => Next10ReportCacheEntry | undefined;
   setHuntAiCache: <T>(key: string, entry: HuntAiCacheEntry<T>) => void;
   getHuntAiCache: <T>(key: string) => HuntAiCacheEntry<T> | undefined;
   setActiveAgent: (agentId: string) => void;
+  setLanguage: (language: "en" | "th") => void;
+  clearAccountState: () => void;
 };
 
 function loadReserve(): number {
@@ -78,21 +78,6 @@ function persistReserve(value: number) {
 
 function loadPremium(): boolean {
   return typeof window !== "undefined" && window.localStorage.getItem(PREMIUM_STORAGE_KEY) === "1";
-}
-
-function loadDeepExtras(): string[] {
-  const raw = typeof window !== "undefined" ? window.localStorage.getItem(DEEP_EXTRAS_STORAGE_KEY) : null;
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((value): value is string => typeof value === "string") : [];
-  } catch {
-    return [];
-  }
-}
-
-function persistDeepExtras(symbols: string[]) {
-  if (typeof window !== "undefined") window.localStorage.setItem(DEEP_EXTRAS_STORAGE_KEY, JSON.stringify(symbols));
 }
 
 function loadN100Quota(): number {
@@ -144,6 +129,11 @@ function persistActiveAgent(agentId: string) {
   if (typeof window !== "undefined") window.localStorage.setItem(ACTIVE_AGENT_STORAGE_KEY, agentId);
 }
 
+function loadLanguage(): "en" | "th" {
+  const raw = typeof window !== "undefined" ? window.localStorage.getItem(LANGUAGE_STORAGE_KEY) : null;
+  return raw === "th" ? "th" : "en";
+}
+
 export const useWolfStore = create<WolfState>((set, get) => ({
   selectedStrategy: "stable_dca",
   selectedMode: null,
@@ -157,11 +147,11 @@ export const useWolfStore = create<WolfState>((set, get) => ({
   portfolioGainPct: 0,
   cashReserve: loadReserve(),
   premium: loadPremium(),
-  deepExtras: loadDeepExtras(),
   n100QuotaUsed: loadN100Quota(),
   next10ReportCache: loadNext10ReportCache(),
   huntAiCache: loadHuntAiCache(),
   activeAgentId: loadActiveAgent(),
+  language: loadLanguage(),
   setStrategy: (selectedStrategy) => set({ selectedStrategy }),
   setSelectedMode: (selectedMode) => set({ selectedMode }),
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
@@ -187,16 +177,6 @@ export const useWolfStore = create<WolfState>((set, get) => ({
     if (typeof window !== "undefined") window.localStorage.setItem(PREMIUM_STORAGE_KEY, "1");
     set({ premium: true });
   },
-  addDeepExtra: (symbol) => {
-    const next = Array.from(new Set([...get().deepExtras, symbol]));
-    persistDeepExtras(next);
-    set({ deepExtras: next });
-  },
-  removeDeepExtra: (symbol) => {
-    const next = get().deepExtras.filter((value) => value !== symbol);
-    persistDeepExtras(next);
-    set({ deepExtras: next });
-  },
   useN100Quota: () => {
     const next = Math.min(N100_QUOTA_LIMIT, get().n100QuotaUsed + 1);
     persistN100Quota(next);
@@ -217,5 +197,22 @@ export const useWolfStore = create<WolfState>((set, get) => ({
   setActiveAgent: (activeAgentId) => {
     persistActiveAgent(activeAgentId);
     set({ activeAgentId });
-  }
+  },
+  setLanguage: (language) => {
+    if (typeof window !== "undefined") window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
+    set({ language });
+  },
+  clearAccountState: () => {
+    persistNext10ReportCache({});
+    persistHuntAiCache({});
+    set({
+      portfolioValue: 0,
+      portfolioGainPct: 0,
+      watchlist: [],
+      next10ReportCache: {},
+      huntAiCache: {},
+      detailOpen: false,
+      deepOpen: false,
+    });
+  },
 }));

@@ -6,8 +6,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from internal.ai.agents import AGENTS, compose_instructions
+from internal.ai.agents import AGENTS, ANALYST_PERSPECTIVES, DAILY_BRIEF_PERSPECTIVES, compose_instructions
 from internal.ai.context import build_analysis_context
+from internal.ai.openai_client import _today_performance_instructions
 
 
 class AgentPersonaTests(unittest.TestCase):
@@ -16,6 +17,76 @@ class AgentPersonaTests(unittest.TestCase):
 
         self.assertTrue(all(contracts))
         self.assertEqual(len(contracts), len(set(contracts)))
+
+    def test_every_agent_has_a_distinct_analyst_perspective(self) -> None:
+        ids = {agent["id"] for agent in AGENTS}
+        north_stars = [ANALYST_PERSPECTIVES[agent_id]["northStar"] for agent_id in ids]
+        outlook_titles = [ANALYST_PERSPECTIVES[agent_id]["outlookTitle"] for agent_id in ids]
+        section_sets = [ANALYST_PERSPECTIVES[agent_id]["sections"] for agent_id in ids]
+        sizing_methods = [ANALYST_PERSPECTIVES[agent_id]["sizing"] for agent_id in ids]
+
+        self.assertEqual(set(ANALYST_PERSPECTIVES), ids)
+        self.assertEqual(len(north_stars), len(set(north_stars)))
+        self.assertEqual(len(outlook_titles), len(set(outlook_titles)))
+        self.assertEqual(len(section_sets), len(set(section_sets)))
+        self.assertEqual(len(sizing_methods), len(set(sizing_methods)))
+
+    def test_analyst_prompts_change_horizon_and_method(self) -> None:
+        vera = compose_instructions("Return longTermView.", "vera", analyst_task=True)
+        rex = compose_instructions("Return longTermView.", "rex", analyst_task=True)
+        nadia = compose_instructions("Return longTermView.", "nadia", analyst_task=True)
+        sam = compose_instructions("Return longTermView.", "sam", analyst_task=True)
+        kai = compose_instructions("Return longTermView.", "kai", analyst_task=True)
+        ben = compose_instructions("Return longTermView.", "ben", analyst_task=True)
+        prime = compose_instructions("Return longTermView.", "alphawolf", analyst_task=True)
+
+        self.assertIn("risk-adjusted owner value", vera)
+        self.assertIn("liquid catalysts", rex)
+        self.assertIn("Technical & factor compatibility", nadia)
+        self.assertIn("stochastic %K/%D", nadia)
+        self.assertIn("growing income engine", sam)
+        self.assertIn("durable adoption, narrative heat", kai)
+        self.assertIn("fast-buy trigger", kai)
+        self.assertIn("Swing setup & exit map", rex)
+        self.assertIn("reinvest retained earnings at high returns", ben)
+        self.assertIn("required outlook horizon: 5 years", ben)
+        self.assertIn("operating cash flow minus capital spending", ben)
+        self.assertIn("Total assets are not a spendable budget", ben)
+        self.assertIn("internally generated cash versus debt/equity funding", ben)
+        self.assertIn("ALLOCATION LADDER", ben)
+        self.assertIn("not automatic AVOID", ben)
+        self.assertIn("do not average them", prime)
+
+    def test_daily_brief_horizons_are_agent_specific(self) -> None:
+        self.assertEqual(set(DAILY_BRIEF_PERSPECTIVES), {agent["id"] for agent in AGENTS})
+        task = _today_performance_instructions()
+        ben = compose_instructions(task, "ben", daily_brief_task=True)
+        rex = compose_instructions(task, "rex", daily_brief_task=True)
+
+        self.assertIn("Plan horizon: 5 years", ben)
+        self.assertIn("one-day move, RSI, MACD, SMA20/50/200 miss", ben)
+        self.assertIn("must not call\nthe plan BEHIND merely because price missed a moving average", ben)
+        self.assertIn("The normal action is HOLD or NO_ACTION", ben)
+        self.assertIn("ADD_SMALL or ADD is rare", ben)
+        self.assertIn("Give SELL and REDUCE serious consideration", ben)
+        self.assertIn("Plan horizon: 3 days to 8 weeks", rex)
+        self.assertIn("Failed levels can put the plan BEHIND quickly", rex)
+        titles = [value["analysisTitle"] for value in DAILY_BRIEF_PERSPECTIVES.values()]
+        sections = [value["analysisSections"] for value in DAILY_BRIEF_PERSPECTIVES.values()]
+        self.assertEqual(len(titles), len(set(titles)))
+        self.assertEqual(len(sections), len(set(sections)))
+        self.assertIn("Ben's owner update", ben)
+        self.assertIn("Rex's live trade map", rex)
+
+    def test_every_ai_task_receives_exclusive_agent_method(self) -> None:
+        vera = compose_instructions("Any AI task.", "vera")
+        rex = compose_instructions("Any AI task.", "rex")
+        ben = compose_instructions("Any AI task.", "ben")
+
+        self.assertIn("AGENT-EXCLUSIVE METHOD", vera)
+        self.assertIn("risk-adjusted owner value", vera)
+        self.assertIn("liquid catalysts", rex)
+        self.assertIn("reinvest retained earnings at high returns", ben)
 
     def test_ben_does_not_use_trader_pullback_logic(self) -> None:
         prompt = compose_instructions("Generic task example: wait for a pullback.", "ben")

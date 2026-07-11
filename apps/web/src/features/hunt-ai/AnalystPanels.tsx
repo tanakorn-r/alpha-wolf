@@ -1,5 +1,4 @@
 import type { StockAnalysisResponse, StockDetailResponse } from "../../lib/api";
-import { formatCurrency } from "../../lib/format";
 import { formatCompact } from "./lib";
 import { panel } from "./ui";
 
@@ -47,11 +46,11 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
   return (
     <div className="grid grid-cols-2 gap-[11px] max-[900px]:grid-cols-1">
 
-      {/* Price Action */}
-      <div className={`${panel} p-3.5`}>
+      {/* Price Context — intentionally last; Analyst is structure-first. */}
+      <div className={`${panel} order-6 p-3.5`}>
         <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 12l3-4 3 2 3-5 3 3" stroke="#3ecf8e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#3ecf8e]">Price Action</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#3ecf8e]">Momentum · Secondary</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
             <span className="text-[9.5px] font-bold" style={{ color: rsiColor }}>{rsiBadge}</span>
           </div>
@@ -80,10 +79,10 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
       </div>
 
       {/* Latest News */}
-      <div className={`${panel} p-3.5`}>
+      <div className={`${panel} order-5 p-3.5`}>
         <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" stroke="#74a4ff" strokeWidth="1.4"/><path d="M4 6h8M4 9h5" stroke="#74a4ff" strokeWidth="1.3" strokeLinecap="round"/></svg>
-          <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#74a4ff]">Latest News</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#74a4ff]">Sector &amp; Recent News</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
             <span className="text-[9.5px] font-bold" style={{ color: sentColor }}>{sentLabel}</span>
           </div>
@@ -104,7 +103,7 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
       </div>
 
       {/* Revenue & Income */}
-      <div className={`${panel} p-3.5`}>
+      <div className={`${panel} order-1 p-3.5`}>
         <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="1" y="8" width="3.5" height="7" rx="0.8" fill="#3ecf8e" opacity="0.7"/><rect x="6.3" y="5" width="3.5" height="10" rx="0.8" fill="#3ecf8e"/><rect x="11.5" y="2" width="3.5" height="13" rx="0.8" fill="#3ecf8e" opacity="0.5"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#3ecf8e]">Revenue &amp; Income</span>
@@ -129,7 +128,7 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
       </div>
 
       {/* Cost Structure */}
-      <div className={`${panel} p-3.5`}>
+      <div className={`${panel} order-2 p-3.5`}>
         <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 8h12M8 2v12" stroke="#f5c451" strokeWidth="1.5" strokeLinecap="round"/><circle cx="8" cy="8" r="5.5" stroke="#f5c451" strokeWidth="1.2" opacity="0.4"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#f5c451]">Cost Structure</span>
@@ -153,33 +152,33 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
         </div>
       </div>
 
-      {/* Company Structure */}
-      <div className={`${panel} p-3.5`}>
+      {/* Company Scale & Sector */}
+      <div className={`${panel} order-3 p-3.5`}>
         <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5.5" y="1" width="5" height="3.5" rx="1" stroke="#c77dff" strokeWidth="1.3"/><rect x="1" y="10" width="5" height="3.5" rx="1" stroke="#c77dff" strokeWidth="1.3"/><rect x="10" y="10" width="5" height="3.5" rx="1" stroke="#c77dff" strokeWidth="1.3"/><path d="M8 4.5v2.5M8 7H4v3M8 7h4v3" stroke="#c77dff" strokeWidth="1.2" strokeLinecap="round"/></svg>
-          <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#c77dff]">Company Structure</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#c77dff]">Company Scale &amp; Sector</span>
           <div className="ml-auto rounded-[5px] border border-[#252529] bg-white/[0.04] px-[7px] py-[2px]">
-            <span className="text-[9.5px] font-bold" style={{ color: pe != null ? (pe < 15 ? "#3ecf8e" : pe < 30 ? "#f5c451" : "#f2575c") : "#8c8c95" }}>
-              {pe != null ? (pe < 15 ? "VALUE" : pe < 30 ? "FAIR" : "PRICEY") : "REVIEW"}
+            <span className="text-[9.5px] font-bold text-[#c77dff]">
+              {biz?.industry || stock.sector || "REVIEW"}
             </span>
           </div>
         </div>
         <div className="mb-2.5">
-          <div className="mb-[3px] text-[10px] text-[#5a5a62]">P/E Ratio — price vs earnings</div>
-          <div className="font-mono text-[24px] font-bold leading-none" style={{ color: peColor }}>
-            {pe != null ? `${pe.toFixed(1)}x` : "—"}
+          <div className="mb-[3px] text-[10px] text-[#5a5a62]">Company scale — market capitalization</div>
+          <div className="font-mono text-[24px] font-bold leading-none text-[#c77dff]">
+            {biz?.marketCap != null ? formatCompact(biz.marketCap, currency) : "—"}
           </div>
-          <div className="mt-[4px] text-[11px] text-[#8c8c95]">{pe != null ? (pe < 20 ? "Reasonably valued" : pe < 35 ? "Moderate premium" : "High growth expectations priced in") : "Valuation data unavailable"}</div>
+          <div className="mt-[4px] line-clamp-3 text-[11px] leading-[1.5] text-[#8c8c95]">{biz?.companySummary || `${stock.name} operates in ${biz?.industry || stock.sector || "its reported industry"}.`}</div>
         </div>
         <div className="flex flex-col gap-1 border-t border-[#1d1d22] pt-2">
-          <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Market Cap</span><span className="font-medium text-[#ececee]">{biz?.marketCap != null ? formatCompact(biz.marketCap, currency) : "—"}</span></div>
-          <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Sector</span><span className="font-medium text-[#ececee] truncate max-w-[120px]">{stock.sector || biz?.sector || "—"}</span></div>
-          <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Analyst Target</span><span className="font-medium text-[#ececee]">{biz?.targetMeanPrice != null ? formatCurrency(biz.targetMeanPrice, currency) : "—"}</span></div>
+          <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Sector</span><span className="max-w-[180px] truncate font-medium text-[#ececee]">{stock.sector || biz?.sector || "—"}</span></div>
+          <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Enterprise Value</span><span className="font-medium text-[#ececee]">{biz?.enterpriseValue != null ? formatCompact(biz.enterpriseValue, currency) : "—"}</span></div>
+          <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">P/E · secondary</span><span className="font-medium" style={{ color: peColor }}>{pe != null ? `${pe.toFixed(1)}x` : "—"}</span></div>
         </div>
       </div>
 
       {/* Balance Sheet & Risk */}
-      <div className={`${panel} p-3.5`}>
+      <div className={`${panel} order-4 p-3.5`}>
         <div className="mb-2.5 flex items-center gap-[7px]">
           <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1.8l5.5 2.2v3.8c0 3.1-2.1 5.4-5.5 6.5-3.4-1.1-5.5-3.4-5.5-6.5V4L8 1.8z" stroke="#74a4ff" strokeWidth="1.4" strokeLinejoin="round"/><path d="M5.4 8.1l1.7 1.7 3.5-3.7" stroke="#74a4ff" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
           <span className="text-[10px] font-bold uppercase tracking-[0.5px] text-[#74a4ff]">Balance Sheet &amp; Risk</span>
@@ -195,6 +194,8 @@ export function AnalystPanels({ detail, analysis }: { detail: StockDetailRespons
           <div className="mt-[4px] text-[11px] text-[#8c8c95]">{d2e != null ? (d2e > 200 ? "Leverage is heavy" : d2e > 100 ? "Debt load needs watching" : "Balance sheet is not debt-heavy") : "Debt data unavailable"}</div>
         </div>
         <div className="flex flex-col gap-1 border-t border-[#1d1d22] pt-2">
+          <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Cash</span><span className="font-medium text-[#ececee]">{biz?.totalCash != null ? formatCompact(biz.totalCash, currency) : "—"}</span></div>
+          <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Total Debt</span><span className="font-medium" style={{ color: d2eColor }}>{biz?.totalDebt != null ? formatCompact(biz.totalDebt, currency) : "—"}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">ROE</span><span className="font-medium text-[#ececee]">{formatPct(roe)}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">ROA</span><span className="font-medium text-[#ececee]">{formatPct(roa)}</span></div>
           <div className="flex justify-between text-[11.5px]"><span className="text-[#666670]">Payout Ratio</span><span className="font-medium text-[#ececee]">{formatPct(payoutRatio)}</span></div>

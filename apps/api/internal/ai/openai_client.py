@@ -3,21 +3,25 @@ from __future__ import annotations
 import json
 import os
 from datetime import datetime, timezone
-import ssl
 from typing import Any
-from urllib import error as urllib_error
-from urllib import request as urllib_request
 
-import certifi
+import requests
 from pydantic import ValidationError
+from requests.adapters import HTTPAdapter
 
 from internal.ai.agents import agent_badge, compose_instructions
 from internal.store.utils import parse_json_fragment
-from models import BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
+from models import BacktradeDecision, BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
 
 OPENAI_TIMEOUT_SECONDS = 45
 DEFAULT_OPENAI_MODEL = "gpt-5.5"
 DEFAULT_FAST_MODEL = "gpt-5.4-mini"
+
+# A fresh urllib call opened (and TLS-handshook) a brand new connection to api.openai.com every
+# time. Backtrade alone can fire 60+ sequential calls in one job, so a pooled, keep-alive session
+# reused across every AI feature in the app removes that per-call handshake entirely.
+_SESSION = requests.Session()
+_SESSION.mount("https://", HTTPAdapter(pool_connections=20, pool_maxsize=20))
 EXPECTED_SCORE_LABELS = ["Value", "Financial health", "Dividend safety", "Growth", "Timing"]
 
 
@@ -49,12 +53,14 @@ def analyze_with_openai(context: dict[str, Any], agent_id: str | None = None) ->
         context=context,
         schema_model=StockAnalysis,
         schema_name="stock_analysis",
-        instructions=compose_instructions(_analysis_instructions_for_strategy(strategy, is_holding=is_holding), agent_id),
-        max_output_tokens=1800,
+        instructions=compose_instructions(_analysis_instructions_for_strategy(strategy, is_holding=is_holding), agent_id, analyst_task=True),
+        max_output_tokens=2400,
     )
     if [score.label for score in result.scores] != EXPECTED_SCORE_LABELS:
         raise OpenAIAnalysisError("OpenAI returned an invalid scorecard order")
-    result = _calibrate_stock_analysis_for_agent(context, result, agent_id)
+    # Keep this number as the Agent's answer. It used to be blended 82% toward
+    # a deterministic scorecard after the model responded, which made the UI's
+    # "AI score" misleading and pulled thin-data results toward the middle.
     result = _calibrate_stock_signal(context, result)
 
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
@@ -69,7 +75,6 @@ def analyze_quant_with_openai(context: dict[str, Any], agent_id: str | None = No
         instructions=compose_instructions(_quant_instructions(), agent_id),
         max_output_tokens=1400,
     )
-    result = _calibrate_quant_result(context, result)
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
@@ -86,23 +91,6 @@ def analyze_valuation_with_openai(context: dict[str, Any], agent_id: str | None 
         reasoning_effort=_fast_reasoning_effort(),
     )
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
-
-
-def _calibrate_quant_result(context: dict[str, Any], result: QuantPerspective) -> QuantPerspective:
-    scorecard = context.get("quantScorecard") or {}
-    anchor = scorecard.get("score")
-    if not isinstance(anchor, int | float):
-        return result
-    anchor_score = max(1, min(100, int(round(anchor))))
-    if abs(result.buyScore - anchor_score) <= 8:
-        return result
-
-    adjusted = result.model_copy(update={"buyScore": anchor_score})
-    if anchor_score >= 75 and adjusted.tone == "bad":
-        adjusted = adjusted.model_copy(update={"tone": "good" if adjusted.investability == "FAVORABLE" else "warn"})
-    if anchor_score <= 40 and adjusted.tone == "good":
-        adjusted = adjusted.model_copy(update={"tone": "bad" if adjusted.investability == "AVOID" else "warn"})
-    return adjusted
 
 
 def _calibrate_stock_analysis_for_agent(context: dict[str, Any], result: StockAnalysis, agent_id: str | None) -> StockAnalysis:
@@ -233,46 +221,27 @@ def _apply_market_evidence_adjustments(score: float, result: StockAnalysis) -> f
 
 
 def _calibrate_stock_signal(context: dict[str, Any], result: StockAnalysis) -> StockAnalysis:
+    if result.confidence is None:
+        return result.model_copy(update={"signal": "INSUFFICIENT DATA", "tone": "bad"})
+    tier = result.longTermView.allocationPlan.tier
     if bool((context.get("positionContext") or {}).get("isHolding")):
-        signal, tone = _holding_signal_from_score(result.confidence)
-        target_move = _num(result.targetPrice.impliedUpsidePct)
-        entry_gap = _num(result.entryPrice.distanceFromCurrentPct)
-        if target_move is not None and target_move < -3 and result.confidence < 60:
-            signal, tone = ("SELL / REDUCE", "bad") if result.confidence < 48 else ("TRIM / PROTECT", "warn")
-        elif entry_gap is not None and entry_gap > 6 and result.confidence < 75 and signal in {"BUY MORE", "ADD"}:
-            signal, tone = "HOLD, WAIT TO ADD", "warn"
+        signal, tone = {
+            "FULL": ("BUY MORE · FULL PLANNED SIZE", "good"),
+            "BUILD": ("HOLD / BUILD POSITION", "good"),
+            "STARTER": ("HOLD / SMALL ADD", "warn"),
+            "OBSERVE": ("HOLD / NO NEW CASH", "warn"),
+            "AVOID": ("TRIM / REVIEW EXIT", "bad"),
+        }[tier]
         return result.model_copy(update={"signal": signal, "tone": tone})
 
-    signal, tone = _signal_from_score(result.confidence)
-    target_move = _num(result.targetPrice.impliedUpsidePct)
-    if target_move is not None and target_move < -3 and result.confidence < 65:
-        signal, tone = ("PASS", "bad") if result.confidence < 50 else ("WATCH", "warn")
+    signal, tone = {
+        "FULL": ("FULL PLANNED POSITION", "good"),
+        "BUILD": ("BUILD POSITION", "good"),
+        "STARTER": ("START SMALL", "warn"),
+        "OBSERVE": ("OBSERVE / WAIT FOR TRIGGER", "warn"),
+        "AVOID": ("AVOID", "bad"),
+    }[tier]
     return result.model_copy(update={"signal": signal, "tone": tone})
-
-
-def _signal_from_score(score: int) -> tuple[str, str]:
-    if score >= 82:
-        return "STRONG BUY", "good"
-    if score >= 68:
-        return "BUY", "good"
-    if score >= 55:
-        return "ACCUMULATE", "warn"
-    if score >= 40:
-        return "WATCH", "warn"
-    return "PASS", "bad"
-
-
-def _holding_signal_from_score(score: int) -> tuple[str, str]:
-    if score >= 82:
-        return "BUY MORE", "good"
-    if score >= 68:
-        return "HOLD / ADD ON DIPS", "good"
-    if score >= 55:
-        return "HOLD, WAIT TO ADD", "warn"
-    if score >= 40:
-        return "HOLD, MONITOR RISK", "warn"
-    return "SELL / REDUCE", "bad"
-
 
 def _weighted(*items: tuple[float | None, float]) -> float:
     total = 0.0
@@ -303,12 +272,38 @@ def analyze_today_with_openai(context: dict[str, Any], agent_id: str | None = No
         context=context,
         schema_model=TodayPerformance,
         schema_name="today_performance",
-        instructions=compose_instructions(_today_performance_instructions(), agent_id),
-        max_output_tokens=800,
+        instructions=compose_instructions(_today_performance_instructions(), agent_id, daily_brief_task=True),
+        max_output_tokens=2800,
         model=model,
         reasoning_effort=_fast_reasoning_effort(),
     )
+    result = _normalize_today_scenarios(result)
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def _normalize_today_scenarios(result: TodayPerformance) -> TodayPerformance:
+    expected = ["DOWN", "NEUTRAL", "UP"]
+    by_direction = {scenario.direction: scenario for scenario in result.tomorrow.scenarios}
+    if set(by_direction) != set(expected):
+        raise OpenAIAnalysisError("OpenAI did not return all three tomorrow scenarios")
+
+    scenarios = [by_direction[direction] for direction in expected]
+    values = [max(0, int(scenario.probabilityPct)) for scenario in scenarios]
+    total = sum(values)
+    if total <= 0:
+        raise OpenAIAnalysisError("OpenAI returned no usable tomorrow probabilities")
+    elif total != 100:
+        scaled = [value * 100 / total for value in values]
+        values = [int(value) for value in scaled]
+        remainder = 100 - sum(values)
+        order = sorted(range(3), key=lambda index: scaled[index] - values[index], reverse=True)
+        for index in order[:remainder]:
+            values[index] += 1
+
+    normalized = [scenario.model_copy(update={"probabilityPct": values[index]}) for index, scenario in enumerate(scenarios)]
+    base_case = max(normalized, key=lambda scenario: scenario.probabilityPct).direction
+    tomorrow = result.tomorrow.model_copy(update={"scenarios": normalized, "baseCase": base_case})
+    return result.model_copy(update={"tomorrow": tomorrow})
 
 
 def analyze_buy_timing_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
@@ -318,11 +313,25 @@ def analyze_buy_timing_with_openai(context: dict[str, Any], agent_id: str | None
         schema_model=BuyTimingNarrative,
         schema_name="buy_timing_narrative",
         instructions=compose_instructions(_buy_timing_instructions(), agent_id),
-        max_output_tokens=600,
+        max_output_tokens=1800,
         model=model,
         reasoning_effort=_fast_reasoning_effort(),
     )
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def decide_backtrade_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
+    model = _selected_model(fast=True)
+    result = _run_openai_structured_request(
+        context=context,
+        schema_model=BacktradeDecision,
+        schema_name="backtrade_decision",
+        instructions=compose_instructions(_backtrade_instructions(), agent_id),
+        max_output_tokens=420,
+        model=model,
+        reasoning_effort=_fast_reasoning_effort(),
+    )
+    return {**result.model_dump(), "model": model}
 
 
 def recommend_strategy_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
@@ -408,27 +417,26 @@ def _run_openai_structured_request(
         payload["tools"] = tools
     if reasoning_effort:
         payload["reasoning"] = {"effort": reasoning_effort}
-    request = urllib_request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
 
     try:
-        ssl_context = ssl.create_default_context(cafile=certifi.where())
-        with urllib_request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS, context=ssl_context) as response:
-            raw = json.loads(response.read().decode("utf-8"))
-    except urllib_error.HTTPError as exc:
-        raise OpenAIAnalysisError(f"OpenAI returned HTTP {exc.code}") from exc
-    except urllib_error.URLError as exc:
-        reason = str(getattr(exc, "reason", exc))
-        raise OpenAIAnalysisError(f"OpenAI analysis request failed: {reason}") from exc
-    except TimeoutError as exc:
+        response = _SESSION.post(
+            "https://api.openai.com/v1/responses",
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=OPENAI_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        raw = response.json()
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "unknown"
+        raise OpenAIAnalysisError(f"OpenAI returned HTTP {status}") from exc
+    except requests.Timeout as exc:
         raise OpenAIAnalysisError("OpenAI analysis request timed out") from exc
+    except requests.RequestException as exc:
+        raise OpenAIAnalysisError(f"OpenAI analysis request failed: {exc}") from exc
     except ValueError as exc:
         raise OpenAIAnalysisError("OpenAI returned an unreadable response") from exc
 
@@ -487,6 +495,98 @@ If the supplied dividend history is thin or the next ex-dividend date is inferre
 Use the calculated buyWindow, trimWindow, postExDipPattern, current cycle position, entry band,
 priceContext (5-year average price, 5-year low/high, and where today's price sits inside that
 range), and technical context to decide BUY, WAIT, TRIM, or AVOID.
+Create monthlyPlan as exactly one decision for each Jan-Dec month, in calendar order. Treat the
+calculated monthlyMap as evidence, not a command. Choose BUY, ADD_SMALL, HOLD, TRIM, or SELL
+through YOUR agent method and horizon. Build a coherent path across adjacent months: an investor
+may buy before a historically strong period, add cautiously as price rises, skip an overheated
+month, and buy again after a reset. A short-term trader may buy early strength and trim or sell
+later momentum. A quality owner may keep buying a durable business through seasonal noise unless
+valuation is extreme. Explain each month in one short sentence using only supplied evidence.
+Historical monthly returns are backward-looking averages, never guaranteed future profit. Do not
+say or imply the user will surely be richer in a later month. Do not mechanically invert returns
+(a positive month is not automatically TRIM and a negative month is not automatically BUY).
+Every month must include explicit sizing:
+- buyBudgetPct is 0-100% of the AVAILABLE DCA CASH POOL deployed that month. The pool receives one
+  normal monthly contribution each month and carries forward unused budget and prior trim proceeds.
+  It is not a percentage of the whole portfolio. BUY/ADD_SMALL require a positive value; use
+  partial installments such as 25/50/75 when conviction is incomplete. All other actions use 0.
+- trimPositionPct is 0-100% of the CURRENT POSITION reduced that month. TRIM/SELL require a
+  positive value; all other actions use 0. SELL normally means 100, while TRIM must state a
+  genuinely partial amount such as 10/25/50.
+- HOLD means keep existing shares, deploy no new money, and preserve the available DCA cash for a
+  later month. There is no separate SKIP action. If normal DCA should continue, use BUY or
+  ADD_SMALL with the appropriate buyBudgetPct instead of HOLD.
+- This is a DCA timing plan, but there is no universal purchase quota. Fund only the months that
+  pass YOUR Agent method. Use 25% sizing when conviction is incomplete but your core evidence gate
+  still passes; use HOLD when that gate fails. Do not buy merely to deploy cash or fill the calendar.
+- A historical +1% to +3% average month is mild strength, not proof of overvaluation. When the
+  Agent's core thesis is intact, treat such months as reasonable 25-50% DCA opportunities unless
+  current valuation, momentum exhaustion, or a named risk rule specifically blocks buying.
+- Do not become so defensive that obvious supplied opportunity is ignored. When priceContext is in
+  the lower part of its five-year range, price is at/below entryBand with target upside remaining,
+  and businessStructure is not AT_RISK, ownership/value/income/balanced Agents should normally use
+  ADD_SMALL or BUY rather than HOLD. Missing perfect confirmation should reduce the first installment
+  to 10-25%, not erase a genuine discount. HOLD in that setup requires a named hard blocker.
+- "Cheap" is not automatically free money. Rex and Kai still require their own signal, acceleration,
+  volume, or trend confirmation; Nadia still requires measurable edge. But each must explicitly
+  consider the discount as favorable risk/reward and state the exact failed trigger if choosing HOLD.
+- Do not concentrate the whole plan into only the historically negative months. Ordinary months
+  may still qualify, but every BUY needs a concrete Agent-specific reason and every HOLD must name
+  the failed or missing evidence gate.
+- Never TRIM merely because a calendar month is an ex-dividend month or historically negative.
+  A trim requires YOUR thesis/risk/valuation/technical exit rule. In particular, Ben and Sam must
+  not trim routine DCA holdings for seasonal weakness; a lower historical-return month can be an
+  accumulation month when business or income quality remains intact.
+- Risk reduction is a real part of the plan, not an afterthought. When YOUR supplied invalidation
+  evidence is present, use TRIM with a meaningful partial size instead of defaulting to HOLD. Use
+  SELL only when the controlling thesis is broken strongly enough to exit the full position. Never
+  invent evidence just to manufacture a trim, and never use the same generic trim trigger for every
+  Agent.
+- Keep the selected Agent's character all the way through sizing. Ben requires an ownable business
+  structure; a cheap price cannot repair weak economics. Sam requires credible income/funding
+  durability and must avoid yield traps. Vera requires reported economics plus a valuation margin
+  of safety. Rex and Kai require their respective momentum/acceleration confirmation and have no DCA
+  participation quota. Nadia requires measurable edge and risk discipline. AlphaWolf must resolve
+  the supplied corners and may HOLD when a named bottleneck blocks capital. When the Agent's required
+  evidence is MIXED, AT_RISK, UNPROVEN, or simply absent, HOLD/AVOID is valid and often preferable.
+- Keep risk reduction in character too. Ben trims when ownership economics deteriorate or price is
+  clearly excessive relative to supplied value—not on ordinary volatility. Sam trims on payout or
+  funding danger, a yield trap, or income-thesis failure. Vera trims when valuation loses its margin
+  of safety or reported economics fail her hurdle. Rex trims into momentum exhaustion and sells on
+  his stop/trend break. Kai trims when acceleration or crowd/volume confirmation fades and exits a
+  failed breakout quickly. Nadia trims when measured edge weakens or a risk limit is breached.
+  AlphaWolf trims only after resolving the supplied corners and identifying the controlling risk.
+  Size the trim according to severity: ordinarily 10-25% for early deterioration, 25-50% for a
+  strong warning, and SELL/100% only for genuine thesis invalidation.
+- Make the twelve months a coherent position path, including the month immediately after every BUY.
+  Do not treat each calendar cell as an isolated recommendation. A long-horizon Agent should not buy
+  in one month and trim the next because of ordinary seasonality. A tactical or rule-based Agent must
+  not keep holding merely because the prior month was a BUY when its exit trigger has already fired.
+- Holding speed is character-specific. Ben and Sam normally hold through month-to-month noise and
+  may reverse a fresh purchase quickly only on a genuine business, funding, or income-thesis break.
+  Vera may trim when price rapidly removes the valuation margin of safety, but should not manufacture
+  one-month churn from mild strength. AlphaWolf needs a named controlling risk before reversing.
+  Rex and Kai are allowed—and expected—to TRIM or SELL even one month after entry when momentum,
+  volume, acceleration, breakout structure, or stop discipline fails. Nadia must reduce exposure as
+  soon as the supplied measured edge/risk rule fails; she must not rationalize a rules breach into HOLD.
+- When adjacent actions reverse direction, the later month's reason must explicitly name what changed
+  from the entry thesis. Without such evidence, keep the position and change only new-cash deployment.
+- Apply the same character to opportunity sizing. Ben buys a starter when the business is ownable and
+  the supplied price is unusually cheap. Sam buys when that discount improves a durable funded yield.
+  Vera leans into a verified valuation margin of safety. AlphaWolf buys when the discount clears every
+  named bottleneck. Rex, Kai, and Nadia may remain selective, but cannot reject the setup with vague
+  language such as "not perfect"; they must name the missing character-specific trigger.
+Make the whole actionable plan unmistakably YOURS, not a generic timing template:
+- todayInstruction: your direct instruction for what to do at today's price.
+- nextMove: the next portfolio action you personally expect to take (not automatically "wait").
+- nextMoveTiming: when or under what supplied condition you would take it.
+- buyCondition: the specific evidence that would earn a buy/add through your method.
+- reduceCondition: the specific evidence that would make you trim, sell, or abandon the idea.
+A quality owner should focus these fields on business quality, normalized value, and long holding
+power; a momentum trader on acceleration, volume, stops, and fast exits; a quant on measured edge
+and variance; an income investor on payout durability and yield. Do not force every persona into
+the same post-ex wait/entry-band playbook. If the supplied data cannot support your specialty,
+say what evidence is missing instead of borrowing another agent's method.
 Judge cheap-vs-expensive against the 5-year priceContext, not just the short-term entry band: a
 stock whose price sits in the top of its 5-year range (high currentPct) is NOT cheap even if a
 3-month pullback occurred — prefer WAIT or TRIM there. Favor BUY when price is in the lower part
@@ -497,6 +597,10 @@ when the post-ex dip (reversal) window is open and price has pulled back into th
 price is above entry or near the 5-year high, say WAIT.
 Return concise JSON only. The headline should sound like a direct trading instruction.
 The summary should explain why in 1-2 sentences with the key numbers supplied.
+perspectiveScore: YOUR OWN 1-100 rating for buying at the current price now, through your Agent
+method and horizon. This is not a generic confidence or a platform formula. Use the full range and
+do not use 50 as a missing-data default.
+perspectiveReason: one short sentence naming the supplied evidence that most drives your rating.
 recap: a plain-words recap a beginner can act on — say directly whether to buy now or wait, and
 if waiting, roughly how long (use the supplied buyWindow opensInDays/dates; if unconfirmed, say
 so). One or two short sentences, no jargon.
@@ -505,6 +609,63 @@ the persona you were given — "aligned" (exactly a setup you would take), "neut
 but not your ideal setup), or "against" (your strategy says stay out here).
 agentFitReason: one sentence, first person, explaining that fit using your persona's priorities
 and the supplied numbers only.
+"""
+
+
+def _backtrade_instructions() -> str:
+    return """
+You are making one point-in-time portfolio decision inside a historical walk-forward replay.
+Use only the supplied snapshot. Never infer or mention data after snapshot.date.
+
+This lab reuses Hunt AI's three existing desks. Read all three before deciding:
+- signalEvidence: the point-in-time Signal desk inputs.
+- buyTimingEvidence: the point-in-time Buy Timing price-location inputs.
+- analystEvidence: the point-in-time Analyst business/funding inputs.
+agentDecisionOrder says how this Agent resolves disagreement. It is priority, not three equal votes.
+Do not invent a fourth strategy and do not average the desks mechanically.
+
+Keep the selected character. Ben's Analyst read decides whether the business is ownable; Buy Timing
+may change installment size, while a short moving average may only be mentioned as a secondary
+execution risk and must never be Ben's main reason. Sam leads with income/funding durability. Vera
+leads with reported economics and valuation evidence. Rex and Kai lead with Signal. Nadia leads with
+measurable signal/factor evidence. AlphaWolf performs a genuine full-corner resolution. Never call
+a moat, management, dividend, valuation, or reinvestment runway proven when the supplied packet does
+not prove it.
+
+portfolio.nextMonthlyContribution arrives before the next session opens, and
+portfolio.cashAvailableAtNextOpen is the cash that BUY sizing will use. That figure already includes
+any real per-share cash dividends the position has paid and banked as cash since the last decision —
+this is not a hypothetical: Sam and any income-led Agent should read
+buyTimingEvidence.trailingDividendPerShare/trailingDividendYieldPct/sessionsSinceLastExDividend as
+genuine received income, not a forecast, and factor a growing idle-cash balance from banked dividends
+into whether to deploy more now.
+deploymentPolicy is part of the selected Agent's recurring-allocation character. Apply it before
+making the final action. This is a monthly contribution lab, not a one-shot perfect-entry contest.
+
+Choose BUY, HOLD, TRIM, or SELL through your own Agent method. This is one combined decision, not
+three votes and not an average score. buyCashPct is the percentage of currently available cash to
+deploy and must be 0 unless action is BUY. trimPositionPct is the percentage of current shares to
+sell and must be 0 unless action is TRIM or SELL; SELL normally uses 100. HOLD uses both zero.
+For recurring_owner, recurring_income, valuation_installments, and balanced_installments styles:
+- When Analyst structure is INTACT and Buy Timing does not show a clear extreme, BUY at least the
+  normalInstallmentPct. A merely ordinary or mildly positive month is not a reason to skip DCA.
+- When evidence is MIXED but contains no AT_RISK condition, prefer a 10-25% starter installment over
+  indefinite HOLD when that fits the Agent. State the missing evidence and keep size small.
+- When cashAvailableAtNextOpen exceeds three monthly contributions because prior months were skipped,
+  explicitly consider 25-50% of available cash to reduce the backlog if the thesis is intact. Do not
+  let cash accumulate forever while repeatedly describing the same acceptable structure.
+- HOLD with zero purchase requires the concrete blocker described by deploymentPolicy.holdRequires.
+  Name that blocker in reason. "Not perfect," routine volatility, or lack of short-term momentum is
+  not sufficient for Ben or Sam.
+Tactical styles remain selective and must not buy merely to use the monthly budget.
+The final BUY/HOLD remains the Agent's own decision; no hidden rule rewrites it afterward. Use partial
+sizing to express uncertainty instead of demanding a perfect entry.
+The order executes at the next session's open, so do not assume today's close is available.
+This replay runs one call per month across years of history, so brevity matters: reason and
+invalidation must each be under 12 words, specific and auditable, not full sentences with filler.
+Return signalRead, timingRead, and analystRead as short fragments under 10 words each, not full
+sentences. decisionBasis must be SIGNAL, BUY_TIMING, ANALYST, or BLENDED and name the desk that
+actually controlled the final action. Return JSON only, no markdown, no extra commentary.
 """
 
 
@@ -574,13 +735,30 @@ Return strictly valid JSON matching the ValuationVerdict schema:
 - rightNow.action: BUY, WAIT, TRIM, or AVOID.
 - rightNow.entryOnlyAt: exact add-back / entry price if justified, otherwise null.
 - rightNow.pctAway: percent from current price to entryOnlyAt if both are known; negative means entry is below current price.
-- rightNow.conviction: 0-100 for the verdict quality, not upside.
-- metrics: echo only supplied/inferred numeric metrics; null when unavailable.
+- rightNow.conviction: YOUR OWN 0-100 perspective rating for acting on this setup now through
+  your Agent method and horizon, not upside and not a platform default. Cite the main driver.
+- metrics: echo only supplied/inferred numeric metrics; null when unavailable. Include trailing
+  peRatio and forwardPE whenever supplied; P/E is material valuation evidence, not a prose-only note.
 - structureBand.discountAnchor: practical cheap/add-back anchor if justified.
 - structureBand.fairAnchor: fair/book/normal anchor if justified.
 - structureBand.now: current price when supplied.
 - structureBand.zoneLabel: short label such as DISCOUNT, FAIR, CHASING, or UNKNOWN.
-- whatAiSees: 2-5 crisp evidence bullets.
+- whatAiSees: 2-5 evidence objects with tone GOOD, WATCH, or BAD, a short natural-language title,
+  and concise text, written
+  exclusively through the selected Agent's method,
+  horizon, and risk discipline—not a generic platform checklist. Select and rank different evidence
+  for different Agents even when they receive the same facts. Ben emphasizes owner earnings,
+  reinvestment runway, durable structure, and the price paid. Sam emphasizes funded income, payout
+  resilience, and yield-trap risk. Vera emphasizes reported economics and valuation gaps. Rex and
+  Kai emphasize actionable price/volume/trend behavior and fast invalidation. Nadia emphasizes
+  measured factors, edge, and risk limits. AlphaWolf explicitly resolves conflicting corners. Each
+  bullet must explain why that fact matters to THIS Agent; omit facts that do not affect their call.
+  GOOD means it supports buying/holding, WATCH means a real concern that does not yet break the
+  thesis, and BAD means it actively argues against buying or invalidates the thesis. Classify the
+  meaning of the whole observation; do not mark leverage or an invalidation condition GOOD merely
+  because cash flow partly offsets it.
+  Make title a specific Agent-style conclusion such as "Strong cash conversion", "Leverage needs
+  watching", or "Momentum thesis broken"—never use GOOD, WATCH, BAD, or generic labels as the title.
 - thePlay.text: exact instruction for this month.
 - thePlay.addBackLow/addBackHigh: add-back zone bounds when justified, otherwise null.
 
@@ -592,47 +770,79 @@ and, if waiting, roughly what to wait for, using only the supplied data. 1-2 sho
 agentFit: judge whether acting at the CURRENT price fits YOUR OWN trading style and strategy as
 the persona you were given — "aligned" (exactly a setup you would take), "neutral" (acceptable
 but not your ideal setup), or "against" (your strategy says stay out here).
-agentFitReason: one sentence, first person, in your persona's voice, explaining that fit from
-your priorities and the supplied numbers only.
+agentFitReason: YOUR standalone first-person quote for this valuation surface. Make it vivid,
+decisive, and unmistakably in character—not a generic paraphrase of recap. Say what you personally
+would do now and name the one supplied trigger that would change your mind. Use only supplied
+numbers and evidence. Keep it to 1-2 short sentences.
 """.strip()
 
 
 def _analysis_instructions() -> str:
     return """
-You are Alpha Wolf's senior equity analyst. Analyze only the supplied live research data.
+You are Alpha Wolf's adaptive Agent analyst. Analyze only the supplied live research data.
 Do not invent missing facts, future prices, analyst opinions, dates, or industry ranks.
 Clearly distinguish Yahoo/Wall Street consensus from your own evidence-based conclusion.
-Judge the stock for the selected investment strategy in the active Agent's own voice.
-The user does NOT own this stock in this mode. Answer whether to buy now, wait for a better
-entry, accumulate gradually, or pass. Do not say "keep holding" or analyze unrealized P/L.
+First build a shared, factual company-structure read. Then judge it through the active Agent's
+required outlook horizon and method. Long-term Agents should keep price technicals secondary;
+tactical Agents such as Rex, Nadia, and Kai may make technical compatibility, entry, and exit the
+main driver of THEIR Agent Outlook. Do not force every Agent into a five-year forecast.
+The user does NOT own this stock in this mode. Decide whether the company or setup fits the selected
+Agent's natural horizon. Do not impose long-term ownership on tactical Agents.
 The summary should feel like the selected Agent wrote it naturally, not like a fixed house template.
-Use the five-level action scale in signal language: STRONG BUY, BUY, ACCUMULATE, WATCH, or PASS.
-Do not flatten medium scores into WAIT: a 55-67 setup is ACCUMULATE, a 40-54 setup is WATCH.
-Make uncertainty explicit in the reasoning, not by using the same label for every score.
-Base confidence and every score on cited numerical evidence from the supplied context.
-Compare performance with the supplied regional benchmark and industry leader.
-Evaluate valuation, financial health, balance-sheet risk, growth quality, earnings quality,
-dividend safety, industry position, sector and market backdrop, material news, earnings/calendar
-risk, historical buy timing patterns, and only then technical timing.
-These four lenses are all available to you:
-1. Business and financial quality
-2. Market and sector backdrop
-3. Valuation and dividend profile
-4. Technical entry timing
+The signal must reflect allocationPlan: FULL, BUILD, STARTER, OBSERVE, or AVOID. Do not translate
+a low Agent-fit score automatically into PASS; a sound but imperfect setup can be STARTER or
+OBSERVE. Make uncertainty explicit through planned size and scale-up/cut triggers.
+The confidence field is YOUR OWN 1-100 perspective score for the company or setup over YOUR
+mandated Agent horizon. It is not a generic confidence level or platform default. Ask,
+"From my method and natural holding period, how strongly does this fit me?"
+Explain the evidence behind that rating in summary/bullets. You MUST choose 1-39 or 61-100; scores
+from 40 through 60 are invalid. Never choose a midpoint because evidence conflicts—your Agent lens
+must decide which evidence wins. If there is not enough evidence for an honest overall rating,
+return confidence null and signal INSUFFICIENT DATA. For any scorecard dimension whose evidence
+is unavailable, return score null and say what is missing in why; unknown is not neutral.
+Base confidence and every non-null score on cited numerical evidence from the supplied context.
+Set longTermView.structureScore to exactly the same number as confidence. Lead headline, summary,
+recap, and bullets with the evidence that controls THIS Agent's mandated outlook. For Ben/Sam/Vera
+that is business and funding quality; for Rex/Nadia/Kai it may be supplied technical evidence.
+Compare multi-year performance with the supplied regional benchmark and industry leader.
+Evaluate what the company does, how it makes money, scale and asset base, balance-sheet resilience,
+revenue/earnings/margin execution, returns on capital, capital allocation, moat, sector demand,
+industry position, and—when the Agent's horizon is long—whether earnings power can be materially
+larger over that horizon. Tactical Agents should instead prioritize their mandated indicators,
+levels, liquidity, and invalidation rules.
+Return longTermView with:
+- structureScore: same decisive 1-39 or 61-100 Agent-fit rating as confidence.
+- outlookRating: STRONG, FAVORABLE, NO_EDGE, or AVOID for this Agent's method and horizon.
+  Use NO_EDGE when it is merely outside the Agent's ideal setup; reserve AVOID for real danger or
+  active invalidation. NO_EDGE may still justify a STARTER when partial evidence supports learning exposure.
+- perspectiveSections: exactly four Agent-specific investigations required by the Agent mandate.
+  Each needs a specific title, STRENGTH/POSITIVE/WATCH/RISK/UNPROVEN rating, concise body, and
+  1-4 supplied evidence points. These cards must materially change between Agents.
+- outlookHorizon/outlookTitle: exactly the values required by the Agent-specific mandate.
+- agentOutlook: the analysis appropriate to that horizon—fast trade, swing, technical/factor,
+  income compounding, intrinsic value, owner projection, or full-corner path.
+- actionPlan: a direct action for that Agent. Tactical Agents must use supplied entry/target/stop or
+  support/resistance and say unavailable when absent; never invent a level.
+- allocationPlan: translate the view into FULL/BUILD/STARTER/OBSERVE/AVOID and a percentage of the
+  pre-planned position, never percentage of the whole portfolio. Prefer sizing down over rejecting
+  a sound but imperfect setup. AVOID requires a genuinely broken thesis, funding-quality risk,
+  active invalidation, or no defensible edge.
+- keySignals: 2-5 supplied facts or indicators that actually control this Agent's decision.
+- thesisBreakers: 2-4 concrete developments, indicators, or levels that invalidate this Agent's thesis.
 Weight them the way YOUR persona actually thinks — lead from your dominant trait and do not give
 equal airtime to lenses you would not personally act on. A data/quality-led agent should not hand a
 strong bullish call to weak financials just because momentum looks good, and can still say WAIT on a
 strong business with a stretched chart. An instinct/momentum-led agent should lead with price action
 and give a fast decisive call, not lecture about fundamentals it would not trade on. Only cross into
 another lens when it would actually flip your call, and say so in one line.
-Your target price must be Alpha Wolf's own 12-month house target, not a copy of Wall Street.
+Your target price is a secondary 12-month reference, not the main Analyst conclusion.
 Use analyst targets only as one input. Build your target from the supplied valuation, growth,
 profitability, balance-sheet quality, sector backdrop, and market comparison. If Wall Street's
 target is the same direction but your own evidence points to a different level, use your own
 level and explain why briefly in basis.
 If the data is not strong enough for a precise target, still provide a cautious target range
 midpoint and say that explicitly in basis.
-You must also return an entryPrice object: a specific price level at which you would actually
+You must still return an entryPrice object for compatibility, but keep it secondary: a specific price level at which you would actually
 place the next buy (not the same as the 12-month targetPrice, which is where the stock is
 headed - entryPrice is where to buy it). Base it on the supplied support level, moving
 averages, the historical post-dividend dip pattern, a benchmark-relative reset, or a
@@ -660,8 +870,10 @@ def _holding_analysis_instructions() -> str:
 You are Alpha Wolf's senior portfolio analyst. Analyze only the supplied live research data and
 positionContext. The user ALREADY OWNS this stock.
 
-This is not a buy-candidate report. Your main question is:
-"Should the user worry about today's price, keep holding, buy more, trim, or sell?"
+This is not a buy-candidate report. Your primary question is:
+"Does this holding still fit the selected Agent's method and natural horizon?"
+Long-term Agents should decide from business durability; tactical Agents should decide from the
+supplied tape, indicators, levels, and exit rules. Do not force every Agent into five years.
 
 Hard separation from non-holding analysis:
 - Do not use WATCH as the main signal. WATCH is a queue/status word, not a portfolio action.
@@ -689,6 +901,12 @@ Target and entry fields in this holding mode:
 The scores must appear exactly in this order: Value, Financial health, Dividend safety,
 Growth, Timing. For Timing, score whether this is a good time to keep/add/trim, not simply whether
 a new buyer should enter.
+
+Return longTermView exactly as defined by the schema: decisive structureScore/outlookRating,
+four Agent-specific perspectiveSections, the Agent-mandated outlookHorizon and outlookTitle,
+agentOutlook, actionPlan, allocationPlan, 2-5 keySignals, and 2-4 thesisBreakers. Ground every
+field in supplied business or technical evidence appropriate to this Agent. Do not invent forecasts,
+indicators, or price levels.
 
 Write like the selected Agent, but keep the output concrete and portfolio-actionable. The investor
 must be able to answer: stay with it, add more, trim, or sell.
@@ -833,26 +1051,88 @@ your priorities and the supplied numbers only.
 
 def _today_performance_instructions() -> str:
     return """
-You are Alpha Wolf's session analyst. Analyze only the supplied live research data.
-This call is about today's move only: what happened in this session, whether it matters,
-and what it changes about the setup relative to older price behavior.
-Do not invent intraday facts, volume, catalysts, or future prices.
-Use the latest daily move, technical levels, recent history, market comparison, news, and
-business context to decide whether today improved the setup, damaged it, or changed nothing.
-Do not write a full valuation memo. This should read like a sharp desk note after the close.
-Return:
-- signal: a short call like IMPROVING, NOTHING NEW, STRETCHED, BREAKING DOWN, or WATCH CLOSELY
-- tone: good, warn, or bad
-- buyScore: 1 to 100 answering "after today's session, how attractive is this to buy now?"
-- headline: one sharp line that says what today's move means
-- summary: 2 short sentences max, with the main conclusion
-- sessionRead: what today's move says versus the stock's normal behavior and trend
-- whatChangedToday: the one thing that changed today, or say plainly that nothing important changed
-- keyLevel: one exact price level or zone the investor should watch next
-- action: one exact next step, with numbers when possible
-- risk: the main way today's move could be misleading
-Avoid generic lines like "momentum is constructive" unless you also say what changed in the setup.
-If today's move is just noise, say so clearly.
+You are Alpha Wolf's Daily Brief scenario desk. Analyze only the supplied live research data.
+Answer three questions: what happened today, did it follow the user's existing plan, and what are
+the conditional DOWN / NEUTRAL / UP paths for the next trading session?
+
+Do not claim certainty or invent intraday facts, overnight news, future prices, catalysts, volume,
+or a prior plan. Use positionContext when it contains the user's holding strategy, average cost,
+monthly DCA, or position state; this USER_POSITION plan outranks a generic platform setup. Use
+platformVerdict/technicals only as a secondary PLATFORM_SETUP. If neither
+contains a real plan, todayVsPlan.status and planSource must be NO_PLAN; explain the setup you can
+observe without pretending it was previously agreed.
+Use USER_POSITION only when positionContext.isHolding is true and actual stored holding details are
+supplied. A generated candidate-mode question is not a saved user plan; classify it as INFERRED or
+use PLATFORM_SETUP when platformVerdict provides the setup.
+
+TODAY VS PLAN:
+- plannedSetup: the actual supplied user/platform plan, or "No saved plan was supplied."
+- actualSession: what today's price move, volume, trend, levels, benchmark and news actually show.
+- planHorizon: the selected Agent's mandated Daily Plan horizon.
+- impactLevel: NOISE, TACTICAL, MATERIAL, or THESIS_BREAK relative to that horizon.
+- enduranceReason: why this Agent should absorb or react to today's move at that horizon.
+- status: ON_PLAN, AHEAD, BEHIND, PLAN_INVALIDATED, or NO_PLAN.
+- verdict and why: state whether today confirmed, exceeded, lagged, or broke the plan and cite numbers.
+- BEHIND and PLAN_INVALIDATED require evidence relevant to the Agent's horizon. For Ben or Sam,
+  a daily decline or moving-average miss alone is NOISE/TACTICAL and normally remains ON_PLAN.
+
+TOMORROW SCENARIO MAP:
+- Return exactly three scenarios in this order: DOWN, NEUTRAL, UP.
+- probabilityPct values must total exactly 100. Use evidence-calibrated conditional judgment, not
+  statistical claims unless supplied data supports them. Avoid fake precision; increments of 5 are preferred.
+- baseCase must be the scenario with the highest probability.
+- For every scenario explain likelyReasons (what might cause it), confirmation (what observable
+  price/volume/indicator/market behavior would confirm it), whatItMeans, and the user's action.
+- Reasons must be conditional: e.g. market/sector weakness, rejection at resistance, failed support,
+  normal consolidation, volume confirmation, catalyst follow-through—only when supplied evidence
+  makes that driver plausible. Never invent an overnight event.
+- overnightWatch lists the real supplied news, market, sector, calendar, or technical items that
+could shift probabilities before/at the next session. Say unavailable when necessary.
+
+AGENT-OWNED ANALYSIS:
+- analysisTitle must use the selected Agent's required analysis title.
+- analysisSections must contain exactly the three required Agent-specific investigations, in the
+  required order. Each needs a specific title, decisive verdict, 1-4 supplied evidence points,
+  and the action this Agent takes because of it.
+- These sections are the primary user-facing analysis. Do not disguise the shared tomorrow
+  scenario map as the Agent's unique method. A long-horizon owner section must not become a chart
+  forecast; a trader section must not become an owner memo; a quant section must name rules and
+  thresholds rather than tell a story.
+
+HOLDING ACTION DOCTRINE:
+- Daily Brief manages an existing holding. The normal action is HOLD or NO_ACTION.
+- Do not recommend adding merely because price fell today, touched support, missed an MA, or looks
+  mildly oversold. Users do not add every day.
+- ADD_SMALL or ADD is rare. It requires a real valuation/floor discount supported by supplied
+  evidence AND an intact business/funding thesis. Prefer at least two independent confirmations,
+  such as price below a defensible fair/book/normal valuation anchor, unusually wide margin of
+  safety, strong free-cash-flow funding, or a pre-existing DCA/add plan reaching its exact gate.
+- If those confirmations are unavailable, addGate must say what evidence is still required and
+  holdingAction remains HOLD/NO_ACTION.
+- Give SELL and REDUCE serious consideration for held positions. Use them when the Agent's actual
+  thesis breaker occurs: funding/cash-flow deterioration, dividend danger, moat/earnings damage,
+  overvaluation with deteriorating outlook, concentration/risk breach, or a hard stop/rule failure
+  for tactical Agents. Do not sell a long-term holding for ordinary daily noise.
+- holdingAction is HOLD, NO_ACTION, ADD_SMALL, ADD, REDUCE, or SELL. Explain it in
+  holdingActionReason. addGate states the rare condition required to add; sellGate states the
+  concrete condition requiring reduction/exit. Each scenario action must respect these gates.
+
+OTHER FIELDS:
+- signal: TODAY CONFIRMED PLAN, TODAY BROKE PLAN, AHEAD OF PLAN, BEHIND PLAN, or NO SAVED PLAN.
+- tone: good, warn, or bad.
+- buyScore: YOUR Agent's decisive 1-39 or 61-100 rating of today's setup, separate from tomorrow probabilities.
+- headline/summary: concise today-versus-plan conclusion and tomorrow base case.
+- whatMattersTonight: the single most important supplied factor that could change the base case.
+- risk: why the scenario probabilities may be wrong or what data is missing.
+- recap: plain action language for a beginner.
+- agentFit/agentFitReason: whether today's setup fits YOUR method and why.
+
+Read the same session through the selected Agent. Rex should weight swing/tape confirmation, Nadia
+should weight RSI/MACD/stochastic/moving-average and factor rules, Kai should weight volume/heat and
+fast invalidation, Ben should treat one session as noise unless it changes business/funding quality,
+Sam should ask whether the income plan changed, Vera should ask whether the plan's valuation/risk
+assumptions changed, and AlphaWolf should name the controlling bottleneck. Probabilities and actions
+may differ by Agent, but every number must remain grounded in the same supplied evidence.
 """.strip()
 
 

@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  addPortfolioWatchlistSymbols,
+  deletePortfolioWatchlistSymbol,
   loadBuyTiming,
+  loadAuthUser,
   loadDiscoveries,
+  loadPremiumPromoActive,
+  redeemPremiumPromo,
   loadPortfolio,
+  loadPortfolioWatchlist,
   loadStockDetail,
   loadStrategyPlaybook,
   loadUpwardMoves,
@@ -32,7 +38,7 @@ type AgentStamped = {
 
 // Bump when persona reasoning changes so persisted browser reports cannot make a newly fixed
 // Agent appear to repeat an older, generic answer.
-const AGENT_REASONING_CACHE_VERSION = "persona-v2";
+const AGENT_REASONING_CACHE_VERSION = "persona-v19-vera-banker";
 
 function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentId: string) {
   return data?.agent?.id === agentId;
@@ -60,14 +66,20 @@ export function useHuntAi() {
   const [n100SyncKey, setN100SyncKey] = useState("");
   const [valuationRunKey, setValuationRunKey] = useState(0);
   const [valuationSyncTicker, setValuationSyncTicker] = useState("");
+  const [timingRunKey, setTimingRunKey] = useState(0);
+  const [timingRunTarget, setTimingRunTarget] = useState("");
   const [aiError, setAiError] = useState("");
 
-  const deepExtras = useWolfStore((s) => s.deepExtras);
-  const addDeepExtra = useWolfStore((s) => s.addDeepExtra);
-  const removeDeepExtra = useWolfStore((s) => s.removeDeepExtra);
   const openDetail = useWolfStore((s) => s.openDetail);
-  const premium = useWolfStore((s) => s.premium);
+  const storePremium = useWolfStore((s) => s.premium);
   const unlockPremium = useWolfStore((s) => s.unlockPremium);
+  // Server-controlled "Pro free for everyone" promo (see routes/auth.py premium_promo_active) is
+  // just an offer — it does NOT grant access by itself. The user must explicitly redeem it
+  // (ProPromoBanner) before `premium` flips true. No client-side expiry: once redeemed, access
+  // continues until the API's PREMIUM_PROMO_ENABLED flag is turned off, which revokes everyone
+  // at once regardless of when they redeemed.
+  const premiumPromoQuery = useQuery({ queryKey: ["premium-promo"], queryFn: loadPremiumPromoActive, staleTime: 300_000, retry: 0 });
+  const premiumPromoActive = premiumPromoQuery.data ?? false;
   const n100QuotaUsed = useWolfStore((s) => s.n100QuotaUsed);
   const useN100Quota = useWolfStore((s) => s.useN100Quota);
   const setNext10ReportCache = useWolfStore((s) => s.setNext10ReportCache);
@@ -75,9 +87,36 @@ export function useHuntAi() {
   const setHuntAiCache = useWolfStore((s) => s.setHuntAiCache);
   const activeAgentId = useWolfStore((s) => s.activeAgentId);
 
-  const portfolioQuery = useQuery({ queryKey: ["portfolio"], queryFn: loadPortfolio });
+  const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
+  const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
+  const authenticated = Boolean(authQuery.data?.id);
+  // Redeemed = clicked the "Redeem free Pro" button (storePremium, works for guests too) or,
+  // for a signed-in account, the server already has a redemption timestamp on file (so Pro
+  // follows the account across devices). Either way it only counts while the promo is active.
+  const redeemed = storePremium || Boolean(authQuery.data?.premiumRedeemedAt);
+  const premium = redeemed && premiumPromoActive;
+  const redeemPremiumMutation = useMutation({
+    mutationFn: redeemPremiumPromo,
+    onSuccess: (user) => {
+      unlockPremium();
+      if (user) queryClient.setQueryData(["auth-user"], user);
+    },
+  });
+  const portfolioQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: authenticated });
+  const watchlistQuery = useQuery({ queryKey: ["portfolio-watchlist", accountScope], queryFn: loadPortfolioWatchlist, enabled: authenticated });
+  const addWatchlistMutation = useMutation({
+    mutationFn: addPortfolioWatchlistSymbols,
+    onSuccess: (nextSymbols) => queryClient.setQueryData(["portfolio-watchlist", accountScope], nextSymbols),
+  });
+  const removeWatchlistMutation = useMutation({
+    mutationFn: deletePortfolioWatchlistSymbol,
+    onSuccess: (_data, removedSymbol) => {
+      queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => current.filter((symbol) => symbol !== removedSymbol));
+    },
+  });
   const holdingSymbols = portfolioQuery.data?.holdings.map((holding) => holding.symbol) ?? [];
-  const symbols = Array.from(new Set([...holdingSymbols, ...deepExtras]));
+  const watchingSymbols = watchlistQuery.data ?? [];
+  const symbols = Array.from(new Set([...holdingSymbols, ...watchingSymbols]));
   const activeTicker = selectedTicker || symbols[0] || "";
   const debouncedAddQuery = useDebouncedValue(addQuery.trim(), DISCOVERY_DEBOUNCE_MS);
 
@@ -98,26 +137,27 @@ export function useHuntAi() {
     setIntradayAnalysis(null);
     setValuationRunKey(0);
     setValuationSyncTicker("");
+    setTimingRunKey(0);
+    setTimingRunTarget("");
     setN100RunKey(0);
     setN100SyncKey("");
   }, [activeAgentId]);
 
   const addQueryResult = useQuery({
     queryKey: ["hunt-add-search", debouncedAddQuery],
-    queryFn: ({ signal }) => loadDiscoveries({ q: debouncedAddQuery, kind: "stock", limit: 8, signal }),
+    queryFn: ({ signal }) => loadDiscoveries({ q: debouncedAddQuery, kind: "all", limit: 8, signal }),
     enabled: addOpen && debouncedAddQuery.length >= 2,
     staleTime: 60_000,
     retry: 0,
   });
   const addResults = (addQueryResult.data?.live ?? []).filter((item) => !symbols.includes(item.symbol));
-
   const valuationQuery = useQuery({
-    queryKey: ["hunt-valuation-verdict", activeTicker, activeAgentId, valuationRunKey],
-    queryFn: () => loadValuationVerdict(activeTicker, "stable_dca", activeAgentId),
+    queryKey: ["hunt-valuation-verdict", "character-quote-v5", activeTicker, activeAgentId, valuationRunKey],
+    queryFn: () => loadValuationVerdict(activeTicker, "stable_dca", activeAgentId, true),
     staleTime: 900_000,
     enabled: tab === "signals" && Boolean(activeTicker) && valuationRunKey > 0 && valuationSyncTicker === activeTicker,
   });
-  const valuationCacheKey = `${AGENT_REASONING_CACHE_VERSION}:signals:${activeTicker}:stable_dca:${activeAgentId}`;
+  const valuationCacheKey = `${accountScope}:character-quote-v5:${AGENT_REASONING_CACHE_VERSION}:signals:${activeTicker}:stable_dca:${activeAgentId}`;
   const valuationCached = getHuntAiCache<ValuationVerdictResponse>(valuationCacheKey);
   const valuationDone =
     valuationRunKey > 0 &&
@@ -137,14 +177,16 @@ export function useHuntAi() {
   }, [setHuntAiCache, valuationAnalyzedAt, valuationCacheKey, valuationDone, valuationQuery.data]);
 
   const timingQuery = useQuery({
-    queryKey: ["hunt-buy-timing", activeTicker, activeAgentId],
-    queryFn: () => loadBuyTiming(activeTicker, activeAgentId),
+    queryKey: ["hunt-buy-timing", "character-exit-path-v8", AGENT_REASONING_CACHE_VERSION, activeTicker, activeAgentId, timingRunKey],
+    queryFn: () => loadBuyTiming(activeTicker, activeAgentId, true),
     staleTime: 900_000,
-    enabled: tab === "timing" && Boolean(activeTicker),
+    retry: 0,
+    enabled: tab === "timing" && Boolean(activeTicker) && timingRunKey > 0 && timingRunTarget === `${activeTicker}:${activeAgentId}`,
   });
-  const timingCacheKey = `${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
+  const timingCacheKey = `${accountScope}:character-exit-path-v8:${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
   const timingCached = getHuntAiCache<BuyTimingResponse>(timingCacheKey);
-  const timingDone = timingQuery.isSuccess && timingQuery.data?.symbol === activeTicker && matchesAgent(timingQuery.data, activeAgentId);
+  const timingResultMatches = timingQuery.data?.symbol === activeTicker && matchesAgent(timingQuery.data, activeAgentId);
+  const timingDone = timingRunTarget === `${activeTicker}:${activeAgentId}` && timingQuery.isSuccess && timingResultMatches;
   const timingAnalyzedAt = timingQuery.dataUpdatedAt ? new Date(timingQuery.dataUpdatedAt).toISOString() : new Date().toISOString();
   const timingReport = timingDone && timingQuery.data
     ? { analyzedAt: timingAnalyzedAt, data: timingQuery.data }
@@ -170,7 +212,7 @@ export function useHuntAi() {
     setAnalystDetail(null);
     setAnalystAnalysis(null);
   }, [activeTicker]);
-  const analystCacheKey = `${AGENT_REASONING_CACHE_VERSION}:analyst:${activeTicker}:${activeAgentId}`;
+  const analystCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:analyst:${activeTicker}:${activeAgentId}`;
   const analystCached = getHuntAiCache<AnalystReport>(analystCacheKey);
   const analystLocalReport =
     analystTicker === activeTicker && analystDetail && analystAnalysis && matchesAgent(analystAnalysis, activeAgentId)
@@ -178,17 +220,17 @@ export function useHuntAi() {
       : null;
   const analystReport = analystLocalReport ?? (matchesAgent(analystCached?.data.analysis, activeAgentId) ? analystCached : undefined);
 
-  const intradayAnalysisCacheKey = `${AGENT_REASONING_CACHE_VERSION}:intraday-ai:${activeTicker}:${activeAgentId}`;
+  const intradayAnalysisCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:intraday-ai:${activeTicker}:${activeAgentId}`;
   const intradayAnalysisCached = getHuntAiCache<StockAnalysisResponse>(intradayAnalysisCacheKey);
   const intradayAnalysisReport = matchesAgent(intradayAnalysis, activeAgentId)
     ? { analyzedAt: new Date().toISOString(), data: intradayAnalysis }
     : matchesAgent(intradayAnalysisCached?.data, activeAgentId) ? intradayAnalysisCached : undefined;
 
-  const n100CacheKey = `${AGENT_REASONING_CACHE_VERSION}:${activeTicker}:${n100Timeframe}:${activeAgentId}`;
+  const n100CacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:${activeTicker}:${n100Timeframe}:${activeAgentId}`;
   const n100Cached = useWolfStore((s) => s.getNext10ReportCache(n100CacheKey));
   const n100Query = useQuery({
     queryKey: ["hunt-next-100", activeTicker, n100Timeframe, activeAgentId, n100SyncKey, n100RunKey],
-    queryFn: () => loadUpwardMoves(activeTicker, n100Timeframe, activeAgentId),
+    queryFn: () => loadUpwardMoves(activeTicker, n100Timeframe, activeAgentId, true),
     enabled: premium && Boolean(activeTicker) && n100RunKey > 0 && n100SyncKey === n100CacheKey,
   });
   const n100Done =
@@ -219,6 +261,10 @@ export function useHuntAi() {
     tab,
     setTab,
     premium,
+    premiumPromoActive: premiumPromoActive && !redeemed,
+    accountCreatedAt: authQuery.data?.createdAt ?? null,
+    redeemPremium: () => redeemPremiumMutation.mutate(),
+    redeemingPremium: redeemPremiumMutation.isPending,
     unlockPremium,
     aiError,
     activeAgentId,
@@ -227,7 +273,7 @@ export function useHuntAi() {
       symbols,
       holdingSymbols,
       activeTicker,
-      loading: portfolioQuery.isPending,
+      loading: authQuery.isPending || (authenticated && (portfolioQuery.isPending || watchlistQuery.isPending)),
       addOpen,
       addQuery,
       results: addResults,
@@ -236,13 +282,16 @@ export function useHuntAi() {
       setQuery: setAddQuery,
       toggle() { setAddOpen((open) => !open); },
       add(symbol: string) {
-        addDeepExtra(symbol);
-        setSelectedTicker(symbol);
+        const normalized = symbol.trim().toUpperCase();
+        queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => Array.from(new Set([...current, normalized])));
+        addWatchlistMutation.mutate([normalized]);
+        setSelectedTicker(normalized);
         setAddOpen(false);
         setAddQuery("");
       },
       remove(symbol: string) {
-        removeDeepExtra(symbol);
+        queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => current.filter((item) => item !== symbol));
+        removeWatchlistMutation.mutate(symbol);
         if (selectedTicker === symbol) setSelectedTicker("");
       },
     },
@@ -250,7 +299,7 @@ export function useHuntAi() {
     signals: {
       ticker: activeTicker,
       symbols,
-      loading: portfolioQuery.isPending,
+      loading: authQuery.isPending || (authenticated && (portfolioQuery.isPending || watchlistQuery.isPending)),
       openDetail,
       verdict: (valuationReport?.data ?? null) as ValuationVerdictResponse | null,
       analyzedAt: valuationReport?.analyzedAt ?? "",
@@ -271,17 +320,24 @@ export function useHuntAi() {
     },
 
     timing: {
-      loading: portfolioQuery.isPending,
+      loading: authQuery.isPending || (authenticated && (portfolioQuery.isPending || watchlistQuery.isPending)),
       openDetail,
       rows: activeTicker
         ? [{
             symbol: activeTicker,
-            pending: !timingReport?.data && timingQuery.isPending,
+            pending: !timingReport?.data && timingRunKey > 0 && timingRunTarget === `${activeTicker}:${activeAgentId}` && timingQuery.isPending,
             fetching: timingQuery.isFetching,
-            failed: Boolean(timingQuery.isError) && !timingReport?.data,
+            failed: (Boolean(timingQuery.isError) || Boolean(timingQuery.isSuccess && timingQuery.data && !timingResultMatches)) && !timingReport?.data,
             timing: (timingReport?.data ?? null) as BuyTimingResponse | null,
             analyzedAt: timingReport?.analyzedAt ?? "",
-            retry: () => void timingQuery.refetch(),
+            run() {
+              setTimingRunTarget(`${activeTicker}:${activeAgentId}`);
+              setTimingRunKey((value) => value + 1);
+            },
+            retry() {
+              setTimingRunTarget(`${activeTicker}:${activeAgentId}`);
+              setTimingRunKey((value) => value + 1);
+            },
           }]
         : [],
     },
@@ -301,7 +357,7 @@ export function useHuntAi() {
         if (!activeTicker) return;
         setIntradayAiLoading(true);
         try {
-          const analysis = await summarizeStock(activeTicker, "momentum", activeAgentId);
+          const analysis = await summarizeStock(activeTicker, "momentum", activeAgentId, true);
           setIntradayAnalysis(analysis);
           setHuntAiCache(intradayAnalysisCacheKey, { analyzedAt: new Date().toISOString(), data: analysis });
         } finally {
@@ -340,7 +396,7 @@ export function useHuntAi() {
         try {
           const card = STRAT_CARDS.find((c) => c.key === mode);
           const strategy = stratPrompt.trim() || (card ? `${card.label}: ${card.subtitle}` : mode);
-          setStratAnalysis(await loadStrategyPlaybook({ strategy, region: "all", limit: 5, candidateLimit: 40, agent: activeAgentId }));
+          setStratAnalysis(await loadStrategyPlaybook({ strategy, region: "all", limit: 5, candidateLimit: 40, agent: activeAgentId, force: true }));
         } catch {
           setAiError("Strategy AI could not rank the stock universe for this strategy.");
         } finally {
@@ -370,13 +426,13 @@ export function useHuntAi() {
         try {
           const [detail, analysis] = await Promise.all([
             loadStockDetail(sym, "capitalized"),
-            summarizeStock(sym, "capitalized", activeAgentId),
+            summarizeStock(sym, "capitalized", activeAgentId, true),
           ]);
           setAnalystDetail(detail);
           setAnalystAnalysis(analysis);
-          setHuntAiCache(`${AGENT_REASONING_CACHE_VERSION}:analyst:${sym}:${activeAgentId}`, { analyzedAt: new Date().toISOString(), data: { detail, analysis } });
-        } catch {
-          setAiError("Stock Analyst could not generate a report for this ticker.");
+          setHuntAiCache(`${accountScope}:${AGENT_REASONING_CACHE_VERSION}:analyst:${sym}:${activeAgentId}`, { analyzedAt: new Date().toISOString(), data: { detail, analysis } });
+        } catch (error) {
+          setAiError(error instanceof Error ? error.message : "Stock Analyst could not generate a report for this ticker.");
         } finally {
           setAnalystLoading(false);
         }

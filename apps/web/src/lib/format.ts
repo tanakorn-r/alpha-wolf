@@ -13,6 +13,14 @@ const CURRENCY_SYMBOL = { USD: "$", THB: "฿" } as const;
 /** THB per 1 USD — the app stores money in USD base and displays THB by default. */
 export const THB_PER_USD = FX_RATES.THB;
 
+/** Convert an instrument-native per-share price (e.g. a THB price for a .BK stock)
+ * into the USD base the portfolio store expects. A `.BK` symbol implies THB. */
+export function priceToUsdBase(price: number, currencyOrSymbol?: string | null): number {
+  const token = (currencyOrSymbol || "").toUpperCase();
+  const currency = token === "THB" || token.endsWith(".BK") ? "THB" : "USD";
+  return price / FX_RATES[currency];
+}
+
 /** value is always in USD; converts and formats for the selected display currency. */
 export function formatMoneyAs(value: number | undefined, currency: "USD" | "THB") {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";

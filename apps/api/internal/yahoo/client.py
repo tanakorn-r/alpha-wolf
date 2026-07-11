@@ -193,26 +193,30 @@ def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
         return current.payload if current and isinstance(current.payload, dict) else result
 
 
-def fetch_history(t: yf.Ticker, period: str = "1y") -> pd.DataFrame:
+def fetch_history(t: yf.Ticker, period: str = "1y", auto_adjust: bool = True) -> pd.DataFrame:
+    # auto_adjust=False keeps Close split-adjusted but dividend-UNADJUSTED (plus a raw "Dividends"
+    # per-share column). Callers that need to book real dividend cash flows without double-counting
+    # them against Yahoo's default continuously-reinvested adjusted Close must pass False.
     symbol = _ticker_symbol(t)
-    cached = load_yahoo_data(symbol, "history", period) if symbol else None
+    dataset = "history" if auto_adjust else "history_raw"
+    cached = load_yahoo_data(symbol, dataset, period) if symbol else None
     if cached and cached.is_fresh:
         frame = _history_from_payload(cached.payload)
         if not frame.empty:
             return frame
 
-    lock_key = f"{symbol}:{period}" if symbol else f"anonymous:{id(t)}:{period}"
+    lock_key = f"{symbol}:{period}:{dataset}" if symbol else f"anonymous:{id(t)}:{period}:{dataset}"
     with cache_compute_lock("yahoo_history", lock_key):
-        current = load_yahoo_data(symbol, "history", period) if symbol else None
+        current = load_yahoo_data(symbol, dataset, period) if symbol else None
         if current and current.is_fresh:
             frame = _history_from_payload(current.payload)
             if not frame.empty:
                 return frame
         is_long_history = period.lower() in {"5y", "10y", "max"}
-        full_refresh = load_yahoo_data(symbol, "history_full_refresh", period) if symbol and is_long_history else None
+        full_refresh = load_yahoo_data(symbol, f"{dataset}_full_refresh", period) if symbol and is_long_history else None
         live_period = "1mo" if current and is_long_history and full_refresh and full_refresh.is_fresh else period
         try:
-            result = normalize_history_frame(t.history(period=live_period, interval="1d"))
+            result = normalize_history_frame(t.history(period=live_period, interval="1d", auto_adjust=auto_adjust))
         except Exception:
             result = pd.DataFrame()
         if not result.empty:
@@ -221,7 +225,7 @@ def fetch_history(t: yf.Ticker, period: str = "1y") -> pd.DataFrame:
             if symbol:
                 save_yahoo_data(
                     symbol,
-                    "history",
+                    dataset,
                     _history_to_payload(result),
                     period=period,
                     ttl_seconds=_history_ttl(period),
@@ -229,7 +233,7 @@ def fetch_history(t: yf.Ticker, period: str = "1y") -> pd.DataFrame:
                 if live_period == period and is_long_history:
                     save_yahoo_data(
                         symbol,
-                        "history_full_refresh",
+                        f"{dataset}_full_refresh",
                         {"period": period},
                         period=period,
                         ttl_seconds=FULL_HISTORY_REFRESH_SECONDS,

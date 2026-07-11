@@ -6,7 +6,8 @@ from typing import Any, Iterable
 
 from internal.market.records import merge_ticker_info
 from internal.market.universe import get_live_records
-from internal.store.cache import cache_get, cache_set
+from internal.store.cache import cache_compute_lock
+from internal.store.calendar_cache import load_market_calendar_events, save_market_calendar_events
 from internal.store.portfolio import list_holdings
 from internal.store.utils import as_float, coerce_iso_date
 from internal.yahoo.client import load_ticker_modules, ticker as make_ticker
@@ -20,48 +21,29 @@ TOP_YIELD_ENRICH_LIMIT = 24
 ENRICH_WORKERS = 6
 
 
-def build_market_calendar(*, month: str | None, region: str) -> MarketCalendarResponse:
+def build_market_calendar(*, month: str | None, region: str, user_id: int = 0) -> MarketCalendarResponse:
     resolved_month = _normalize_month(month)
     safe_region = region if region in {"all", "us", "th"} else "us"
-    cache_key = f"v2:{resolved_month}:{safe_region}"
-    cached = cache_get("market_calendar", cache_key)
-    if cached is not None:
-        return MarketCalendarResponse.model_validate(cached)
 
-    holdings = {item.symbol.upper() for item in list_holdings()}
+    holdings = {item.symbol.upper() for item in list_holdings(user_id)}
     events: list[MarketCalendarEvent] = []
 
-    # Holdings get the accurate per-ticker read (ex-dividend + payment). This is
-    # the only network fan-out and it is bounded by the user's holdings count.
+    # Holdings get the accurate per-ticker read (ex-dividend + payment). This is the only
+    # per-request network fan-out, and it's bounded by this one user's holdings count —
+    # everything else below is identical for every user and comes from the shared cache.
     for symbol in sorted(holdings):
         if safe_region != "all" and _region_for_symbol(symbol) != safe_region:
             continue
         events.extend(_events_for_symbol(symbol, resolved_month, is_holding=True))
 
-    # The rest of the market comes from the already-cached catalog records —
-    # payment dates only, zero extra network calls.
-    missing_date: list[dict[str, Any]] = []
-    for record in _filter_records(get_live_records(), safe_region):
-        symbol = str(record.get("symbol") or "").upper()
-        if not symbol or symbol in holdings:
+    for event in _market_events(resolved_month, safe_region):
+        if event.symbol in holdings:
             continue
-        if record.get("dividendDate") is None and (as_float(record.get("dividendYield")) or 0) > 0:
-            missing_date.append(record)
-            continue
-        events.extend(_events_for_record(record, resolved_month))
-
-    top_payers = sorted(missing_date, key=lambda r: as_float(r.get("dividendYield")) or 0, reverse=True)[:TOP_YIELD_ENRICH_LIMIT]
-    if top_payers:
-        with ThreadPoolExecutor(max_workers=ENRICH_WORKERS) as pool:
-            for symbol_events in pool.map(
-                lambda r: _events_for_symbol(str(r["symbol"]).upper(), resolved_month, is_holding=False),
-                top_payers,
-            ):
-                events.extend(symbol_events)
+        events.append(event)
 
     events.sort(key=lambda item: (item.date, item.kind, item.symbol))
 
-    response = MarketCalendarResponse(
+    return MarketCalendarResponse(
         month=resolved_month,
         region=safe_region,  # type: ignore[arg-type]
         summary=MarketCalendarSummary(
@@ -73,8 +55,43 @@ def build_market_calendar(*, month: str | None, region: str) -> MarketCalendarRe
         ),
         events=events,
     )
-    cache_set("market_calendar", cache_key, response.model_dump(), CALENDAR_TTL_SECONDS)
-    return response
+
+
+def _market_events(month: str, region: str) -> list[MarketCalendarEvent]:
+    """Non-personalized dividend events for a month/region, persisted in SQLite and shared
+    across every user. Only the first request for a given month/region ever pays for the
+    catalog scan + top-payer Yahoo enrichment; everyone else reads the saved payload."""
+    cached = load_market_calendar_events(month, region)
+    if cached is not None:
+        return [MarketCalendarEvent.model_validate(item) for item in cached]
+
+    with cache_compute_lock("market_calendar_build", f"{month}:{region}"):
+        cached = load_market_calendar_events(month, region)
+        if cached is not None:
+            return [MarketCalendarEvent.model_validate(item) for item in cached]
+
+        events: list[MarketCalendarEvent] = []
+        missing_date: list[dict[str, Any]] = []
+        for record in _filter_records(get_live_records(), region):
+            symbol = str(record.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            if record.get("dividendDate") is None and (as_float(record.get("dividendYield")) or 0) > 0:
+                missing_date.append(record)
+                continue
+            events.extend(_events_for_record(record, month))
+
+        top_payers = sorted(missing_date, key=lambda r: as_float(r.get("dividendYield")) or 0, reverse=True)[:TOP_YIELD_ENRICH_LIMIT]
+        if top_payers:
+            with ThreadPoolExecutor(max_workers=ENRICH_WORKERS) as pool:
+                for symbol_events in pool.map(
+                    lambda r: _events_for_symbol(str(r["symbol"]).upper(), month, is_holding=False),
+                    top_payers,
+                ):
+                    events.extend(symbol_events)
+
+        save_market_calendar_events(month, region, [event.model_dump() for event in events], CALENDAR_TTL_SECONDS)
+        return events
 
 
 def _filter_records(records: list[dict[str, Any]], region: str) -> list[dict[str, Any]]:

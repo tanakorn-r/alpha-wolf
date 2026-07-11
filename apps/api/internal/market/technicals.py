@@ -56,6 +56,31 @@ def compute_macd(series: pd.Series) -> tuple[float | None, float | None, float |
     return float(macd.iloc[-1]), float(signal.iloc[-1]), float(histogram.iloc[-1])
 
 
+def compute_stochastic(
+    closes: pd.Series,
+    highs: pd.Series,
+    lows: pd.Series,
+    window: int = 14,
+) -> tuple[float | None, float | None]:
+    if len(closes) < window or len(highs) < window or len(lows) < window:
+        return None, None
+    frame = pd.concat(
+        [closes.rename("close"), highs.rename("high"), lows.rename("low")],
+        axis=1,
+        join="inner",
+    ).dropna()
+    if len(frame) < window:
+        return None, None
+    rolling_low = frame["low"].rolling(window).min()
+    rolling_high = frame["high"].rolling(window).max()
+    spread = (rolling_high - rolling_low).replace(0, float("nan"))
+    k_series = ((frame["close"] - rolling_low) / spread * 100).dropna()
+    if k_series.empty:
+        return None, None
+    d_series = k_series.rolling(3).mean().dropna()
+    return float(k_series.iloc[-1]), float(d_series.iloc[-1]) if not d_series.empty else None
+
+
 def return_over_window(closes: pd.Series, window: int) -> float:
     if len(closes) <= window:
         return 0.0
@@ -154,6 +179,7 @@ def build_technicals(history: pd.DataFrame) -> dict[str, Any]:
     ema20 = rolling_ema(closes, 20)
     rsi14 = compute_rsi(closes, 14)
     macd, macd_signal, macd_hist = compute_macd(closes)
+    stochastic_k, stochastic_d = compute_stochastic(closes, high_series, low_series)
     volatility = daily_volatility(closes)
     avg_volume = rolling_mean(volumes, 20)
     current_volume = float(volumes.iloc[-1]) if len(volumes) else None
@@ -166,6 +192,8 @@ def build_technicals(history: pd.DataFrame) -> dict[str, Any]:
         "macd": round(macd, 4) if macd is not None else None,
         "macdSignal": round(macd_signal, 4) if macd_signal is not None else None,
         "macdHistogram": round(macd_hist, 4) if macd_hist is not None else None,
+        "stochasticK": round(stochastic_k, 2) if stochastic_k is not None else None,
+        "stochasticD": round(stochastic_d, 2) if stochastic_d is not None else None,
         "sma20": round(sma20, 2) if sma20 is not None else None,
         "sma50": round(sma50, 2) if sma50 is not None else None,
         "sma200": round(sma200, 2) if sma200 is not None else None,

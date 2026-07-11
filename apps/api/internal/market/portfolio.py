@@ -28,9 +28,9 @@ def _to_base_series(series: pd.Series, currency: str | None) -> pd.Series:
     return series / rate if rate else series
 
 
-def build_portfolio_dashboard() -> PortfolioDashboard:
-    holdings = list_holdings()
-    orders = list_dca_orders()
+def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
+    holdings = list_holdings(user_id)
+    orders = list_dca_orders(user_id)
     if not holdings:
         return PortfolioDashboard(dcaOrders=orders, markers=[PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders])
 

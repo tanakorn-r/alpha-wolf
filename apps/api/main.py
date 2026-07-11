@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,9 +14,14 @@ from internal.store.db import migrate
 from routes.router import register_routes
 
 app = FastAPI(title="Alpha Wolf API", version="1.0.0")
+cors_origins = [
+    value.strip()
+    for value in os.getenv("CORS_ORIGINS", "http://127.0.0.1:4200,http://localhost:4200").split(",")
+    if value.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -86,12 +86,14 @@ def migrate() -> None:
             """
             CREATE TABLE IF NOT EXISTS holdings (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                symbol TEXT NOT NULL UNIQUE,
+                user_id INTEGER NOT NULL DEFAULT 0,
+                symbol TEXT NOT NULL,
                 shares REAL NOT NULL,
                 average_cost REAL NOT NULL,
                 strategy TEXT NOT NULL,
                 monthly_dca REAL NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, symbol)
             )
             """
         )
@@ -99,6 +101,7 @@ def migrate() -> None:
             """
             CREATE TABLE IF NOT EXISTS dca_orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 0,
                 symbol TEXT NOT NULL,
                 amount REAL NOT NULL,
                 scheduled_for TEXT NOT NULL,
@@ -107,6 +110,17 @@ def migrate() -> None:
                 executed_price REAL,
                 shares REAL,
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portfolio_watchlist (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 0,
+                symbol TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, symbol)
             )
             """
         )
@@ -136,7 +150,118 @@ def migrate() -> None:
         db.execute(
             "CREATE INDEX IF NOT EXISTS idx_yahoo_data_cache_symbol ON yahoo_data_cache(symbol, data_type)"
         )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS market_calendar_cache (
+                cache_key TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                fetched_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                google_sub TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL,
+                name TEXT NOT NULL,
+                picture_url TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id)")
+        _migrate_account_tables(db)
         db.execute("DROP TABLE IF EXISTS market_presets")
         db.execute("DROP TABLE IF EXISTS snapshots")
         db.execute("DROP TABLE IF EXISTS stocks")
         db.commit()
+
+
+def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
+    if "premium_redeemed_at" not in _table_columns(db, "users"):
+        db.execute("ALTER TABLE users ADD COLUMN premium_redeemed_at TEXT")
+
+    holding_columns = _table_columns(db, "holdings")
+    if "user_id" not in holding_columns:
+        db.execute("ALTER TABLE holdings RENAME TO holdings_legacy")
+        db.execute(
+            """
+            CREATE TABLE holdings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 0,
+                symbol TEXT NOT NULL,
+                shares REAL NOT NULL,
+                average_cost REAL NOT NULL,
+                strategy TEXT NOT NULL,
+                monthly_dca REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, symbol)
+            )
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO holdings(id, user_id, symbol, shares, average_cost, strategy, monthly_dca, created_at)
+            SELECT id, 0, symbol, shares, average_cost, strategy, monthly_dca, created_at
+            FROM holdings_legacy
+            """
+        )
+        db.execute("DROP TABLE holdings_legacy")
+    else:
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_holdings_user_symbol ON holdings(user_id, symbol)")
+
+    order_columns = _table_columns(db, "dca_orders")
+    if "user_id" not in order_columns:
+        db.execute("ALTER TABLE dca_orders RENAME TO dca_orders_legacy")
+        db.execute(
+            """
+            CREATE TABLE dca_orders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL DEFAULT 0,
+                symbol TEXT NOT NULL,
+                amount REAL NOT NULL,
+                scheduled_for TEXT NOT NULL,
+                strategy TEXT NOT NULL,
+                status TEXT NOT NULL,
+                executed_price REAL,
+                shares REAL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO dca_orders(id, user_id, symbol, amount, scheduled_for, strategy, status, executed_price, shares, created_at)
+            SELECT id, 0, symbol, amount, scheduled_for, strategy, status, executed_price, shares, created_at
+            FROM dca_orders_legacy
+            """
+        )
+        db.execute("DROP TABLE dca_orders_legacy")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_dca_orders_user ON dca_orders(user_id, scheduled_for, id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_watchlist_user ON portfolio_watchlist(user_id, created_at, id)")
+
+
+def _table_columns(db: sqlite3.Connection | LibsqlConnection, table: str) -> set[str]:
+    rows = db.execute(f"PRAGMA table_info({table})").fetchall()
+    columns: set[str] = set()
+    for row in rows:
+        try:
+            columns.add(str(row["name"]))
+        except Exception:
+            columns.add(str(row[1]))
+    return columns

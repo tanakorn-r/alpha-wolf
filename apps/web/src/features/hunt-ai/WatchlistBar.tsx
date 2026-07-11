@@ -13,9 +13,9 @@ export function WatchlistBar({ hunt }: { hunt: HuntAi }) {
         <div className="mx-px h-6 w-px bg-[#2a2a31]" />
         <WatchlistGroup label="Watching" symbols={watchingSymbols} list={list} />
         <button type="button" onClick={list.toggle} className="flex items-center gap-1.5 rounded-[7px] border border-dashed border-[#2a2a31] px-2.5 py-[5px] text-[12px] font-bold text-[#3ecf8e] hover:border-[#3ecf8e] hover:bg-[#3ecf8e]/05">
-          <span className="text-[16px] leading-none">+</span>Add stock
+          <span className="text-[16px] leading-none">+</span>Add asset
         </button>
-        <span className="ml-auto flex-none font-mono text-[11px] text-[#5a5a62]">Tap a stock - every tab follows</span>
+        <span className="ml-auto flex-none font-mono text-[11px] text-[#5a5a62]">Tap an asset - every tab follows</span>
       </div>
 
       {list.addOpen ? (
@@ -27,7 +27,7 @@ export function WatchlistBar({ hunt }: { hunt: HuntAi }) {
                 autoFocus
                 value={list.addQuery}
                 onChange={(event) => list.setQuery(event.target.value)}
-                placeholder="Search ticker or company - NVDA, PTT, Apple..."
+                placeholder="Search asset - gold, xauusd, silver, oil, NVDA..."
                 className="w-full rounded-lg border border-[#2a2a31] bg-[#0e0e10] py-[9px] pl-[34px] pr-3 text-[13px] text-[#ececee] outline-none"
               />
             </div>
@@ -36,18 +36,27 @@ export function WatchlistBar({ hunt }: { hunt: HuntAi }) {
             {list.results.map((item) => (
               <button key={item.symbol} type="button" onClick={() => list.add(item.symbol)} className="flex w-full items-center gap-2.5 border-t border-[#1a1a1e] px-3.5 py-2.5 text-left hover:bg-[#1c1c20]">
                 <span className="w-[64px] flex-none font-mono text-[13px] font-semibold">{item.symbol}</span>
-                <span className="rounded border border-[#2a2a31] px-[5px] py-px text-[10px] text-[#8c8c95]">{item.symbol.endsWith(".BK") ? "TH" : "US"}</span>
+                <span className="rounded border border-[#2a2a31] px-[5px] py-px text-[10px] text-[#8c8c95]">{assetTag(item.symbol, item.quoteType)}</span>
                 <span className="min-w-0 flex-1 truncate text-[12px] text-[#8c8c95]">{item.name}</span>
                 <span className="flex-none text-[11px] font-semibold text-[#3ecf8e]">+ Add</span>
               </button>
             ))}
             {list.searchLoading ? <LoadingRow label="Searching live universe..." /> : null}
-            {!list.searchLoading && list.addQuery.trim().length > 0 && !list.results.length ? <EmptyStrip label="No results. Try a ticker like NVDA, AAPL or PTT." /> : null}
+            {!list.searchLoading && list.addQuery.trim().length > 0 && !list.results.length ? <EmptyStrip label="No results. Try gold, xauusd, oil, NVDA or AAPL." /> : null}
           </div>
         </div>
       ) : null}
     </div>
   );
+}
+
+function assetTag(symbol: string, quoteType?: string | null) {
+  const upperType = (quoteType || "").toUpperCase();
+  if (upperType === "FUTURE" || symbol.includes("=F")) return "FUT";
+  if (upperType === "ETF") return "ETF";
+  if (upperType === "INDEX" || symbol.startsWith("^")) return "IDX";
+  if (symbol.endsWith(".BK")) return "TH";
+  return "US";
 }
 
 function WatchlistGroup({ label, symbols, list }: { label: string; symbols: string[]; list: HuntAi["watchlist"] }) {

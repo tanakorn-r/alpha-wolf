@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { deleteHolding, loadPortfolio, loadPortfolioReview, saveHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
+import { deleteHolding, loadAuthUser, loadPortfolio, loadPortfolioReview, saveHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
+import { priceToUsdBase } from "../../lib/format";
 
 export type Dashboard = ReturnType<typeof useDashboard>;
 
@@ -15,10 +16,12 @@ export function useDashboard() {
   const [sellTarget, setSellTarget] = useState<PortfolioHolding | null>(null);
   const [selling, setSelling] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [formValue, setFormValue] = useState({ symbol: "", shares: "", averageCost: "", monthlyDca: "" });
+  const [formValue, setFormValue] = useState({ symbol: "", shares: "", averageCost: "" });
   const [formSaving, setFormSaving] = useState(false);
 
-  const portfolioQuery = useQuery({ queryKey: ["portfolio"], queryFn: loadPortfolio });
+  const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
+  const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
+  const portfolioQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: Boolean(authQuery.data?.id) });
   const portfolio = portfolioQuery.data;
   const refresh = () => { void portfolioQuery.refetch(); };
   useEffect(() => {
@@ -34,7 +37,7 @@ export function useDashboard() {
     if (!portfolio?.holdings.length) return;
     setAnalyzing(true);
     try {
-      setAnalysis(await loadPortfolioReview(activeAgentId));
+      setAnalysis(await loadPortfolioReview(activeAgentId, true));
     } catch {
       setActionError("AI analysis could not be generated.");
     } finally {
@@ -51,7 +54,7 @@ export function useDashboard() {
     hasPlan,
     hasIncome,
     showEmptyHero: (!hasHoldings && !hasPlan) || !portfolio,
-    isSkeleton: portfolioQuery.isPending && !portfolio,
+    isSkeleton: authQuery.isPending || (Boolean(authQuery.data?.id) && portfolioQuery.isPending && !portfolio),
     isError: portfolioQuery.isError,
     isFetching: portfolioQuery.isFetching,
     actionError,
@@ -89,17 +92,27 @@ export function useDashboard() {
       hide() { setFormOpen(false); },
       set(field: keyof typeof formValue, value: string) { setFormValue((current) => ({ ...current, [field]: value })); },
       async submit() {
+        const symbol = formValue.symbol.trim().toUpperCase();
+        const boughtShares = Number(formValue.shares);
+        // The user types the price in the stock's native currency (THB for .BK); the store is USD base.
+        const price = priceToUsdBase(Number(formValue.averageCost), symbol);
+        if (!symbol || !(boughtShares > 0) || !(price > 0)) return;
         setFormSaving(true);
         try {
+          // Adding more of a stock already held averages into the existing position;
+          // a fresh symbol just records the buy as-is.
+          const existing = portfolio?.holdings.find((holding) => holding.symbol === symbol);
+          const totalShares = (existing?.shares ?? 0) + boughtShares;
+          const totalCost = (existing?.shares ?? 0) * (existing?.averageCost ?? 0) + boughtShares * price;
           await saveHolding({
-            symbol: formValue.symbol,
-            shares: Number(formValue.shares),
-            averageCost: Number(formValue.averageCost),
-            monthlyDca: Number(formValue.monthlyDca || 0),
-            strategy: "stable_dca",
+            symbol,
+            shares: totalShares,
+            averageCost: totalCost / totalShares,
+            monthlyDca: existing?.monthlyDca ?? 0,
+            strategy: existing?.strategy ?? "stable_dca",
           });
           setFormOpen(false);
-          setFormValue({ symbol: "", shares: "", averageCost: "", monthlyDca: "" });
+          setFormValue({ symbol: "", shares: "", averageCost: "" });
           refresh();
         } finally {
           setFormSaving(false);

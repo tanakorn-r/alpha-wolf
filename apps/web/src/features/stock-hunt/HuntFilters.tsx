@@ -1,4 +1,3 @@
-import { Money } from "../../components/Money";
 import { PillTabs } from "../../components/ui/PillTabs";
 import { SearchIcon, StrategyIcon, type StrategyIconKind } from "../../components/ui/icons";
 import { marketOptions, sortLabels, type SortKey, type StockHunt } from "./useStockHunt";
@@ -43,12 +42,6 @@ export function HuntFilters({ hunt }: { hunt: StockHunt }) {
           <select value={hunt.sortBy} onChange={(event) => hunt.setSortBy(event.target.value as SortKey)} className={`${select} w-full min-[900px]:w-auto`}>
             {(Object.keys(sortLabels) as SortKey[]).map((key) => <option key={key} value={key}>Sort · {sortLabels[key]}</option>)}
           </select>
-          <div className="min-[560px]:col-span-2 min-[900px]:col-span-1 min-[900px]:text-right">
-            <div className="text-[11px] text-[#f5c451]">Cash to invest</div>
-            <div className="font-mono text-[15px] font-semibold text-[#3ecf8e]">
-              <Money value={hunt.cashReserve} secondaryClassName="text-[11px] font-normal text-[#5a5a62]" />
-            </div>
-          </div>
         </div>
       </div>
     </div>

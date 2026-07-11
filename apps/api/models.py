@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+# AI decisions must take a side. The center band encouraged generic, balanced
+# answers that looked like defaults instead of an Agent's actual call.
+DecisiveScore = Annotated[int, Field(ge=1, le=39)] | Annotated[int, Field(ge=61, le=100)]
 
 
 class DiscoveryKind(str, Enum):
@@ -201,7 +206,7 @@ class StockAnalysisScore(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     label: Literal["Value", "Financial health", "Dividend safety", "Growth", "Timing"]
-    score: int = Field(ge=0, le=100)
+    score: int | None = Field(default=None, ge=0, le=100)
     why: str
 
 
@@ -224,14 +229,65 @@ class StockAnalysisEntryPrice(BaseModel):
     why: str
 
 
+class StockAnalysisPerspectiveSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    rating: Literal["STRENGTH", "POSITIVE", "WATCH", "RISK", "UNPROVEN"]
+    body: str
+    evidence: list[str] = Field(min_length=1, max_length=4)
+
+
+class StockAnalysisAllocationPlan(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tier: Literal["FULL", "BUILD", "STARTER", "OBSERVE", "AVOID"]
+    plannedPositionPct: int = Field(ge=0, le=100)
+    label: str
+    rationale: str
+    scaleUpTrigger: str
+    cutTrigger: str
+
+    @model_validator(mode="after")
+    def validate_tier_size(self) -> "StockAnalysisAllocationPlan":
+        allowed = {
+            "FULL": range(80, 101),
+            "BUILD": range(50, 80),
+            "STARTER": range(15, 50),
+            "OBSERVE": range(0, 15),
+            "AVOID": range(0, 1),
+        }
+        if self.plannedPositionPct not in allowed[self.tier]:
+            raise ValueError(f"{self.tier} is inconsistent with plannedPositionPct {self.plannedPositionPct}")
+        return self
+
+
+class StockAnalysisLongTermView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    structureScore: DecisiveScore
+    outlookRating: Literal["STRONG", "FAVORABLE", "NO_EDGE", "AVOID"]
+    perspectiveSections: list[StockAnalysisPerspectiveSection] = Field(min_length=4, max_length=4)
+    outlookHorizon: str
+    outlookTitle: str
+    agentOutlook: str
+    actionPlan: str
+    allocationPlan: StockAnalysisAllocationPlan
+    keySignals: list[str] = Field(min_length=2, max_length=5)
+    thesisBreakers: list[str] = Field(min_length=2, max_length=4)
+
+
 class StockAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     signal: str
     headline: str
     tone: Literal["good", "warn", "bad"]
-    confidence: int = Field(ge=0, le=100)
+    # The active Agent's own rating of taking this setup now. Null means the
+    # supplied evidence cannot support an honest rating.
+    confidence: DecisiveScore | None = None
     summary: str
+    longTermView: StockAnalysisLongTermView
     targetPrice: StockAnalysisTargetPrice
     entryPrice: StockAnalysisEntryPrice
     scores: list[StockAnalysisScore] = Field(min_length=5, max_length=5)
@@ -250,6 +306,7 @@ class AgentBadge(BaseModel):
     color: str
     avatarUrl: str | None = None
     premium: bool = False
+    analystFocus: str | None = None
 
 
 class StockAnalysisResponse(StockAnalysis):
@@ -276,7 +333,7 @@ class StrategyPick(BaseModel):
     stop: float | None = None
     riskReward: str | None = None
     upsidePct: float | None = None
-    conviction: int = Field(ge=0, le=100)
+    conviction: DecisiveScore
 
 
 class StrategyPlaybook(BaseModel):
@@ -322,7 +379,7 @@ class QuantPerspective(BaseModel):
 
     signal: str
     tone: Literal["good", "warn", "bad"]
-    buyScore: int = Field(ge=1, le=100)
+    buyScore: DecisiveScore
     investability: Literal["FAVORABLE", "WATCH", "AVOID"]
     hook: str
     nextActionWindow: str
@@ -355,7 +412,7 @@ class ValuationRightNow(BaseModel):
     note: str
     entryOnlyAt: float | None = None
     pctAway: float | None = None
-    conviction: int = Field(ge=0, le=100)
+    conviction: DecisiveScore
 
 
 class ValuationMetrics(BaseModel):
@@ -366,6 +423,8 @@ class ValuationMetrics(BaseModel):
     bookValuePerShare: float | None = None
     pbv: float | None = None
     pbvFloor: float | None = None
+    peRatio: float | None = None
+    forwardPE: float | None = None
     dividendYield: float | None = None
 
 
@@ -386,6 +445,14 @@ class ValuationPlay(BaseModel):
     addBackHigh: float | None = None
 
 
+class ValuationEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tone: Literal["GOOD", "WATCH", "BAD"]
+    title: str
+    text: str
+
+
 class ValuationVerdict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -398,7 +465,7 @@ class ValuationVerdict(BaseModel):
     rightNow: ValuationRightNow
     metrics: ValuationMetrics
     structureBand: ValuationStructureBand
-    whatAiSees: list[str] = Field(min_length=2, max_length=5)
+    whatAiSees: list[ValuationEvidence] = Field(min_length=2, max_length=5)
     thePlay: ValuationPlay
     recap: str
     agentFit: Literal["aligned", "neutral", "against"]
@@ -415,19 +482,71 @@ class ValuationVerdictResponse(ValuationVerdict):
     agentFitReason: str | None = None
 
 
+class TodayPlanAssessment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["ON_PLAN", "AHEAD", "BEHIND", "PLAN_INVALIDATED", "NO_PLAN"]
+    planSource: Literal["USER_POSITION", "PLATFORM_SETUP", "INFERRED", "NO_PLAN"]
+    planHorizon: str
+    impactLevel: Literal["NOISE", "TACTICAL", "MATERIAL", "THESIS_BREAK"]
+    enduranceReason: str
+    plannedSetup: str
+    actualSession: str
+    verdict: str
+    why: str
+
+
+class TomorrowScenario(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["DOWN", "NEUTRAL", "UP"]
+    probabilityPct: int = Field(ge=0, le=100)
+    headline: str
+    likelyReasons: list[str] = Field(min_length=1, max_length=4)
+    confirmation: str
+    whatItMeans: str
+    action: str
+
+
+class TomorrowScenarioMap(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseCase: Literal["DOWN", "NEUTRAL", "UP"]
+    probabilityBasis: str
+    scenarios: list[TomorrowScenario] = Field(min_length=3, max_length=3)
+    overnightWatch: list[str] = Field(min_length=1, max_length=4)
+
+
+class AgentDailySection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    verdict: str
+    evidence: list[str] = Field(min_length=1, max_length=4)
+    action: str
+
+
 class TodayPerformance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     signal: str
     tone: Literal["good", "warn", "bad"]
-    buyScore: int = Field(ge=1, le=100)
+    buyScore: DecisiveScore
     headline: str
     summary: str
-    sessionRead: str
-    whatChangedToday: str
-    keyLevel: str
-    action: str
+    todayVsPlan: TodayPlanAssessment
+    tomorrow: TomorrowScenarioMap
+    analysisTitle: str
+    analysisSections: list[AgentDailySection] = Field(min_length=3, max_length=3)
+    holdingAction: Literal["HOLD", "NO_ACTION", "ADD_SMALL", "ADD", "REDUCE", "SELL"]
+    holdingActionReason: str
+    addGate: str
+    sellGate: str
+    whatMattersTonight: str
     risk: str
+    recap: str
+    agentFit: Literal["aligned", "neutral", "against"]
+    agentFitReason: str
 
 
 class TodayPerformanceResponse(TodayPerformance):
@@ -465,7 +584,7 @@ class PortfolioReviewSection(BaseModel):
 class PortfolioReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    score: int = Field(ge=0, le=100)
+    score: DecisiveScore
     verdict: str
     intro: str
     sections: list[PortfolioReviewSection] = Field(min_length=1, max_length=4)
@@ -480,15 +599,48 @@ class PortfolioReviewResponse(PortfolioReview):
     generatedAt: str | None = None
 
 
+class BuyTimingMonthDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    month: Literal["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    action: Literal["BUY", "ADD_SMALL", "HOLD", "TRIM", "SELL"]
+    buyBudgetPct: int = Field(ge=0, le=100)
+    trimPositionPct: int = Field(ge=0, le=100)
+    reason: str
+
+
 class BuyTimingNarrative(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     headline: str
     summary: str
     action: Literal["BUY", "WAIT", "TRIM", "AVOID"]
+    perspectiveScore: DecisiveScore
+    perspectiveReason: str
     recap: str
     agentFit: Literal["aligned", "neutral", "against"]
     agentFitReason: str
+    todayInstruction: str
+    nextMove: str
+    nextMoveTiming: str
+    buyCondition: str
+    reduceCondition: str
+    monthlyPlan: list[BuyTimingMonthDecision] = Field(min_length=12, max_length=12)
+
+
+class BacktradeDecision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["BUY", "HOLD", "TRIM", "SELL"]
+    buyCashPct: int = Field(ge=0, le=100)
+    trimPositionPct: int = Field(ge=0, le=100)
+    conviction: DecisiveScore
+    signalRead: str
+    timingRead: str
+    analystRead: str
+    decisionBasis: Literal["SIGNAL", "BUY_TIMING", "ANALYST", "BLENDED"]
+    reason: str
+    invalidation: str
 
 
 class PredictedTechnicalMove(BaseModel):

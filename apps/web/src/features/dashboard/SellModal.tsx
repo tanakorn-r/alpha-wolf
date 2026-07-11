@@ -1,12 +1,15 @@
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { Money } from "../../components/Money";
 import { Modal } from "../../components/ui/Modal";
+import { formatCurrency, priceToUsdBase } from "../../lib/format";
 import type { Dashboard } from "./useDashboard";
 
 export function SellModal({ dash }: { dash: Dashboard }) {
   const holding = dash.sellTarget;
   if (!holding) return null;
-  const proceeds = holding.shares * holding.price;
+  // holding.price is the instrument-native quote (e.g. THB for .BK); convert to
+  // USD base before it feeds into <Money>, which expects USD-base aggregate money.
+  const proceeds = holding.shares * priceToUsdBase(holding.price, holding.currency ?? holding.symbol);
   return (
     <Modal title={`Sell ${holding.symbol}`} onClose={dash.cancelSell}>
       <p className="text-[13px] leading-[1.6] text-[#bcbcc2]">
@@ -14,7 +17,7 @@ export function SellModal({ dash }: { dash: Dashboard }) {
       </p>
       <div className="mt-4 overflow-hidden rounded-[11px] border border-[#2a2a31]">
         <Row label="Shares" value={String(holding.shares)} />
-        <Row label="Current price" value={<Money value={holding.price} />} />
+        <Row label="Current price" value={formatCurrency(holding.price, holding.currency)} />
         <Row label="Realized P/L" value={<Money value={holding.gainLoss} />} color={holding.gainLoss >= 0 ? "#3ecf8e" : "#f2575c"} />
         <div className="flex items-center justify-between bg-[#121215] px-[15px] py-[14px]">
           <span className="font-semibold">Estimated proceeds</span>

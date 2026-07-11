@@ -4,8 +4,9 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
+from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import normalize_agent_id
 from internal.ai.context import build_analysis_context
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_quant_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
@@ -93,20 +94,23 @@ def _fetch_analysis_data(
 
 
 @router.post("/api/analysis/{symbol}", response_model=StockAnalysisResponse)
-def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
+def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    position_context = _position_context(normalized)
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
+    position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"v14:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"{account_scope}:v21-agent-method:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
     cached = cache_get("analysis", cache_key)
-    if cached is not None:
+    if cached is not None and not force:
         return cached
 
     bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    _require_ai_market_data(bundle, normalized)
 
     context = build_analysis_context(
         bundle,
@@ -127,15 +131,16 @@ def analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), a
 
 
 @router.post("/api/analysis/{symbol}/quant", response_model=QuantPerspectiveResponse)
-def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
+def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
+    account_scope = account_cache_scope(user_id_from_request(request))
     mode = str((payload or {}).get("mode") or "").strip().lower()
     mode = mode if mode in {"swing", "day", "long", "value", "fomo"} else None
-    cache_key = f"quant:v14:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
+    cache_key = f"{account_scope}:quant:v16-agent-method:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
     cached = cache_get("analysis", cache_key)
-    if cached is not None:
+    if cached is not None and not force:
         return cached
 
     bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
@@ -147,6 +152,7 @@ def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    _require_ai_market_data(bundle, normalized)
 
     context = build_analysis_context(
         bundle,
@@ -166,13 +172,14 @@ def quant_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
 
 
 @router.post("/api/analysis/{symbol}/valuation", response_model=ValuationVerdictResponse)
-def valuation_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
+def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    cache_key = f"valuation:v9:{normalized}:{strategy}:{agent_id}"
+    account_scope = account_cache_scope(user_id_from_request(request))
+    cache_key = f"{account_scope}:valuation:v16-character-quote:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
-    if cached is not None:
+    if cached is not None and not force:
         return cached
 
     bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
@@ -182,6 +189,7 @@ def valuation_analysis(symbol: str, payload: dict[str, Any] | None = Body(defaul
     )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    _require_ai_market_data(bundle, normalized)
 
     context = build_analysis_context(
         bundle,
@@ -196,18 +204,33 @@ def valuation_analysis(symbol: str, payload: dict[str, Any] | None = Body(defaul
     except OpenAIAnalysisError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    # Keep objective valuation multiples authoritative even if the model omits an echo field.
+    business = bundle.get("business") if isinstance(bundle.get("business"), dict) else {}
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    result = {
+        **result,
+        "metrics": {
+            **metrics,
+            "peRatio": business.get("peRatio"),
+            "forwardPE": business.get("forwardPE"),
+        },
+    }
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
 
 @router.post("/api/analysis/{symbol}/today", response_model=TodayPerformanceResponse)
-def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera")) -> dict[str, Any]:
+def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    cache_key = f"today:v6:{normalized}:{strategy}:{agent_id}"
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
+    position_context = _position_context(normalized, user_id)
+    position_cache_key = _position_cache_key(position_context)
+    cache_key = f"{account_scope}:today:v12-agent-method:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
     cached = cache_get("analysis", cache_key)
-    if cached is not None:
+    if cached is not None and not force:
         return cached
 
     bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
@@ -219,12 +242,14 @@ def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    _require_ai_market_data(bundle, normalized)
 
     context = build_analysis_context(
         bundle,
         financials=financials_data,
         market_comparison=market_data,
         domain_insights=insights_data,
+        position_context=position_context,
         agent_id=agent_id,
     )
 
@@ -237,10 +262,41 @@ def today_analysis(symbol: str, payload: dict[str, Any] | None = Body(default=No
     return result
 
 
-def _position_context(symbol: str) -> dict[str, Any]:
+def _require_ai_market_data(bundle: dict[str, Any], symbol: str) -> None:
+    """Never spend an AI call or publish a rating on an unpriced shell record."""
+    stock = bundle.get("stock") if isinstance(bundle.get("stock"), dict) else {}
+    history = bundle.get("history") if isinstance(bundle.get("history"), list) else []
+    try:
+        price = float(stock.get("price") or 0)
+    except (TypeError, ValueError):
+        price = 0
+
+    usable_closes = 0
+    for point in history:
+        if not isinstance(point, dict):
+            continue
+        try:
+            if float(point.get("close") or 0) > 0:
+                usable_closes += 1
+        except (TypeError, ValueError):
+            continue
+
+    missing: list[str] = []
+    if price <= 0:
+        missing.append("a valid current price")
+    if usable_closes < 5:
+        missing.append("usable price history")
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{symbol} cannot be rated yet because the market feed has no {' and '.join(missing)}. No AI score was generated.",
+        )
+
+
+def _position_context(symbol: str, user_id: int = 0) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     try:
-        portfolio = build_portfolio_dashboard()
+        portfolio = build_portfolio_dashboard(user_id)
         data = portfolio.model_dump() if hasattr(portfolio, "model_dump") else dict(portfolio or {})
         for holding in data.get("holdings") or []:
             if str(holding.get("symbol") or "").upper() != normalized:
@@ -264,7 +320,7 @@ def _position_context(symbol: str) -> dict[str, Any]:
         print(f"Warning: Portfolio context load failed for {normalized}: {exc}")
 
     try:
-        for holding in list_holdings():
+        for holding in list_holdings(user_id):
             if holding.symbol.upper() != normalized:
                 continue
             return {
@@ -303,16 +359,17 @@ def _position_cache_key(context: dict[str, Any]) -> str:
 
 
 @router.post("/api/strategy/recommendations", response_model=StrategyPlaybookResponse)
-def strategy_recommendations(payload: StrategyRecommendationRequest, agent: str = Query("vera")) -> dict[str, Any]:
+def strategy_recommendations(payload: StrategyRecommendationRequest, request: Request, agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
     strategy_prompt = payload.strategy.strip()
     base_strategy = _infer_base_strategy(strategy_prompt)
     agent_id = normalize_agent_id(agent)
+    account_scope = account_cache_scope(user_id_from_request(request))
     cache_digest = hashlib.sha256(
-        f"{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}".encode("utf-8")
+        f"{account_scope}:{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}".encode("utf-8")
     ).hexdigest()[:24]
-    cache_key = f"strategy-playbook:v6:{cache_digest}"
+    cache_key = f"{account_scope}:strategy-playbook:v7-agent-method:{cache_digest}"
     cached = cache_get("analysis", cache_key)
-    if cached is not None:
+    if cached is not None and not force:
         return cached
 
     candidates, _, total = build_market_page(
@@ -346,16 +403,18 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, agent: str 
 
 
 @router.post("/api/analysis/portfolio/review", response_model=PortfolioReviewResponse)
-def portfolio_review(agent: str = Query("vera")) -> dict[str, Any]:
+def portfolio_review(request: Request, agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
     agent_id = normalize_agent_id(agent)
-    portfolio = build_portfolio_dashboard()
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
+    portfolio = build_portfolio_dashboard(user_id)
     context = _portfolio_review_context(portfolio)
     cache_digest = hashlib.sha256(
-        f"{agent_id}:{context.get('totalValue')}:{context.get('gainLossPct')}:{context.get('forwardYield')}:{','.join(item.get('symbol', '') for item in context.get('holdings', []))}".encode("utf-8")
+        f"{account_scope}:{agent_id}:{context.get('totalValue')}:{context.get('gainLossPct')}:{context.get('forwardYield')}:{','.join(item.get('symbol', '') for item in context.get('holdings', []))}".encode("utf-8")
     ).hexdigest()[:24]
-    cache_key = f"portfolio-review:v4:{cache_digest}"
+    cache_key = f"{account_scope}:portfolio-review:v5-agent-method:{cache_digest}"
     cached = cache_get("analysis", cache_key)
-    if cached is not None:
+    if cached is not None and not force:
         return cached
 
     try:

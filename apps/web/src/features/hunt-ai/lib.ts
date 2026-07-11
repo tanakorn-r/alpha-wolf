@@ -1,7 +1,7 @@
 import type { StockDetailResponse, UpwardMove } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
 
-export type HuntTab = "signals" | "brief" | "timing" | "intraday" | "n100" | "strategy" | "analyst";
+export type HuntTab = "signals" | "brief" | "timing" | "replay" | "intraday" | "n100" | "strategy" | "analyst";
 export type N100Timeframe = "1D" | "1W";
 export type StratMode = "swing" | "day" | "long" | "value" | "fomo";
 export type MoveDirection = "UP" | "DOWN" | "FLAT";

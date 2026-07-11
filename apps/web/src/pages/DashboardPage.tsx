@@ -6,16 +6,13 @@ import { EmptyPortfolio } from "../features/dashboard/EmptyPortfolio";
 import { HoldingFormModal } from "../features/dashboard/HoldingFormModal";
 import { HoldingsTable } from "../features/dashboard/HoldingsTable";
 import { IncomeList } from "../features/dashboard/IncomeList";
-import { PlanCard } from "../features/dashboard/PlanCard";
 import { PortfolioValueCard } from "../features/dashboard/PortfolioValueCard";
 import { SellModal } from "../features/dashboard/SellModal";
 import { StatsRow } from "../features/dashboard/StatsRow";
 import { useDashboard } from "../features/dashboard/useDashboard";
-import { usePlanCard } from "../features/dashboard/usePlanCard";
 
 export function DashboardPage() {
   const dash = useDashboard();
-  const plan = usePlanCard(dash);
 
   if (dash.isSkeleton) return <DashboardSkeleton />;
 
@@ -26,14 +23,11 @@ export function DashboardPage() {
       ) : null}
 
       {dash.showEmptyHero ? (
-        <EmptyPortfolio />
+        <EmptyPortfolio onAdd={dash.holdingForm.show} />
       ) : (
         <>
           <StatsRow dash={dash} />
-          <section className="grid gap-[14px] xl:grid-cols-[1fr_320px]">
-            <PortfolioValueCard dash={dash} />
-            <PlanCard plan={plan} />
-          </section>
+          <PortfolioValueCard dash={dash} />
           {dash.hasHoldings ? <ChartsRow dash={dash} /> : null}
         </>
       )}

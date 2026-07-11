@@ -66,10 +66,14 @@ def build_market_page(
     sort: str = "score",
     region: str = "all",
     query: str = "",
+    sector: str | None = None,
 ) -> tuple[list[dict[str, Any]], int, int]:
     records = get_market_catalog()
     if region in {"us", "th"}:
         records = [record for record in records if region in record.get("indexes", [])]
+    if sector and sector.lower() != "all":
+        target = sector.strip().lower()
+        records = [record for record in records if str(record.get("sector") or "").lower() == target]
     term = query.strip().lower()
     if term:
         records = [record for record in records if term in str(record.get("symbol") or "").lower() or term in str(record.get("name") or "").lower()]

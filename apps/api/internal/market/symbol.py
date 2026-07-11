@@ -11,7 +11,16 @@ DETAIL_TTL_SECONDS = 180
 # A typed name that isn't a real ticker still hits yfinance, which may 404/raise or
 # resolve to a non-security (a fund/currency/index whose display name reads like a
 # person). Only real tradeable instruments are accepted; everything else → no match.
-_SUPPORTED_QUOTE_TYPES = {"EQUITY", "ETF", "MUTUALFUND", "MUTUAL_FUND"}
+_SUPPORTED_QUOTE_TYPES = {
+    "EQUITY",
+    "ETF",
+    "MUTUALFUND",
+    "MUTUAL_FUND",
+    "FUTURE",
+    "INDEX",
+    "CURRENCY",
+    "CRYPTOCURRENCY",
+}
 
 
 def fetch_symbol_record(symbol: str) -> dict[str, Any] | None:

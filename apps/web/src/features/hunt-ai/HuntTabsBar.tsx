@@ -5,6 +5,7 @@ const tabs: Array<{ key: HuntTab; label: string; tag?: string; tone?: "live" | "
   { key: "signals", label: "Signals", tag: "PRO", tone: "pro"  },
   { key: "brief", label: "Daily Brief", tag: "PRO", tone: "pro" },
   { key: "timing", label: "Buy Timing", tag: "PRO", tone: "pro" },
+  { key: "replay", label: "AI Replay", tag: "LAB", tone: "ultra" },
   { key: "analyst", label: "Analyst", tag: "PRO", tone: "pro" },
 ];
 
@@ -38,5 +39,6 @@ function TabGlyph({ tab }: { tab: HuntTab }) {
   if (tab === "signals") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 11l3-4 3 3 4-6 2 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (tab === "brief") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 3.5h10M3 7h7M3 10.5h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="M12 7h1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
   if (tab === "timing") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" /><path d="M8 4.7V8l2.4 1.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  if (tab === "replay") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5.2 4H2.8v-2.4M3 4a5.8 5.8 0 1 1-1 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /><path d="M6.5 6v4l3-2-3-2Z" fill="currentColor" /></svg>;
   return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" stroke="currentColor" strokeWidth="1.4" /><path d="M4 6h8M4 9h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
 }

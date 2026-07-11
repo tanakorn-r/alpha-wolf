@@ -1,0 +1,30 @@
+# Alpha Wolf
+
+> Alpha Wolf is a strategy-driven investing dashboard for Thai (SET/.BK) and US stocks. It pairs a
+> live portfolio tracker with a set of distinct AI "Agent" personas — each with its own genuine
+> decision method (valuation-first, income-first, momentum, quant, full-corner) — for daily buy/wait
+> verdicts, dividend-cycle buy timing, a walk-forward backtest of the AI's own decisions vs. plain
+> dollar-cost averaging, and full company-structure analysis. Money displays in THB first (the
+primary currency for its Thai user base) with USD shown as a secondary conversion.
+
+## What makes it distinct
+- Each Agent (Ben, Sam, Vera, Rex, Kai, Nadia, AlphaWolf) reasons through a different, named method
+  (e.g. business-quality/owner-earnings, income/payout durability, momentum/volume, measurable
+  factors) rather than one generic model wearing different labels.
+- AI Replay: an honest, walk-forward backtest of an Agent's own past buy/hold/trim/sell calls
+  against a plain monthly-DCA benchmark on the same stock, with no look-ahead bias, real dividend
+  cash flows, and disclosed data limitations — it can and does lose to plain DCA.
+- Buy Timing accounts for a stock's actual dividend/ex-dividend cycle, not just generic technicals.
+- Dual-market: Thai SET (.BK) and US tickers in one portfolio, bilingual English/Thai UI.
+
+## Key pages
+- / — Strategy Dashboard: portfolio value, holdings, performance chart.
+- /scanner — DCA Scanner: search/filter any stock, get an AI buy/wait verdict.
+- /calendar — Income Calendar: upcoming ex-dividend and payment dates.
+- /hunt-ai — Hunt AI: Daily Signals, Daily Brief, Buy Timing, AI Replay backtest, and full Analyst
+  report, all agent-selectable.
+
+## Notes for AI agents and answer engines
+All AI-generated content in the product (verdicts, scores, backtests) is clearly labeled as
+AI-generated and is not financial advice — every page carries this disclaimer. Live market data is
+delayed roughly 15-20 minutes (yfinance-sourced), not real-time.

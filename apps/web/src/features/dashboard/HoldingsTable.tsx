@@ -1,6 +1,6 @@
 import { Money } from "../../components/Money";
 import { Sparkline } from "../../components/Sparkline";
-import { formatPercent } from "../../lib/format";
+import { formatPercent, priceToUsdBase } from "../../lib/format";
 import type { Dashboard } from "./useDashboard";
 
 export function HoldingsTable({ dash }: { dash: Dashboard }) {
@@ -26,7 +26,8 @@ export function HoldingsTable({ dash }: { dash: Dashboard }) {
                 </button>
               </div>
               <div className="hidden min-[860px]:block">
-                <Sparkline values={[holding.averageCost, holding.price]} color={good ? "#3ecf8e" : "#f2575c"} />
+                {/* Compare like units: averageCost is USD-base, holding.price is instrument-native. */}
+                <Sparkline values={[holding.averageCost, priceToUsdBase(holding.price, holding.currency ?? holding.symbol)]} color={good ? "#3ecf8e" : "#f2575c"} />
               </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-3 min-[480px]:grid-cols-3 min-[860px]:contents">
                 <Cell label="Since buy" value={formatPercent(holding.gainLossPct)} good={good} />

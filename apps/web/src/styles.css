@@ -79,9 +79,14 @@ body {
 }
 
 /* App is designed in hardcoded px; a root zoom scales every font + spacing
-   proportionally up to web-standard sizing without touching each class. */
-#root {
-  zoom: var(--aw-root-zoom);
+   proportionally up to web-standard sizing without touching each class.
+   Mobile widths (<720px, matching the sidebar/bottom-nav breakpoint) already
+   get their own tighter classes below — stacking a 10% zoom on top of those
+   made everything (especially the header) oversized on phones. */
+@media (min-width: 720px) {
+  #root {
+    zoom: var(--aw-root-zoom);
+  }
 }
 
 body {
@@ -233,7 +238,6 @@ select:disabled,
 @media (max-width: 719px) {
   /* Mobile overlays live under #root, which is zoomed to 1.1 for the app UI.
      Compensate their vertical size so fixed sheets fit the real device viewport. */
-  .aw-modal-panel,
   .aw-detail-panel,
   .aw-deep-panel {
     max-height: calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) / 1.1) !important;

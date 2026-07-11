@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import type { StockRecord, StrategyKey } from "../../data/market";
 import { loadDiscoveries, loadPortfolio, saveHolding, summarizeStock, type StockAnalysisResponse } from "../../lib/api";
-import { formatCurrency, formatPercent, formatShortDate } from "../../lib/format";
+import { formatCurrency, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
 import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useWolfStore } from "../../store/useWolfStore";
 import type { StrategyIconKind } from "../../components/ui/icons";
@@ -53,6 +53,22 @@ export const sortLabels: Record<SortKey, string> = {
   name: "Ticker",
 };
 
+// Fixed GICS sectors the backend catalog is built from (see catalog.CATALOG_SECTORS).
+// Sector filtering is server-side, so the dropdown uses this fixed list, not loaded items.
+export const SECTORS = [
+  "Technology",
+  "Financial Services",
+  "Healthcare",
+  "Consumer Cyclical",
+  "Consumer Defensive",
+  "Industrials",
+  "Communication Services",
+  "Energy",
+  "Utilities",
+  "Real Estate",
+  "Basic Materials",
+] as const;
+
 export type MatchVM = {
   item: StockRecord;
   rank: number;
@@ -81,8 +97,6 @@ export function useStockHunt() {
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
   const [strategyMode, setStrategyMode] = useState<StrategyMode>("swing");
   const baseStrategy = modeToBaseStrategy[strategyMode];
-  const cashReserve = useWolfStore((state) => state.cashReserve);
-  const spendCashReserve = useWolfStore((state) => state.spendCashReserve);
 
   const query = useDebouncedValue(searchQuery.trim(), DISCOVERY_DEBOUNCE_MS);
 
@@ -117,8 +131,8 @@ export function useStockHunt() {
 
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const discoveryQuery = useInfiniteQuery({
-    queryKey: ["discoveries", query, market, baseStrategy, strategyMode, sortBy],
-    queryFn: ({ pageParam, signal }) => loadDiscoveries({ q: query || undefined, kind: "stock", region: market, strategy: baseStrategy, mode: strategyMode, sort: sortBy, page: pageParam, limit: 40, signal }),
+    queryKey: ["discoveries", query, market, baseStrategy, strategyMode, sortBy, sector],
+    queryFn: ({ pageParam, signal }) => loadDiscoveries({ q: query || undefined, kind: "stock", region: market, strategy: baseStrategy, mode: strategyMode, sort: sortBy, sector, page: pageParam, limit: 40, signal }),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined),
     staleTime: 60_000,
@@ -129,14 +143,11 @@ export function useStockHunt() {
   const items = useMemo(() => discoveryQuery.data?.pages.flatMap((page) => page.live) ?? [], [discoveryQuery.data]);
   const total = discoveryQuery.data?.pages[0]?.total ?? 0;
 
-  const sectors = useMemo(
-    () => Array.from(new Set(items.map((item) => item.sector).filter((value): value is string => Boolean(value && value !== "Unknown")))).sort(),
-    [items],
-  );
+  const sectors = SECTORS;
 
   const candidates = useMemo(() => {
-    let result = sector === "all" ? items : items.filter((item) => item.sector === sector);
-    const ranked = [...result];
+    // Sector filtering happens server-side (see loadDiscoveries `sector`); items are already scoped.
+    const ranked = [...items];
     ranked.sort((a, b) => {
       if (sortBy === "score") return scoreForMode(b, strategyMode) - scoreForMode(a, strategyMode);
       if (sortBy === "yield") return (b.strategyScores.yield ?? 0) - (a.strategyScores.yield ?? 0);
@@ -144,7 +155,7 @@ export function useStockHunt() {
       return a.symbol.localeCompare(b.symbol);
     });
     return ranked;
-  }, [items, sector, sortBy, strategyMode]);
+  }, [items, sortBy, strategyMode]);
 
   useEffect(() => {
     const node = loadMoreRef.current;
@@ -159,10 +170,8 @@ export function useStockHunt() {
     return () => observer.disconnect();
   }, [discoveryQuery.hasNextPage, discoveryQuery.isFetchingNextPage, discoveryQuery.fetchNextPage]);
 
-  const suggestedFor = (count: number) => (cashReserve > 0 ? Math.min(200, Math.round(cashReserve / Math.max(count, 1))) : null);
-
   const matches = useMemo<MatchVM[]>(() => {
-    const suggested = cashReserve > 0 ? Math.min(200, Math.round(cashReserve / Math.max(candidates.length, 1))) : null;
+    const suggested = null;
     return candidates.map((item, index) => {
       const score = scoreForMode(item, strategyMode);
       const scoreColor = score >= 85 ? "#3ecf8e" : score >= 70 ? "#f5c451" : "#8c8c95";
@@ -193,13 +202,11 @@ export function useStockHunt() {
         suggested,
       };
     });
-  }, [candidates, strategyMode, cashReserve]);
+  }, [candidates, strategyMode]);
 
   const top5 = useMemo(
-    () => candidates.slice(0, 5).map((item) => ({ item, amount: suggestedFor(Math.min(candidates.length, 5)) ?? 200 })),
-    // suggestedFor is stable per render; cashReserve drives it
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [candidates, cashReserve],
+    () => candidates.slice(0, 5).map((item) => ({ item, amount: 200 })),
+    [candidates],
   );
 
   const chip = strategyMode;
@@ -221,7 +228,6 @@ export function useStockHunt() {
     strategy: baseStrategy,
     strategyMode,
     strategyDescription: modeDescriptions[strategyMode],
-    cashReserve,
     matches,
     total,
     countLabel: `${matches.length === total ? `All ${matches.length}` : `${matches.length} of ${total}`} matches · sorted by ${sortLabels[sortBy]}`,
@@ -265,8 +271,9 @@ export function useStockHunt() {
       try {
         const portfolio = await loadPortfolio();
         for (const pick of top5) {
-          const price = pick.item.price;
-          if (!price || price <= 0) continue;
+          if (!pick.item.price || pick.item.price <= 0) continue;
+          // pick.amount is a USD-base budget; convert the native price so share count is right for THB.
+          const price = priceToUsdBase(pick.item.price, pick.item.currency ?? pick.item.symbol);
           const boughtShares = pick.amount / price;
           const existing = portfolio.holdings.find((holding) => holding.symbol === pick.item.symbol);
           const totalShares = (existing?.shares ?? 0) + boughtShares;
@@ -274,7 +281,6 @@ export function useStockHunt() {
           await saveHolding({ symbol: pick.item.symbol, shares: totalShares, averageCost: totalCost / totalShares, strategy: baseStrategy, monthlyDca: existing?.monthlyDca ?? 0 });
         }
         const amount = top5.reduce((sum, pick) => sum + pick.amount, 0);
-        spendCashReserve(Math.min(amount, cashReserve));
         setTop5Applied({ count: top5.length, amount });
         setTop5State("idle");
       } catch {
@@ -288,7 +294,7 @@ export function useStockHunt() {
       setAnalyzing(true);
       setAnalyzingSymbol(symbol);
       try {
-        setAnalysis(await summarizeStock(symbol, baseStrategy, activeAgentId));
+        setAnalysis(await summarizeStock(symbol, baseStrategy, activeAgentId, true));
       } finally {
         setAnalyzing(false);
         setAnalyzingSymbol("");

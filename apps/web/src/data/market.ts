@@ -23,6 +23,8 @@ export type StockRecord = {
   strategyScores: Record<StrategyKey, number>;
   dividendYield?: number | null;
   exDividendDate?: string | null;
+  // Attached by the live discovery feed (ETF / FUTURE / INDEX / EQUITY) for asset tagging.
+  quoteType?: string | null;
 };
 
 export const strategyLabels: Record<StrategyKey, string> = {

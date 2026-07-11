@@ -21,7 +21,7 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 
 def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
-    cache_key = f"v2:{normalized}:{strategy}"
+    cache_key = f"v7:dividend-uplift:{normalized}:{strategy}"
     cached = cache_get(BUY_TIMING_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
@@ -42,7 +42,8 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         futs = {
-            pool.submit(fetch_history, ticker, "5y"): "history",
+            # Keep dividends out of Close so the backtest can book and report them explicitly.
+            pool.submit(fetch_history, ticker, "5y", False): "history",
             pool.submit(fetch_dividends, ticker, "5y"): "dividends",
             pool.submit(build_detail_bundle, normalized, strategy): "detail",
             pool.submit(deep_analysis, normalized): "deep",
@@ -64,6 +65,7 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
                 deep = val or {}
 
     closes = _close_series(history)
+    history_dividends = _dividend_series(history)
     current_price = _latest_close(closes) or as_float(stock.get("price")) or as_float(deep.get("price"))
     events = _dividend_events(closes, dividends)
     intervals = _event_intervals(events)
@@ -94,7 +96,10 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
     cheapest = min(seasonality, key=lambda item: item["returnPct"])["month"] if seasonality else None
     peak = max(seasonality, key=lambda item: item["returnPct"])["month"] if seasonality else None
     monthly_map = _monthly_map(seasonality, events, cycle_days, next_ex, today)
+    monthly_history = _monthly_close_history(closes, history_dividends)
+    backtest = _backtest_monthly_plan(monthly_history, monthly_map)
     price_context = _price_context(closes, current_price)
+    business_structure = _business_structure(detail.get("business"))
     timeline = _build_timeline(today, last_ex, next_ex, current_buy_start, current_buy_end, buy_start, buy_end, trim_start, trim_end)
     pattern_good = bool(avg_dip is not None and avg_dip < -0.3 and (hit_rate or 0) >= 55)
     action = _action(pattern_good, today, current_buy_start, current_buy_end, trim_start, trim_end, current_price, deep, price_context)
@@ -144,11 +149,14 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
             "edgeVsRandomBuyPct": round(edge, 2) if edge is not None else None,
         },
         "priceContext": price_context,
+        "businessStructure": business_structure,
         "timeline": timeline,
         "seasonality": seasonality,
         "cheapestMonth": cheapest,
         "peakMonth": peak,
         "monthlyMap": monthly_map,
+        "monthlyHistory": monthly_history,
+        "backtest": backtest,
         "events": [
             {
                 "exDate": _iso(event["date"]),
@@ -173,17 +181,100 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
 
 
 def apply_ai_narrative(result: dict[str, Any], narrative: dict[str, Any]) -> dict[str, Any]:
+    narrative_agent = narrative.get("agent") if isinstance(narrative.get("agent"), dict) else {}
+    monthly_plan = _valid_agent_monthly_plan(result.get("monthlyMap"), narrative.get("monthlyPlan"), narrative_agent.get("id"), result.get("businessStructure"))
+    action = narrative.get("action") or result["action"]
+    agent_fit = narrative.get("agentFit")
+    if action != "BUY" and agent_fit == "aligned":
+        agent_fit = "neutral"
+    elif action == "BUY" and agent_fit == "against":
+        agent_fit = "neutral"
     return {
         **result,
         "headline": narrative.get("headline") or result["headline"],
         "summary": narrative.get("summary") or result["summary"],
-        "action": narrative.get("action") or result["action"],
+        "action": action,
+        "perspectiveScore": narrative.get("perspectiveScore"),
+        "perspectiveReason": narrative.get("perspectiveReason"),
         "narrativeSource": narrative.get("source") or "openai",
         "model": narrative.get("model"),
         "recap": narrative.get("recap"),
-        "agentFit": narrative.get("agentFit"),
+        "agentFit": agent_fit,
         "agentFitReason": narrative.get("agentFitReason"),
+        "todayInstruction": narrative.get("todayInstruction"),
+        "nextMove": narrative.get("nextMove"),
+        "nextMoveTiming": narrative.get("nextMoveTiming"),
+        "buyCondition": narrative.get("buyCondition"),
+        "reduceCondition": narrative.get("reduceCondition"),
+        "agentMonthlyPlan": monthly_plan,
+        "backtest": _backtest_monthly_plan(result.get("monthlyHistory"), monthly_plan) if monthly_plan else result.get("backtest"),
         "generatedAt": narrative.get("generatedAt"),
+    }
+
+
+def _valid_agent_monthly_plan(calculated: Any, proposed: Any, agent_id: str | None = None, business_structure: Any = None) -> list[dict[str, Any]] | None:
+    if not isinstance(calculated, list) or not isinstance(proposed, list):
+        return None
+    evidence = {item.get("month"): item for item in calculated if isinstance(item, dict) and item.get("month") in MONTHS}
+    decisions = {item.get("month"): item for item in proposed if isinstance(item, dict) and item.get("month") in MONTHS}
+    if len(evidence) != 12 or len(decisions) != 12:
+        return None
+    plan: list[dict[str, Any]] = []
+    for month in MONTHS:
+        decision = decisions[month]
+        action = decision.get("action")
+        buy_pct = max(0, min(100, int(decision.get("buyBudgetPct") or 0)))
+        trim_pct = max(0, min(100, int(decision.get("trimPositionPct") or 0)))
+        if action in {"BUY", "ADD_SMALL"}:
+            buy_pct = buy_pct or 25
+            trim_pct = 0
+        elif action in {"TRIM", "SELL"}:
+            buy_pct = 0
+            trim_pct = trim_pct or (100 if action == "SELL" else 25)
+        else:
+            buy_pct = 0
+            trim_pct = 0
+        plan.append({
+            **evidence[month],
+            "calculatedAction": evidence[month].get("action"),
+            "action": action,
+            "buyBudgetPct": buy_pct,
+            "trimPositionPct": trim_pct,
+            "reason": decision.get("reason"),
+        })
+
+    # Preserve the Agent's decision. Do not silently turn HOLD into ADD_SMALL to satisfy a generic
+    # DCA quota: Ben, Sam, Vera, Rex, Kai, Nadia, and AlphaWolf have different evidence gates.
+    return plan
+
+
+def _business_structure(business: Any) -> dict[str, Any]:
+    source = business if isinstance(business, dict) else {}
+    roe = as_float(source.get("roe"))
+    margin = as_float(source.get("profitMargin"))
+    revenue_growth = as_float(source.get("revenueGrowth"))
+    debt_to_equity = as_float(source.get("debtToEquity"))
+    available = [value for value in (roe, margin, revenue_growth, debt_to_equity) if value is not None]
+    at_risk_reasons = [
+        reason for condition, reason in (
+            (margin is not None and margin < 0, "negative profit margin"),
+            (roe is not None and roe < 0, "negative return on equity"),
+            (debt_to_equity is not None and debt_to_equity > 250, "very high debt to equity"),
+        ) if condition
+    ]
+    intact = (
+        margin is not None and margin > 0
+        and roe is not None and roe > 0
+        and (debt_to_equity is None or debt_to_equity <= 200)
+    )
+    status = "AT_RISK" if at_risk_reasons else "INTACT" if intact else "MIXED" if available else "UNPROVEN"
+    return {
+        "status": status,
+        "roe": roe,
+        "profitMargin": margin,
+        "revenueGrowth": revenue_growth,
+        "debtToEquity": debt_to_equity,
+        "reasons": at_risk_reasons,
     }
 
 
@@ -215,6 +306,149 @@ def _monthly_returns(closes: pd.Series) -> list[dict[str, Any]]:
         return [{"month": month, "returnPct": 0.0} for month in MONTHS]
     monthly = closes.resample("ME").last().pct_change().dropna() * 100.0
     return [{"month": month, "returnPct": round(float(monthly[monthly.index.month == index + 1].mean()) if not monthly[monthly.index.month == index + 1].empty else 0.0, 2)} for index, month in enumerate(MONTHS)]
+
+
+def _monthly_close_history(closes: pd.Series, dividends: pd.Series | None = None) -> list[dict[str, Any]]:
+    if closes.empty:
+        return []
+    monthly = closes.resample("ME").last().dropna().tail(61)
+    monthly_dividends = dividends.resample("ME").sum() if dividends is not None and not dividends.empty else pd.Series(dtype="float64")
+    return [{
+        "date": index.date().isoformat(),
+        "month": MONTHS[index.month - 1],
+        "close": round(float(value), 6),
+        "dividendPerShare": round(float(monthly_dividends.get(index, 0.0)), 6),
+    } for index, value in monthly.items()]
+
+
+def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
+    if not isinstance(history, list) or len(history) < 13 or not isinstance(plan, list):
+        return None
+    decisions = {item.get("month"): item for item in plan if isinstance(item, dict)}
+    strategy_shares = 0.0
+    strategy_cash = 0.0
+    benchmark_shares = 0.0
+    strategy_no_div_shares = strategy_no_div_cash = benchmark_no_div_shares = 0.0
+    invested_months = 0
+    observed_months = 0
+    monthly_contribution = 100.0
+    ledger: list[dict[str, Any]] = []
+    strategy_index = benchmark_index = 100.0
+    strategy_peak = benchmark_peak = 100.0
+    strategy_max_drawdown = benchmark_max_drawdown = 0.0
+    previous_strategy_value = previous_benchmark_value = 0.0
+    strategy_dividends_received = benchmark_dividends_reinvested = 0.0
+    for point in history:
+        if not isinstance(point, dict):
+            continue
+        price = as_float(point.get("close"))
+        month = point.get("month")
+        if not price or month not in MONTHS:
+            continue
+        dividend_per_share = max(0.0, as_float(point.get("dividendPerShare")) or 0.0)
+        strategy_dividend = strategy_shares * dividend_per_share
+        benchmark_dividend = benchmark_shares * dividend_per_share
+        if strategy_dividend > 0:
+            strategy_cash += strategy_dividend
+            strategy_dividends_received += strategy_dividend
+        if benchmark_dividend > 0:
+            benchmark_shares += benchmark_dividend / price
+            benchmark_dividends_reinvested += benchmark_dividend
+        # Measure drawdown without letting a fresh monthly deposit mask a market loss. The
+        # pre-contribution values capture only the return earned by last month's portfolio.
+        strategy_value_before_flow = strategy_cash + strategy_shares * price
+        benchmark_value_before_flow = benchmark_shares * price
+        if previous_strategy_value > 0:
+            strategy_index *= strategy_value_before_flow / previous_strategy_value
+            strategy_peak = max(strategy_peak, strategy_index)
+            strategy_max_drawdown = min(strategy_max_drawdown, (strategy_index / strategy_peak - 1.0) * 100.0)
+        if previous_benchmark_value > 0:
+            benchmark_index *= benchmark_value_before_flow / previous_benchmark_value
+            benchmark_peak = max(benchmark_peak, benchmark_index)
+            benchmark_max_drawdown = min(benchmark_max_drawdown, (benchmark_index / benchmark_peak - 1.0) * 100.0)
+        observed_months += 1
+        strategy_cash += monthly_contribution
+        benchmark_shares += monthly_contribution / price
+        strategy_no_div_cash += monthly_contribution
+        benchmark_no_div_shares += monthly_contribution / price
+        decision = decisions.get(month) or {}
+        action = decision.get("action")
+        fallback_pct = 100 if action in {"BUY", "ADD_SMALL"} else 0
+        buy_pct = max(0.0, min(100.0, float(decision.get("buyBudgetPct", fallback_pct) or 0)))
+        # The available pool includes this month's contribution, cash preserved by earlier
+        # HOLD calls, and proceeds from trims. A later BUY must be able to redeploy that
+        # accumulated reserve or the timing strategy is unfairly modeled as permanent cash drag.
+        buy_amount = strategy_cash * buy_pct / 100.0
+        if buy_amount > 0:
+            strategy_shares += buy_amount / price
+            strategy_cash -= buy_amount
+            invested_months += 1
+        no_div_buy_amount = strategy_no_div_cash * buy_pct / 100.0
+        if no_div_buy_amount > 0:
+            strategy_no_div_shares += no_div_buy_amount / price
+            strategy_no_div_cash -= no_div_buy_amount
+        trim_pct = max(0.0, min(100.0, float(decision.get("trimPositionPct", 0) or 0)))
+        if trim_pct > 0 and strategy_shares > 0:
+            shares_sold = strategy_shares * trim_pct / 100.0
+            strategy_shares -= shares_sold
+            strategy_cash += shares_sold * price
+        if trim_pct > 0 and strategy_no_div_shares > 0:
+            no_div_shares_sold = strategy_no_div_shares * trim_pct / 100.0
+            strategy_no_div_shares -= no_div_shares_sold
+            strategy_no_div_cash += no_div_shares_sold * price
+        contributed = observed_months * monthly_contribution
+        stock_value = strategy_shares * price
+        account_value = strategy_cash + stock_value
+        previous_strategy_value = account_value
+        previous_benchmark_value = benchmark_shares * price
+        ledger.append({"date": point.get("date"), "month": month, "action": action, "buyBudgetPct": round(buy_pct), "trimPositionPct": round(trim_pct), "dividendIncome": round(strategy_dividend, 2), "contributed": round(contributed, 2), "cash": round(strategy_cash, 2), "stockValue": round(stock_value, 2), "accountValue": round(account_value, 2), "profitLoss": round(account_value - contributed, 2)})
+    if not observed_months or not ledger:
+        return None
+    final_price = as_float(history[-1].get("close"))
+    contributed = observed_months * monthly_contribution
+    stock_value = strategy_shares * final_price
+    account_value = strategy_cash + stock_value
+    benchmark_value = benchmark_shares * final_price
+    strategy_no_div_value = strategy_no_div_cash + strategy_no_div_shares * final_price
+    benchmark_no_div_value = benchmark_no_div_shares * final_price
+    exposure_samples = [
+        float(item["stockValue"]) / float(item["accountValue"]) * 100.0
+        for item in ledger
+        if float(item.get("accountValue") or 0) > 0
+    ]
+    average_stock_exposure = sum(exposure_samples) / len(exposure_samples) if exposure_samples else 0.0
+    strategy_return = (account_value / contributed - 1.0) * 100.0
+    benchmark_return = (benchmark_value / contributed - 1.0) * 100.0
+    strategy_no_div_return = (strategy_no_div_value / contributed - 1.0) * 100.0
+    benchmark_no_div_return = (benchmark_no_div_value / contributed - 1.0) * 100.0
+    return {
+        "years": round(observed_months / 12.0, 1),
+        "observedMonths": observed_months,
+        "investedMonths": invested_months,
+        "skippedMonths": observed_months - invested_months,
+        "strategyReturnPct": round(strategy_return, 2),
+        "alwaysBuyReturnPct": round(benchmark_return, 2),
+        "strategyReturnWithoutDividendsPct": round(strategy_no_div_return, 2),
+        "alwaysBuyReturnWithoutDividendsPct": round(benchmark_no_div_return, 2),
+        "strategyDividendReturnBoostPct": round(strategy_return - strategy_no_div_return, 2),
+        "alwaysBuyDividendReturnBoostPct": round(benchmark_return - benchmark_no_div_return, 2),
+        "edgePct": round(strategy_return - benchmark_return, 2),
+        "strategyMaxDrawdownPct": round(abs(strategy_max_drawdown), 2),
+        "alwaysBuyMaxDrawdownPct": round(abs(benchmark_max_drawdown), 2),
+        "averageStockExposurePct": round(average_stock_exposure, 2),
+        "agentDividendsReceived": round(strategy_dividends_received, 2),
+        "alwaysBuyDividendsReinvested": round(benchmark_dividends_reinvested, 2),
+        "monthlyContribution": monthly_contribution,
+        "totalContributed": round(contributed, 2),
+        "endingValue": round(account_value, 2),
+        "endingCash": round(strategy_cash, 2),
+        "endingStockValue": round(stock_value, 2),
+        "profitLoss": round(account_value - contributed, 2),
+        "alwaysBuyEndingValue": round(benchmark_value, 2),
+        "ledger": ledger,
+        "method": "Starts at 0 and adds 100 each historical month. Buys deploy the stated percentage of all available DCA cash, including prior unspent budget, trim proceeds, and received dividends; trims sell the stated share percentage. The Agent accumulates dividends as cash for later plan buys, while normal DCA reinvests dividends at that month-end close. Held shares revalue at actual unadjusted month-end closes.",
+        "inSample": True,
+    }
 
 
 def _monthly_map(seasonality: list[dict[str, Any]], events: list[dict[str, Any]], cycle_days: int | None, next_ex: date | None, today: date) -> list[dict[str, Any]]:
@@ -412,8 +646,24 @@ def _close_series(history: pd.DataFrame) -> pd.Series:
     if history.empty or "Close" not in history.columns:
         return pd.Series(dtype="float64")
     closes = history["Close"].dropna().copy()
-    closes.index = pd.to_datetime(closes.index)
-    return closes
+    # Yahoo/cache payloads can occasionally mix timezone-aware datetime objects from different
+    # exchange offsets. Pandas refuses to combine those unless they are normalized through UTC.
+    normalized_index = pd.to_datetime(closes.index, utc=True, errors="coerce")
+    valid = ~normalized_index.isna()
+    closes = closes[valid]
+    closes.index = normalized_index[valid]
+    return closes.sort_index()
+
+
+def _dividend_series(history: pd.DataFrame) -> pd.Series:
+    if history.empty or "Dividends" not in history.columns:
+        return pd.Series(dtype="float64")
+    dividends = history["Dividends"].fillna(0.0).astype(float).copy()
+    normalized_index = pd.to_datetime(dividends.index, utc=True, errors="coerce")
+    valid = ~normalized_index.isna()
+    dividends = dividends[valid]
+    dividends.index = normalized_index[valid]
+    return dividends.sort_index()
 
 
 def _latest_close(closes: pd.Series) -> float | None:

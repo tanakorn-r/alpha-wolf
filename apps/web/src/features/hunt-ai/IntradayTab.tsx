@@ -131,7 +131,7 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
                     <IntradayLevel label="Enter at" value={moneyMaybe(analysis.entryPrice?.entryPrice, currency)} color={tone} />
                     <IntradayLevel label="Stop loss" value={moneyMaybe(stopFromEntry(analysis.entryPrice?.entryPrice), currency)} color="#f2575c" />
                     <IntradayLevel label="Take profit" value={moneyMaybe(analysis.targetPrice?.targetPrice, currency)} color="#3ecf8e" />
-                    <IntradayLevel label="Signal score" value={`${analysis.confidence}/100`} color={tone} />
+                    <IntradayLevel label="Agent perspective" value={analysis.confidence != null ? `${analysis.confidence}/100` : "N/A"} color={tone} />
                   </div>
                   <div className="font-mono text-[10px] text-[#5a5a62]">Cached {formatAnalyzedAt(intraday.analyzedAt)}</div>
                   <AgentRecap agent={analysis.agent} recap={analysis.recap} fit={analysis.agentFit} reason={analysis.agentFitReason} className="mt-2.5 text-left" />

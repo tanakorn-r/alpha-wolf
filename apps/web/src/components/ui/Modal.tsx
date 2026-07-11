@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   useEffect(() => {
@@ -12,7 +13,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     };
   }, [onClose]);
 
-  return (
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[calc(0.75rem+env(safe-area-inset-top))] min-[560px]:items-center min-[560px]:p-4">
       <button type="button" aria-label="Close modal" onClick={onClose} className="absolute inset-0" />
       <div className="aw-modal-panel relative flex max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-md flex-col overflow-hidden rounded-t-2xl border border-[#34343c] bg-[#161619] shadow-2xl min-[560px]:rounded-xl">
@@ -26,6 +27,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -22,7 +22,7 @@ class FakeHistoryTicker:
         self.calls = 0
         self.periods: list[str] = []
 
-    def history(self, *, period: str, interval: str) -> pd.DataFrame:
+    def history(self, *, period: str, interval: str, auto_adjust: bool = True) -> pd.DataFrame:
         self.calls += 1
         self.periods.append(period)
         return pd.DataFrame(

@@ -19,8 +19,8 @@ export function PortfolioValueCard({ dash }: { dash: Dashboard }) {
             <Legend color="#3ecf8e" label="Capital added" dot />
           </div>
         </div>
-        <button type="button" onClick={dash.holdingForm.show} className="rounded-lg border border-[#34343c] px-3 py-2 text-xs hover:border-[#3ecf8e]">
-          Edit holdings
+        <button type="button" onClick={dash.holdingForm.show} className="flex items-center gap-1.5 rounded-lg bg-[#3ecf8e] px-3.5 py-2 text-xs font-bold text-[#06120c] hover:opacity-90">
+          <span className="text-sm leading-none">+</span> Add stock
         </button>
       </div>
       <div className="relative mt-1 h-[300px]">

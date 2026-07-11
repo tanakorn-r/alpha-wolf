@@ -3,8 +3,9 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 
+from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import agent_badge, normalize_agent_id
 from internal.ai.context import build_analysis_context
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_buy_timing_with_openai, predict_technical_moves_with_openai
@@ -106,25 +107,38 @@ def details_deep(symbol: str) -> dict[str, Any]:
 @router.get("/api/details/{symbol}/buy-timing")
 def details_buy_timing(
     symbol: str,
+    request: Request,
     strategy: StrategyKey = Query("stable_dca"),
     agent: str = Query("vera"),
+    force: bool = Query(False),
 ) -> dict[str, Any]:
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
-    ai_cache_key = f"ai-buy-timing:v3:{normalized}:{strategy}:{agent_id}"
+    account_scope = account_cache_scope(user_id_from_request(request))
+    ai_cache_key = f"{account_scope}:ai-buy-timing:v26-character-exit-path:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", ai_cache_key)
-    if cached is not None:
+    if cached is not None and not force:
         return cached
 
     result = build_buy_timing(normalized, strategy)
     if not result:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    try:
+        has_price = float(result.get("price") or 0) > 0
+    except (TypeError, ValueError):
+        has_price = False
+    if not has_price:
+        # Keep the calculated fallback, but do not spend an AI call or attach a
+        # perspective score when there is no valid current market price.
+        return {**result, "agent": agent_badge(agent_id)}
 
     try:
         narrative = analyze_buy_timing_with_openai({"buyTiming": result}, agent_id)
-    except OpenAIAnalysisError:
-        return result
-    response = {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
+        response = {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
+    except (OpenAIAnalysisError, KeyError, TypeError, ValueError):
+        fallback = {**result, "agent": agent_badge(agent_id)}
+        cache_set("analysis", ai_cache_key, fallback, UPWARD_MOVES_TTL_SECONDS)
+        return fallback
     cache_set("analysis", ai_cache_key, response, UPWARD_MOVES_TTL_SECONDS)
     return response
 
@@ -132,15 +146,18 @@ def details_buy_timing(
 @router.get("/api/details/{symbol}/upward-moves", response_model=TechnicalMovesPredictionResponse)
 def details_upward_moves(
     symbol: str,
+    request: Request,
     timeframe: str = Query("1D", pattern="^(1D|1W)$"),
     strategy: StrategyKey = Query("capitalized"),
     agent: str = Query("vera"),
+    force: bool = Query(False),
 ) -> dict[str, Any]:
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
-    cache_key = f"ai-next-10-technical:v11:{normalized}:{timeframe}:{strategy}:{agent_id}"
+    account_scope = account_cache_scope(user_id_from_request(request))
+    cache_key = f"{account_scope}:ai-next-10-technical:v12-agent-method:{normalized}:{timeframe}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
-    if cached is not None:
+    if cached is not None and not force:
         return cached
 
     bundle = build_detail_bundle(normalized, strategy)

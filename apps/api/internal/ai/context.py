@@ -39,6 +39,10 @@ def build_analysis_context(
         # This is the requested page/setup strategy, not the selected AI persona. Keeping the
         # concepts separate prevents every Agent from being overwritten by the same swing role.
         "strategyMandate": _strategy_mandate(bundle.get("strategy"), bundle.get("mode")),
+        # Shared macro backdrop so every persona can weigh the market regime the stock trades in
+        # (SET Index for Thai names, S&P 500 for US) through its own lens instead of judging the
+        # ticker in a vacuum. Each Agent decides how much this matters — it is context, not a verdict.
+        "marketBackdrop": _market_backdrop(bundle.get("stock") or {}, market_comparison),
         "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
     }
     return json_safe(context)
@@ -81,6 +85,43 @@ def _compact_domain_insights(value: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _market_backdrop(stock: dict[str, Any], market_comparison: dict[str, Any] | None) -> dict[str, Any]:
+    symbol = str(stock.get("symbol") or "")
+    is_thai = symbol.upper().endswith(".BK")
+    index_name = "SET Index (Thailand)" if is_thai else "S&P 500 (US)"
+    region = "Thailand / SET" if is_thai else "US"
+    comparison = market_comparison or {}
+    benchmark = comparison.get("benchmark") or {}
+    stock_side = comparison.get("stock") or {}
+    points = comparison.get("points") or []
+
+    benchmark_return = _num(benchmark.get("returnPct"))
+    stock_return = _num(stock_side.get("returnPct"))
+    relative_pct = (stock_return - benchmark_return) if stock_return is not None and benchmark_return is not None else None
+
+    # Regime = slope of the last three monthly rebased benchmark points (100 = one year ago).
+    trend = "unknown"
+    if len(points) >= 3:
+        recent = [_num(point.get("benchmark")) for point in points[-3:]]
+        if all(value is not None for value in recent):
+            change = recent[-1] - recent[0]
+            trend = "rising" if change > 1.5 else "falling" if change < -1.5 else "flat"
+
+    regime = "unknown"
+    if benchmark_return is not None:
+        regime = "bull" if benchmark_return >= 8 else "bear" if benchmark_return <= -8 else "range-bound"
+
+    return {
+        "index": index_name,
+        "region": region,
+        "indexOneYearReturnPct": benchmark_return,
+        "indexRecentTrend": trend,
+        "marketRegime": regime,
+        "stockVsMarketPct": relative_pct,
+        "note": "Backdrop only. Weigh it through your own lens — a strong market does not make a weak setup a buy, and a soft market does not veto a wonderful business.",
+    }
+
+
 def _agent_input_pack(
     agent_id: str | None,
     bundle: dict[str, Any],
@@ -107,11 +148,17 @@ def _agent_input_pack(
     dividend_yield = _num(business.get("dividendYield"))
     payout_ratio = _num(business.get("payoutRatio"))
     pe = _num(business.get("peRatio"))
+    forward_pe = _num(business.get("forwardPE"))
     pbv = _num(business.get("priceToBook"))
     target = _num(business.get("targetMeanPrice"))
     volatility = _num(technicals.get("volatility"))
     volume_ratio = _num(technicals.get("volumeRatio"))
+    avg_volume = _num(technicals.get("avgVolume"))
+    current_volume = _num(technicals.get("currentVolume"))
+    volume_surge_pct = ((current_volume - avg_volume) / avg_volume * 100) if avg_volume and current_volume else None
     rsi = _num(technicals.get("rsi14"))
+    revenue_growth = _num(business.get("revenueGrowth"))
+    earnings_growth = _num(business.get("earningsGrowth"))
 
     core = {
         "symbol": stock.get("symbol"),
@@ -158,9 +205,16 @@ def _agent_input_pack(
     if agent == "kai":
         return {
             "agent": "kai",
-            "inputPriority": ["breakout heat", "crowd energy", "momentum acceleration", "quick flip target", "rug-pull risk", "hard exit"],
+            "inputPriority": ["volume surge (is the crowd here today)", "breakout heat", "momentum acceleration", "quick flip target", "rug-pull risk", "hard exit"],
             "primary": {
                 **core,
+                "volumeCheck": {
+                    "currentVolume": current_volume,
+                    "avgVolume": avg_volume,
+                    "volumeRatio": volume_ratio,
+                    "volumeSurgePct": volume_surge_pct,
+                    "read": "Volume IS the crowd. A breakout on thin volume is a trap; a move on >1.5x average volume is real chase fuel. No volume, no chase.",
+                },
                 "chaseSetup": {
                     "technicalSignal": technicals.get("signal"),
                     "momentum": technicals.get("momentum"),
@@ -181,7 +235,7 @@ def _agent_input_pack(
                 "businessVetoOnly": _pick(business, "marketCap", "beta", "debtToEquity", "profitMargin", "analystRating", "targetMeanPrice"),
                 "relativeHeat": {"peerRank": peer_rank, "marketComparison": market_comparison},
             },
-            "mustAnswer": ["Is this chaseable now?", "Where does the fun stop?", "Where is the fast sell/trim?", "What rug-pull signal kills the trade?"],
+            "mustAnswer": ["Is volume confirming the move or is it a thin-air fakeout?", "Is this chaseable now?", "Where does the fun stop?", "Where is the fast sell/trim?", "What rug-pull signal kills the trade?"],
         }
 
     if agent == "nadia":
@@ -198,6 +252,22 @@ def _agent_input_pack(
                     "risk": {"volatility": volatility, "beta": business.get("beta"), "volumeRatio": volume_ratio},
                 },
                 "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
+                "technicalCompatibility": _pick(
+                    technicals,
+                    "signal",
+                    "rsi14",
+                    "macd",
+                    "macdSignal",
+                    "macdHistogram",
+                    "stochasticK",
+                    "stochasticD",
+                    "sma20",
+                    "sma50",
+                    "sma200",
+                    "ema20",
+                    "volumeRatio",
+                    "volatility",
+                ),
                 "relativePerformance": {"peerRank": peer_rank, "marketComparison": market_comparison},
             },
             "secondary": {
@@ -234,7 +304,7 @@ def _agent_input_pack(
     if agent == "ben":
         return {
             "agent": "ben",
-            "inputPriority": ["moat durability", "management and capital allocation", "owner earnings", "balance-sheet resilience", "pricing power", "price only after structure"],
+            "inputPriority": ["moat durability", "5-year forward earnings power & reinvestment runway", "management and capital allocation", "owner earnings", "balance-sheet resilience", "price only after structure"],
             "primary": {
                 **core,
                 "businessStructure": {
@@ -250,8 +320,19 @@ def _agent_input_pack(
                     "revenueGrowth": business.get("revenueGrowth"),
                     "earningsGrowth": business.get("earningsGrowth"),
                 },
+                # The forward lens: is this business's earnings power likely bigger in 5 years?
+                "forwardView": {
+                    "forwardPE": forward_pe,
+                    "trailingPE": pe,
+                    "revenueGrowth": revenue_growth,
+                    "earningsGrowth": earnings_growth,
+                    "roe": business.get("roe"),
+                    "reinvestmentRunway": "Judge whether high ROE + retained earnings + growth can compound owner earnings for years. Falling forwardPE vs trailingPE implies the market expects earnings to grow into the price.",
+                    "horizon": "5 years",
+                },
                 "capitalAllocation": _pick(financials or {}, "cashFlow", "balanceSheet", "incomeStatement", "dividends"),
-                "ownershipPriceCheck": {"price": price, "peRatio": pe, "priceToBook": pbv, "targetMeanPrice": target, "dividendYield": dividend_yield},
+                "ownerEarningsAudit": _funding_quality_audit(financials or {}, business),
+                "ownershipPriceCheck": {"price": price, "peRatio": pe, "forwardPE": forward_pe, "priceToBook": pbv, "targetMeanPrice": target, "dividendYield": dividend_yield},
                 "longTermReturns": {key: returns.get(key) for key in ("1y", "2y", "3y", "4y", "ytd")},
             },
             "secondary": {
@@ -260,7 +341,7 @@ def _agent_input_pack(
                 "sectorAndIndustryResearch": domain_insights,
                 "technicalsAsNoiseCheck": _pick(technicals, "signal", "sma50", "sma200", "support", "resistance"),
             },
-            "mustAnswer": ["Is this a wonderful business?", "Can the structure compound?", "Would an owner ignore the price noise?", "What evidence would break the long-term thesis?"],
+            "mustAnswer": ["Is this a wonderful business?", "Will its earnings power be materially larger in 5 years, and why?", "Can it reinvest at high returns?", "Would an owner ignore the price noise?", "What evidence would break the long-term thesis?"],
         }
 
     if agent == "alphawolf":
@@ -278,6 +359,7 @@ def _agent_input_pack(
                     "relativePerformance": {"returns": returns, "peerRank": peer_rank, "marketComparison": market_comparison},
                 },
                 "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
+                "fundingQualityAudit": _funding_quality_audit(financials or {}, business),
                 "recentNews": news,
             },
             "secondary": {
@@ -290,11 +372,12 @@ def _agent_input_pack(
 
     return {
         "agent": "vera",
-        "inputPriority": ["intrinsic value", "financial statements", "balance sheet", "margin of safety", "dividend safety", "technical timing last"],
+        "inputPriority": ["would I buy it at this price now", "intrinsic value & margin of safety", "forward earnings vs price", "balance sheet", "multi-year track record", "technical timing last"],
         "primary": {
             **core,
             "valuation": {
                 "peRatio": pe,
+                "forwardPE": forward_pe,
                 "priceToBook": pbv,
                 "targetMeanPrice": target,
                 "currentPrice": price,
@@ -303,7 +386,10 @@ def _agent_input_pack(
             },
             "financialHealth": _pick(business, "roe", "roa", "profitMargin", "operatingMargin", "grossMargin", "debtToEquity", "payoutRatio"),
             "growthQuality": _pick(business, "revenueGrowth", "earningsGrowth"),
+            # Track record so the call rests on years of evidence, not a single snapshot.
+            "multiYearReturns": {key: returns.get(key) for key in ("1y", "2y", "3y", "4y", "ytd")},
             "financialResearch": _pick(financials or {}, "incomeStatement", "balanceSheet", "cashFlow", "earnings", "calendar"),
+            "fundingQualityAudit": _funding_quality_audit(financials or {}, business),
             "marginOfSafety": _risk_map(price, support, resistance, target),
         },
         "secondary": {
@@ -312,12 +398,63 @@ def _agent_input_pack(
             "sectorAndIndustryResearch": domain_insights,
             "recentNews": news,
         },
-        "mustAnswer": ["Is intrinsic value compelling?", "Is the balance sheet acceptable?", "What is the margin of safety?", "What price would change the call?"],
+        "mustAnswer": ["Would I personally buy this at today's price — yes, no, or only below what?", "Is the margin of safety real given forward earnings?", "Does the multi-year record support the thesis?", "What single number would flip my call?"],
     }
 
 
 def _pick(source: dict[str, Any], *keys: str) -> dict[str, Any]:
     return {key: source.get(key) for key in keys if key in source}
+
+
+def _funding_quality_audit(financials: dict[str, Any], business: dict[str, Any]) -> dict[str, Any]:
+    def latest(statement: str) -> dict[str, Any]:
+        value = financials.get(statement)
+        return value.get("latest") if isinstance(value, dict) and isinstance(value.get("latest"), dict) else {}
+
+    income = latest("incomeStatement")
+    cash_flow = latest("cashFlow")
+    balance = latest("balanceSheet")
+    net_income = _num(income.get("Net Income"))
+    operating_cash_flow = _num(cash_flow.get("Operating Cash Flow"))
+    capital_expenditure = _num(cash_flow.get("Capital Expenditure"))
+    supplied_free_cash_flow = _num(cash_flow.get("Free Cash Flow"))
+    calculated_free_cash_flow = None
+    if operating_cash_flow is not None and capital_expenditure is not None:
+        calculated_free_cash_flow = operating_cash_flow + capital_expenditure if capital_expenditure < 0 else operating_cash_flow - capital_expenditure
+    free_cash_flow = supplied_free_cash_flow if supplied_free_cash_flow is not None else calculated_free_cash_flow
+    cash = _num(business.get("totalCash"))
+    debt = _num(balance.get("Total Debt")) or _num(business.get("totalDebt"))
+    total_assets = _num(balance.get("Total Assets"))
+    total_liabilities = _num(balance.get("Total Liabilities"))
+    cash_conversion = (operating_cash_flow / net_income) if operating_cash_flow is not None and net_income not in (None, 0) else None
+    net_cash = (cash - debt) if cash is not None and debt is not None else None
+
+    if free_cash_flow is None:
+        funding_read = "UNPROVEN: free cash flow evidence is unavailable"
+    elif free_cash_flow <= 0 and debt is not None and debt > 0:
+        funding_read = "RISK: free cash flow is not funding reinvestment; debt dependence must be investigated"
+    elif free_cash_flow > 0 and net_cash is not None and net_cash >= 0:
+        funding_read = "SELF_FUNDED: positive free cash flow and net cash support reinvestment"
+    elif free_cash_flow > 0:
+        funding_read = "CASH_GENERATIVE_BUT_LEVERAGED: operations fund growth, but debt remains material"
+    else:
+        funding_read = "UNPROVEN: funding source cannot be classified from supplied evidence"
+
+    return {
+        "netIncome": net_income,
+        "operatingCashFlow": operating_cash_flow,
+        "capitalExpenditure": capital_expenditure,
+        "freeCashFlow": free_cash_flow,
+        "freeCashFlowSource": "reported" if supplied_free_cash_flow is not None else "calculated_operating_cash_flow_less_capex" if calculated_free_cash_flow is not None else "unavailable",
+        "operatingCashFlowToNetIncome": cash_conversion,
+        "cash": cash,
+        "totalDebt": debt,
+        "netCash": net_cash,
+        "totalAssets": total_assets,
+        "totalLiabilities": total_liabilities,
+        "fundingRead": funding_read,
+        "guardrail": "Total assets and market capitalization are not spendable budget. Classify reinvestment as internally funded only when operating/free cash flow supports it.",
+    }
 
 
 def _risk_map(price: float | None, support: float | None, resistance: float | None, target: float | None) -> dict[str, Any]:

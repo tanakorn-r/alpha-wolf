@@ -73,7 +73,7 @@ export function LiveTradePage() {
 
   const ai = useQuery({
     queryKey: ["live-trade-ai", selected, activeAgentId],
-    queryFn: () => summarizeStock(selected, "momentum", activeAgentId),
+    queryFn: () => summarizeStock(selected, "momentum", activeAgentId, true),
     enabled: autoAi,
     refetchInterval: autoAi ? 60_000 : false,
     staleTime: 0,

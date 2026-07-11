@@ -118,7 +118,7 @@ export function AiVerdictCard({
               <span className="font-mono text-2xl font-semibold leading-none" style={{ color }}>
                 {value.confidence}
               </span>
-              <span className="mt-0.5 text-[9px] text-[#8c8c95]">AI score</span>
+              <span className="mt-0.5 text-[9px] text-[#8c8c95]">Agent view</span>
             </div>
           </div>
         ) : null}
@@ -146,16 +146,17 @@ export function AiVerdictCard({
         <div className="mt-[18px] flex flex-col gap-[9px]">
           <div className="text-[11px] uppercase tracking-[.5px] text-[#8c8c95]">AI scorecard · 0-100</div>
           {value.scores.map((entry) => {
-            const ringColor = scoreColor(entry.score);
+            const hasScore = typeof entry.score === "number";
+            const ringColor = hasScore ? scoreColor(entry.score) : "#5a5a62";
             return (
               <div key={entry.label} className="flex items-center gap-3.5 rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] px-3.5 py-3">
                 <div className="relative flex-none" style={{ width: 54, height: 54 }}>
-                  <Ring score={entry.score} color={ringColor} size={54} stroke={6} />
+                  {hasScore ? <Ring score={entry.score} color={ringColor} size={54} stroke={6} /> : null}
                   <div
                     className="absolute inset-0 flex items-center justify-center font-mono text-[15px] font-semibold"
                     style={{ color: ringColor }}
                   >
-                    {entry.score}
+                    {entry.score ?? "N/A"}
                   </div>
                 </div>
                 <div className="flex-1">

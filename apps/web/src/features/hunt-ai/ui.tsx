@@ -8,7 +8,7 @@ type ProgressStep = {
   sub: string;
 };
 
-export type LoadingTask = "analyst" | "valuation" | "forecast" | "strategy" | "portfolio" | "intraday" | "deep";
+export type LoadingTask = "analyst" | "valuation" | "forecast" | "strategy" | "portfolio" | "intraday" | "deep" | "timing";
 
 const AGENT_NAMES: Record<string, string> = {
   vera: "Vera",
@@ -34,6 +34,7 @@ export function agentLoadingTitle(agentId: string | undefined, task: LoadingTask
     if (task === "strategy") return "Kai is hunting the spiciest setups";
     if (task === "portfolio") return "Kai is checking if your portfolio is cooked";
     if (task === "intraday") return `Kai is reading the tape on ${target}`;
+    if (task === "timing") return `Kai is mapping when to send ${target}`;
   }
   if (task === "analyst" || task === "deep") return `${name} is analyzing ${target}`;
   if (task === "valuation") return `${name} is checking ${target}'s price discipline`;
@@ -41,6 +42,7 @@ export function agentLoadingTitle(agentId: string | undefined, task: LoadingTask
   if (task === "strategy") return `${name} is building the strategy playbook`;
   if (task === "portfolio") return `${name} is reviewing your portfolio`;
   if (task === "intraday") return `${name} is reading the tape on ${target}`;
+  if (task === "timing") return `${name} is building ${target}'s buy timing plan`;
   return `${name} is working`;
 }
 
@@ -203,6 +205,16 @@ function compactMarker(value: string) {
 
 function loadingStepsFor(title: string): ProgressStep[] {
   const lower = title.toLowerCase();
+  if (lower.includes("buy timing") || lower.includes("timing plan")) {
+    return [
+      { label: "Pulling five-year monthly closes", sub: "actual prices · seasonal returns" },
+      { label: "Reading dividend rhythm", sub: "ex-dates · post-ex behavior · recovery" },
+      { label: "Checking current price context", sub: "entry band · five-year range" },
+      { label: "Sizing monthly actions", sub: "buy budget · hold · trim percentage" },
+      { label: "Asking the selected Agent", sub: "persona method · horizon · risk rule" },
+      { label: "Rendering the timing plan", sub: "12 months · backtest · decision gates" },
+    ];
+  }
   if (lower.includes("forecast") || lower.includes("next 10")) {
     return [
       { label: "Pulling 5-year price history", sub: "1,260 trading days" },

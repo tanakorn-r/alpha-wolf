@@ -227,6 +227,7 @@ def fetch_record_from_ticker(
     return {
         "symbol": entry.symbol,
         "name": name,
+        "quoteType": str(info.get("quoteType") or "").upper() or None,
         "sector": sector,
         "industry": info.get("industry") or sector,
         "sectorKey": info.get("sectorKey"),

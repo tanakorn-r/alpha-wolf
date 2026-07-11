@@ -1,15 +1,19 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
+  loadAuthUser,
   loadMarketCalendar,
   loadPortfolio,
   loadStockDetailsBatch,
+  loadTodayPerformance,
   type DcaOrder,
   type MarketCalendarEvent,
   type PortfolioHolding,
   type StockDetailResponse,
   type StockNewsItem,
+  type TodayPerformanceResponse,
 } from "../../lib/api";
+import { useWolfStore } from "../../store/useWolfStore";
 
 export type BriefStatus = "needs_you" | "watch" | "hold";
 export type BriefFilter = "all" | BriefStatus;
@@ -64,9 +68,15 @@ export type HoldingBriefRow = {
 
 export type DailyBrief = ReturnType<typeof useDailyBrief>;
 
+export type RowAnalysisState = { loading: boolean; data: TodayPerformanceResponse | null; error: string };
+
 export function useDailyBrief() {
+  const activeAgentId = useWolfStore((state) => state.activeAgentId);
   const [filter, setFilter] = useState<BriefFilter>("all");
-  const portfolio = useQuery({ queryKey: ["portfolio"], queryFn: loadPortfolio });
+  const [rowAnalysis, setRowAnalysis] = useState<Record<string, RowAnalysisState>>({});
+  const auth = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
+  const accountScope = auth.data?.id ? `user:${auth.data.id}` : "signed-out";
+  const portfolio = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: Boolean(auth.data?.id) });
   const month = new Date().toISOString().slice(0, 7);
   const calendar = useQuery({
     queryKey: ["calendar", month, "holdings"],
@@ -121,10 +131,21 @@ export function useDailyBrief() {
   }, [calendar.data?.events, calendar.isError, details.data, details.isFetching, details.isLoading, filter, holdings, portfolio.data?.dcaOrders, portfolio.data?.summary]);
 
   return {
-    loading: portfolio.isPending,
+    loading: auth.isPending || (Boolean(auth.data?.id) && portfolio.isPending),
     failed: portfolio.isError,
     filter,
     setFilter,
+    activeAgentId,
+    rowAnalysis,
+    async analyzeRow(row: HoldingBriefRow) {
+      setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: true, data: current[row.symbol]?.data ?? null, error: "" } }));
+      try {
+        const data = await loadTodayPerformance(row.symbol, row.strategy, activeAgentId, true);
+        setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, data, error: "" } }));
+      } catch (error) {
+        setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, data: current[row.symbol]?.data ?? null, error: error instanceof Error ? error.message : "AI analysis is unavailable." } }));
+      }
+    },
     retry() {
       void portfolio.refetch();
       void calendar.refetch();
@@ -152,17 +173,14 @@ function buildHoldingRow({
   const todayPct = detail?.stock.changePct ?? holding.changePct ?? 0;
   const rating = clamp(Math.round(detail?.verdict?.score ?? fallbackRating(holding, detail)), 1, 99);
   const action = detail?.verdict?.action ?? "WATCH";
-  const support = detail?.technicals?.support;
   const sma50 = detail?.technicals?.sma50;
   const exDiv = events.find((event) => event.kind === "EX-DIV");
   const payment = events.find((event) => event.kind === "PAYS");
-  const buySignal = action === "BUY" || action === "BUY SETUP";
-  const atSupport = typeof support === "number" && support > 0 ? price <= support * 1.03 : holding.gainLossPct <= -3;
   const belowSellTrigger = typeof sma50 === "number" && sma50 > 0 && price < sma50;
   const openOrder = dcaOrders[0];
 
   let status: BriefStatus = "hold";
-  if ((exDiv && exDiv.days <= 7) || (buySignal && atSupport) || belowSellTrigger || openOrder) {
+  if ((exDiv && exDiv.days <= 7) || belowSellTrigger || openOrder) {
     status = "needs_you";
   } else if ((exDiv && exDiv.days <= 14) || action === "WATCH" || action === "WAIT" || action === "BUY SETUP" || payment) {
     status = "watch";
@@ -170,7 +188,7 @@ function buildHoldingRow({
 
   const actionLabel = status === "needs_you" ? actionLabelFor(action, belowSellTrigger, openOrder) : status === "watch" ? "Watch" : "Just hold";
   const actionTone = belowSellTrigger ? "bad" : status === "needs_you" ? "good" : status === "watch" ? "warn" : "neutral";
-  const priority = statusPriority(status) + eventPriority(exDiv, payment) + (belowSellTrigger ? 40 : 0) + (buySignal && atSupport ? 28 : 0) + rating / 100;
+  const priority = statusPriority(status) + eventPriority(exDiv, payment) + (belowSellTrigger ? 40 : 0) + rating / 100;
   const headline = detail?.verdict?.headline || fallbackHeadline(holding, action, status, exDiv, sma50, price);
   const whatToDo = detail?.verdict?.analyst || headline;
 
@@ -317,7 +335,7 @@ function fallbackRating(holding: PortfolioHolding, detail?: StockDetailResponse)
 function fallbackHeadline(holding: PortfolioHolding, action: string, status: BriefStatus, exDiv: HoldingEvent | undefined, sma50: number | undefined, price: number) {
   if (sma50 && price < sma50) return `${holding.symbol} is below its 50-day trigger.`;
   if (exDiv && exDiv.days <= 7) return `${holding.symbol} has an ex-dividend decision ${relativeDate(exDiv.days)}.`;
-  if (action === "BUY") return `${holding.symbol} has a buy read, but size it from support and risk.`;
+  if (action === "BUY") return `${holding.symbol} has a buy read, but adding still requires the rare-add valuation and funding gates.`;
   if (status === "watch") return `${holding.symbol} needs monitoring, not automatic cash.`;
   return `${holding.symbol} can be held unless the thesis changes.`;
 }
@@ -325,8 +343,7 @@ function fallbackHeadline(holding: PortfolioHolding, action: string, status: Bri
 function actionLabelFor(action: string, belowSellTrigger: boolean, openOrder?: DcaOrder) {
   if (belowSellTrigger) return "Review risk";
   if (openOrder) return "Apply plan";
-  if (action === "BUY") return "Buy more";
-  if (action === "BUY SETUP") return "Wait setup";
+  if (action === "BUY" || action === "BUY SETUP") return "Review setup";
   return "Decide";
 }
 
