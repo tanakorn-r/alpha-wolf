@@ -10,6 +10,10 @@ export type AuthUser = {
   pictureUrl?: string | null;
   createdAt: string;
   premiumRedeemedAt?: string | null;
+  premiumExpiresAt?: string | null;
+  proActive?: boolean;
+  plan?: "free" | "pro";
+  aiUsage?: { period: string; used: number; limit: number; remaining: number };
 };
 
 export async function loadAuthUser(): Promise<AuthUser | null> {
@@ -28,7 +32,11 @@ export async function loadPremiumPromoActive(): Promise<boolean> {
 
 export async function redeemPremiumPromo(): Promise<AuthUser | null> {
   const response = await fetch(`${API_BASE}/auth/redeem-premium`, { method: "POST", credentials: "include" });
-  if (!response.ok) throw new Error(`Could not redeem Pro (${response.status})`);
+  if (!response.ok) {
+    let message = `Could not redeem Pro (${response.status})`;
+    try { message = ((await response.json()) as { detail?: string }).detail ?? message; } catch { /* HTTP fallback */ }
+    throw new Error(message);
+  }
   const payload = (await response.json()) as { user: AuthUser | null };
   return payload.user;
 }
@@ -929,10 +937,11 @@ export type BuyTimingResponse = {
     trimZone: { startPct?: number | null; endPct?: number | null; start?: string | null; end?: string | null; label?: string | null };
   } | null;
   seasonality: Array<{ month: string; returnPct: number }>;
+  comparisonYear?: number;
   cheapestMonth?: string | null;
   peakMonth?: string | null;
-  monthlyMap?: Array<{ month: string; score: number; action: "BUY" | "TRIM" | "HOLD"; returnPct: number; isExMonth: boolean; isCurrent: boolean; note: string }>;
-  agentMonthlyPlan?: Array<{ month: string; score: number; action: "BUY" | "ADD_SMALL" | "HOLD" | "TRIM" | "SELL"; buyBudgetPct: number; trimPositionPct: number; calculatedAction: "BUY" | "TRIM" | "HOLD"; returnPct: number; isExMonth: boolean; isCurrent: boolean; note: string; reason: string }> | null;
+  monthlyMap?: Array<{ month: string; score: number; action: "BUY" | "TRIM" | "HOLD"; returnPct: number; currentYearReturnPct?: number | null; isExMonth: boolean; isCurrent: boolean; note: string }>;
+  agentMonthlyPlan?: Array<{ month: string; score: number; action: "BUY" | "ADD_SMALL" | "HOLD" | "TRIM" | "SELL"; buyBudgetPct: number; trimPositionPct: number; calculatedAction: "BUY" | "TRIM" | "HOLD"; returnPct: number; currentYearReturnPct?: number | null; isExMonth: boolean; isCurrent: boolean; note: string; reason: string }> | null;
   monthlyHistory?: Array<{ date: string; month: string; close: number }>;
   backtest?: { years: number; observedMonths: number; investedMonths: number; skippedMonths: number; monthlyContribution: number; totalContributed: number; endingValue: number; endingCash: number; endingStockValue: number; profitLoss: number; alwaysBuyEndingValue: number; strategyReturnPct: number; alwaysBuyReturnPct: number; strategyReturnWithoutDividendsPct: number; alwaysBuyReturnWithoutDividendsPct: number; strategyDividendReturnBoostPct: number; alwaysBuyDividendReturnBoostPct: number; edgePct: number; strategyMaxDrawdownPct: number; alwaysBuyMaxDrawdownPct: number; averageStockExposurePct: number; agentDividendsReceived: number; alwaysBuyDividendsReinvested: number; method: string; inSample: boolean; ledger: Array<{ date: string; month: string; action: string; buyBudgetPct: number; trimPositionPct: number; dividendIncome: number; contributed: number; cash: number; stockValue: number; accountValue: number; profitLoss: number }> } | null;
   events: Array<{ exDate: string; amount?: number | null; dipPct: number; recoverySessions?: number | null }>;

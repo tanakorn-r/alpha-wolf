@@ -7,7 +7,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from internal.store.auth import create_session, delete_session, redeem_premium, upsert_google_user, user_for_session
+from internal.store.auth import create_session, delete_session, upsert_google_user, user_for_session
+from internal.store.entitlements import redeem_pro_trial
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -34,9 +35,9 @@ def redeem_premium_route(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail="The free Pro promo is no longer available")
     user = user_for_session(request.cookies.get(SESSION_COOKIE))
     if not user:
-        # Guests have no account row to stamp — the frontend grants premium locally in this case.
-        return {"user": None}
-    return {"user": redeem_premium(int(user["id"]))}
+        raise HTTPException(status_code=401, detail="Sign in before redeeming Pro")
+    redeem_pro_trial(int(user["id"]))
+    return {"user": user_for_session(request.cookies.get(SESSION_COOKIE))}
 
 
 def premium_promo_active() -> bool:

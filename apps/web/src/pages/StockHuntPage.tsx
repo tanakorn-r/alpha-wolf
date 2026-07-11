@@ -7,9 +7,9 @@ import { useStockHunt } from "../features/stock-hunt/useStockHunt";
 export function StockHuntPage() {
   const hunt = useStockHunt();
   return (
-    <section className="flex flex-col gap-4 text-[#ececee]">
+    <section className="flex flex-col gap-3 text-[#ececee]">
       <HuntFilters hunt={hunt} />
-      <RankBanner hunt={hunt} />
+      {/* <RankBanner hunt={hunt} /> */}
       <Top5Panel hunt={hunt} />
       <MatchList hunt={hunt} />
     </section>

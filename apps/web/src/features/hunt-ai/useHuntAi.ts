@@ -6,7 +6,6 @@ import {
   loadBuyTiming,
   loadAuthUser,
   loadDiscoveries,
-  loadPremiumPromoActive,
   redeemPremiumPromo,
   loadPortfolio,
   loadPortfolioWatchlist,
@@ -22,7 +21,7 @@ import {
   type ValuationVerdictResponse,
 } from "../../lib/api";
 import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
-import { N100_QUOTA_LIMIT, useWolfStore } from "../../store/useWolfStore";
+import { useWolfStore } from "../../store/useWolfStore";
 import { STRAT_CARDS, type HuntTab, type N100Timeframe, type StratMode } from "./lib";
 
 export type HuntAi = ReturnType<typeof useHuntAi>;
@@ -46,7 +45,8 @@ function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentI
 
 export function useHuntAi() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<HuntTab>("signals");
+  const [tab, setTabState] = useState<HuntTab>("signals");
+  const [trialModalOpen, setTrialModalOpen] = useState(false);
   const [selectedTicker, setSelectedTicker] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [addQuery, setAddQuery] = useState("");
@@ -71,17 +71,6 @@ export function useHuntAi() {
   const [aiError, setAiError] = useState("");
 
   const openDetail = useWolfStore((s) => s.openDetail);
-  const storePremium = useWolfStore((s) => s.premium);
-  const unlockPremium = useWolfStore((s) => s.unlockPremium);
-  // Server-controlled "Pro free for everyone" promo (see routes/auth.py premium_promo_active) is
-  // just an offer — it does NOT grant access by itself. The user must explicitly redeem it
-  // (ProPromoBanner) before `premium` flips true. No client-side expiry: once redeemed, access
-  // continues until the API's PREMIUM_PROMO_ENABLED flag is turned off, which revokes everyone
-  // at once regardless of when they redeemed.
-  const premiumPromoQuery = useQuery({ queryKey: ["premium-promo"], queryFn: loadPremiumPromoActive, staleTime: 300_000, retry: 0 });
-  const premiumPromoActive = premiumPromoQuery.data ?? false;
-  const n100QuotaUsed = useWolfStore((s) => s.n100QuotaUsed);
-  const useN100Quota = useWolfStore((s) => s.useN100Quota);
   const setNext10ReportCache = useWolfStore((s) => s.setNext10ReportCache);
   const getHuntAiCache = useWolfStore((s) => s.getHuntAiCache);
   const setHuntAiCache = useWolfStore((s) => s.setHuntAiCache);
@@ -90,17 +79,15 @@ export function useHuntAi() {
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
   const authenticated = Boolean(authQuery.data?.id);
-  // Redeemed = clicked the "Redeem free Pro" button (storePremium, works for guests too) or,
-  // for a signed-in account, the server already has a redemption timestamp on file (so Pro
-  // follows the account across devices). Either way it only counts while the promo is active.
-  const redeemed = storePremium || Boolean(authQuery.data?.premiumRedeemedAt);
-  const premium = redeemed && premiumPromoActive;
+  const premium = Boolean(authQuery.data?.proActive);
+  const n100QuotaUsed = authQuery.data?.aiUsage?.used ?? 0;
   const redeemPremiumMutation = useMutation({
     mutationFn: redeemPremiumPromo,
     onSuccess: (user) => {
-      unlockPremium();
       if (user) queryClient.setQueryData(["auth-user"], user);
+      setTrialModalOpen(false);
     },
+    onError: (error) => setAiError(error instanceof Error ? error.message : "Could not activate Pro."),
   });
   const portfolioQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: authenticated });
   const watchlistQuery = useQuery({ queryKey: ["portfolio-watchlist", accountScope], queryFn: loadPortfolioWatchlist, enabled: authenticated });
@@ -173,17 +160,18 @@ export function useHuntAi() {
   useEffect(() => {
     if (valuationDone && valuationQuery.data) {
       setHuntAiCache(valuationCacheKey, { analyzedAt: valuationAnalyzedAt, data: valuationQuery.data });
+      void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
     }
   }, [setHuntAiCache, valuationAnalyzedAt, valuationCacheKey, valuationDone, valuationQuery.data]);
 
   const timingQuery = useQuery({
-    queryKey: ["hunt-buy-timing", "character-exit-path-v8", AGENT_REASONING_CACHE_VERSION, activeTicker, activeAgentId, timingRunKey],
+    queryKey: ["hunt-buy-timing", "live-current-month-v10", AGENT_REASONING_CACHE_VERSION, activeTicker, activeAgentId, timingRunKey],
     queryFn: () => loadBuyTiming(activeTicker, activeAgentId, true),
     staleTime: 900_000,
     retry: 0,
     enabled: tab === "timing" && Boolean(activeTicker) && timingRunKey > 0 && timingRunTarget === `${activeTicker}:${activeAgentId}`,
   });
-  const timingCacheKey = `${accountScope}:character-exit-path-v8:${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
+  const timingCacheKey = `${accountScope}:live-current-month-v10:${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
   const timingCached = getHuntAiCache<BuyTimingResponse>(timingCacheKey);
   const timingResultMatches = timingQuery.data?.symbol === activeTicker && matchesAgent(timingQuery.data, activeAgentId);
   const timingDone = timingRunTarget === `${activeTicker}:${activeAgentId}` && timingQuery.isSuccess && timingResultMatches;
@@ -195,6 +183,7 @@ export function useHuntAi() {
   useEffect(() => {
     if (timingDone && timingQuery.data) {
       setHuntAiCache(timingCacheKey, { analyzedAt: timingAnalyzedAt, data: timingQuery.data });
+      void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
     }
   }, [setHuntAiCache, timingAnalyzedAt, timingCacheKey, timingDone, timingQuery.data]);
 
@@ -244,28 +233,39 @@ export function useHuntAi() {
   const n100Report = n100Done && n100Query.data
     ? { analyzedAt: n100AnalyzedAt, data: n100Query.data }
     : matchesAgent(n100Cached?.data, activeAgentId) ? n100Cached : undefined;
-  const n100QuotaLeft = N100_QUOTA_LIMIT - n100QuotaUsed;
+  const n100QuotaLeft = authQuery.data?.aiUsage?.remaining ?? 0;
 
   useEffect(() => {
-    if (n100Done && n100Query.data) setNext10ReportCache(n100CacheKey, { analyzedAt: n100AnalyzedAt, data: n100Query.data });
+    if (n100Done && n100Query.data) {
+      setNext10ReportCache(n100CacheKey, { analyzedAt: n100AnalyzedAt, data: n100Query.data });
+      void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
+    }
   }, [n100AnalyzedAt, n100CacheKey, n100Done, n100Query.data, setNext10ReportCache]);
 
   function runN100() {
     if (n100QuotaLeft <= 0) return;
-    useN100Quota();
     setN100SyncKey(n100CacheKey);
     setN100RunKey((value) => value + 1);
+  }
+
+  const premiumTabs = new Set<HuntTab>(["brief", "timing", "replay", "analyst"]);
+  function setTab(next: HuntTab) {
+    setTabState(next);
+    if (premiumTabs.has(next) && !premium) setTrialModalOpen(true);
   }
 
   return {
     tab,
     setTab,
     premium,
-    premiumPromoActive: premiumPromoActive && !redeemed,
-    accountCreatedAt: authQuery.data?.createdAt ?? null,
+    trialModalOpen,
+    closeTrialModal: () => setTrialModalOpen(false),
+    aiUsage: authQuery.data?.aiUsage ?? { period: "", used: 0, limit: premium ? 100 : 3, remaining: premium ? 100 : 3 },
+    premiumExpiresAt: authQuery.data?.premiumExpiresAt ?? null,
+    signedIn: authenticated,
     redeemPremium: () => redeemPremiumMutation.mutate(),
     redeemingPremium: redeemPremiumMutation.isPending,
-    unlockPremium,
+    unlockPremium: () => setTrialModalOpen(true),
     aiError,
     activeAgentId,
 
@@ -360,6 +360,7 @@ export function useHuntAi() {
           const analysis = await summarizeStock(activeTicker, "momentum", activeAgentId, true);
           setIntradayAnalysis(analysis);
           setHuntAiCache(intradayAnalysisCacheKey, { analyzedAt: new Date().toISOString(), data: analysis });
+          void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
         } finally {
           setIntradayAiLoading(false);
         }
@@ -371,6 +372,7 @@ export function useHuntAi() {
       timeframe: n100Timeframe,
       quotaUsed: n100QuotaUsed,
       quotaLeft: n100QuotaLeft,
+      quotaLimit: authQuery.data?.aiUsage?.limit ?? 0,
       report: n100Report,
       fetching: n100Query.isFetching,
       error: n100Query.isError ? (n100Query.error as Error).message || "Could not load Next 10." : "",
@@ -397,6 +399,7 @@ export function useHuntAi() {
           const card = STRAT_CARDS.find((c) => c.key === mode);
           const strategy = stratPrompt.trim() || (card ? `${card.label}: ${card.subtitle}` : mode);
           setStratAnalysis(await loadStrategyPlaybook({ strategy, region: "all", limit: 5, candidateLimit: 40, agent: activeAgentId, force: true }));
+          void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
         } catch {
           setAiError("Strategy AI could not rank the stock universe for this strategy.");
         } finally {
@@ -431,6 +434,7 @@ export function useHuntAi() {
           setAnalystDetail(detail);
           setAnalystAnalysis(analysis);
           setHuntAiCache(`${accountScope}:${AGENT_REASONING_CACHE_VERSION}:analyst:${sym}:${activeAgentId}`, { analyzedAt: new Date().toISOString(), data: { detail, analysis } });
+          void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
         } catch (error) {
           setAiError(error instanceof Error ? error.message : "Stock Analyst could not generate a report for this ticker.");
         } finally {

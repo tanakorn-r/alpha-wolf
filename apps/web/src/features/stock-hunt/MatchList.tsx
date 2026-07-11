@@ -17,7 +17,7 @@ export function MatchList({ hunt }: { hunt: StockHunt }) {
       {hunt.analysis ? <AiVerdictCard value={hunt.analysis} size="modal" /> : null}
       {hunt.analyzing ? <LoadingStrip label={`Analyzing ${hunt.analyzingSymbol}…`} /> : null}
 
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
         {hunt.matches.map((match) => <MatchCard key={match.item.symbol} match={match} hunt={hunt} />)}
       </div>
 

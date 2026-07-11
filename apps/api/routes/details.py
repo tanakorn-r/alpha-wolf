@@ -9,6 +9,7 @@ from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import agent_badge, normalize_agent_id
 from internal.ai.context import build_analysis_context
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_buy_timing_with_openai, predict_technical_moves_with_openai
+from internal.ai.access import claim_ai_run, release_ai_run, require_ai_account
 from internal.market.deep import deep_analysis
 from internal.market.buy_timing import apply_ai_narrative, build_buy_timing
 from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials, get_market_comparison
@@ -112,15 +113,16 @@ def details_buy_timing(
     agent: str = Query("vera"),
     force: bool = Query(False),
 ) -> dict[str, Any]:
+    require_ai_account(request, premium_required=True)
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
-    ai_cache_key = f"{account_scope}:ai-buy-timing:v26-character-exit-path:{normalized}:{strategy}:{agent_id}"
+    ai_cache_key = f"{account_scope}:ai-buy-timing:v28-live-current-month:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", ai_cache_key)
     if cached is not None and not force:
         return cached
 
-    result = build_buy_timing(normalized, strategy)
+    result = build_buy_timing(normalized, strategy, force_refresh=force)
     if not result:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
     try:
@@ -132,10 +134,12 @@ def details_buy_timing(
         # perspective score when there is no valid current market price.
         return {**result, "agent": agent_badge(agent_id)}
 
+    usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         narrative = analyze_buy_timing_with_openai({"buyTiming": result}, agent_id)
         response = {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
     except (OpenAIAnalysisError, KeyError, TypeError, ValueError):
+        release_ai_run(usage_user_id)
         fallback = {**result, "agent": agent_badge(agent_id)}
         cache_set("analysis", ai_cache_key, fallback, UPWARD_MOVES_TTL_SECONDS)
         return fallback
@@ -152,6 +156,7 @@ def details_upward_moves(
     agent: str = Query("vera"),
     force: bool = Query(False),
 ) -> dict[str, Any]:
+    require_ai_account(request, premium_required=True)
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
@@ -230,9 +235,11 @@ def details_upward_moves(
     }
     context["historicalMoveDistribution"] = historical
 
+    usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = predict_technical_moves_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     result["history"] = historical.get("history", [])

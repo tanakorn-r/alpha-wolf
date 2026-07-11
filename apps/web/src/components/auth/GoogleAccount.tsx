@@ -41,7 +41,7 @@ export function GoogleAccount() {
   );
 }
 
-function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; onClose: () => void }) {
+export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const clearAccountState = useWolfStore((state) => state.clearAccountState);
   const logout = useMutation({

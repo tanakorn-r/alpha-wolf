@@ -149,12 +149,13 @@ function MonthlyBuyMap({ timing }: { timing: BuyTimingResponse }) {
   return (
     <div className="mt-5">
       <div className="grid grid-cols-6 gap-1.5 min-[720px]:grid-cols-12">
-        {map.map((month) => <MonthCell key={month.month} month={month} />)}
+        {map.map((month) => <MonthCell key={month.month} month={month} year={timing.comparisonYear ?? new Date().getFullYear()} />)}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[#8c8c95]">
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#3ecf8e]" /> Buy / add</span>
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#f2575c]" /> Trim / sell</span>
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#f5c451]" /> Ex-dividend</span>
+        <span>Avg = historical monthly average · {timing.comparisonYear ?? new Date().getFullYear()} = actual return / current MTD</span>
         <span className="ml-auto">Each buy uses that % of the whole available cash pool—not one month’s deposit</span>
       </div>
     </div>
@@ -163,15 +164,17 @@ function MonthlyBuyMap({ timing }: { timing: BuyTimingResponse }) {
 
 type MonthCellData = NonNullable<BuyTimingResponse["agentMonthlyPlan"]>[number] | NonNullable<BuyTimingResponse["monthlyMap"]>[number];
 
-function MonthCell({ month }: { month: MonthCellData }) {
+function MonthCell({ month, year }: { month: MonthCellData; year: number }) {
   const size = "buyBudgetPct" in month ? month.buyBudgetPct || month.trimPositionPct : Math.abs(month.score);
   const tone = cellTone(month.action, Math.min(1, size / 100));
   const sizeLabel = "buyBudgetPct" in month && month.buyBudgetPct > 0 ? `${month.buyBudgetPct}% of pool` : "trimPositionPct" in month && month.trimPositionPct > 0 ? `${month.trimPositionPct}% position` : null;
+  const actual = month.currentYearReturnPct;
+  const alignment = actual == null || month.returnPct === 0 ? "not available" : Math.sign(actual) === Math.sign(month.returnPct) ? "aligned" : "diverged";
   return (
     <div
       className="relative flex flex-col items-center gap-1 rounded-[8px] border px-1 py-2.5"
       style={{ background: tone.bg, borderColor: month.isCurrent ? "#ececee" : tone.border }}
-      title={`${month.month}: ${month.action}${sizeLabel ? ` ${sizeLabel}` : ""} · ${"reason" in month ? month.reason : month.note} (historical evidence ${signed(month.returnPct)}%)`}
+      title={`${month.month}: ${month.action}${sizeLabel ? ` ${sizeLabel}` : ""} · ${"reason" in month ? month.reason : month.note} · historical avg ${signed(month.returnPct)}% · ${year} ${actual == null ? "not available" : `${signed(actual)}% (${alignment})`}`}
     >
       {month.isCurrent ? (
         <span className="absolute -top-[7px] rounded-[4px] bg-[#ececee] px-1 py-[1px] text-[7px] font-bold uppercase tracking-[0.06em] text-[#0e0e10]">now</span>
@@ -180,7 +183,8 @@ function MonthCell({ month }: { month: MonthCellData }) {
       <span className="text-[9px] font-bold uppercase tracking-[0.05em]" style={{ color: tone.fg }}>{month.action === "HOLD" ? "HOLD" : month.action === "ADD_SMALL" ? "ADD" : month.action}</span>
       <span className="font-mono text-[12px] font-bold text-[#ececee]">{month.month}</span>
       {sizeLabel ? <span className="text-[8px] font-semibold text-[#bcbcc2]">{sizeLabel}</span> : null}
-      <span className="font-mono text-[9px] text-[#8c8c95]">{signed(month.returnPct)}%</span>
+      <span className="font-mono text-[8.5px] text-[#8c8c95]">Avg {signed(month.returnPct)}%</span>
+      <span className="font-mono text-[8.5px]" style={{ color: actual == null ? "#5a5a62" : actual >= 0 ? "#3ecf8e" : "#f2575c" }}>Y{year} {actual == null ? "—" : `${signed(actual)}%`}</span>
     </div>
   );
 }

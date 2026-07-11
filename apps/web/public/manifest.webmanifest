@@ -1,7 +1,7 @@
 {
   "name": "Alpha Wolf",
   "short_name": "Alpha Wolf",
-  "description": "Investment strategy platform — match stocks to the strategy you actually want to run.",
+  "description": "AI Agent investing dashboard for Thai SET and US stocks with dividend buy timing and transparent AI-versus-DCA replay.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -41,10 +41,10 @@
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {
-      "name": "Radar",
-      "short_name": "Radar",
-      "description": "Strategy radar — find the right stock",
-      "url": "/radar",
+      "name": "Stock Scanner",
+      "short_name": "Scanner",
+      "description": "Find stocks that match your investing strategy",
+      "url": "/scanner",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     },
     {

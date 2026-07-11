@@ -19,11 +19,11 @@ BUY_TIMING_TTL_SECONDS = 900
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[str, Any] | None:
+def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_refresh: bool = False) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
-    cache_key = f"v7:dividend-uplift:{normalized}:{strategy}"
+    cache_key = f"v9-live-current-month:{normalized}:{strategy}"
     cached = cache_get(BUY_TIMING_CACHE_NAMESPACE, cache_key)
-    if cached is not None:
+    if cached is not None and not force_refresh:
         return cached
 
     stock = fetch_symbol_record(normalized)
@@ -66,7 +66,7 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
 
     closes = _close_series(history)
     history_dividends = _dividend_series(history)
-    current_price = _latest_close(closes) or as_float(stock.get("price")) or as_float(deep.get("price"))
+    current_price = as_float(stock.get("price")) or as_float(deep.get("price")) or _latest_close(closes)
     events = _dividend_events(closes, dividends)
     intervals = _event_intervals(events)
     cycle_days = int(round(median(intervals))) if intervals else (365 if events else None)
@@ -93,9 +93,10 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
     entry_gap_pct = ((entry - current_price) / current_price * 100.0) if current_price and entry is not None else None
     upside_left_pct = ((target - current_price) / current_price * 100.0) if current_price and target is not None else None
     seasonality = _monthly_returns(closes)
+    current_year_returns = _current_year_monthly_returns(closes, today, current_price)
     cheapest = min(seasonality, key=lambda item: item["returnPct"])["month"] if seasonality else None
     peak = max(seasonality, key=lambda item: item["returnPct"])["month"] if seasonality else None
-    monthly_map = _monthly_map(seasonality, events, cycle_days, next_ex, today)
+    monthly_map = _monthly_map(seasonality, current_year_returns, events, cycle_days, next_ex, today)
     monthly_history = _monthly_close_history(closes, history_dividends)
     backtest = _backtest_monthly_plan(monthly_history, monthly_map)
     price_context = _price_context(closes, current_price)
@@ -152,6 +153,7 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca") -> dict[
         "businessStructure": business_structure,
         "timeline": timeline,
         "seasonality": seasonality,
+        "comparisonYear": today.year,
         "cheapestMonth": cheapest,
         "peakMonth": peak,
         "monthlyMap": monthly_map,
@@ -451,7 +453,7 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
     }
 
 
-def _monthly_map(seasonality: list[dict[str, Any]], events: list[dict[str, Any]], cycle_days: int | None, next_ex: date | None, today: date) -> list[dict[str, Any]]:
+def _monthly_map(seasonality: list[dict[str, Any]], current_year_returns: dict[str, float], events: list[dict[str, Any]], cycle_days: int | None, next_ex: date | None, today: date) -> list[dict[str, Any]]:
     # Turn the two timing signals into one actionable per-calendar-month call: green = buy, red =
     # trim. Seasonality says which months are historically weak (accumulate) vs strong (lighten);
     # the dividend cycle says which months hold the post-ex dip (buy) vs the pre-ex run-up (trim).
@@ -510,10 +512,32 @@ def _monthly_map(seasonality: list[dict[str, Any]], events: list[dict[str, Any]]
             "score": score,
             "action": action,
             "returnPct": round(returns[index], 2),
+            "currentYearReturnPct": current_year_returns.get(month),
             "isExMonth": index in ex_months,
             "isCurrent": index == today.month - 1,
             "note": ", ".join(notes) or "neutral",
         })
+    return result
+
+
+def _current_year_monthly_returns(closes: pd.Series, today: date, current_price: float | None = None) -> dict[str, float]:
+    if closes.empty:
+        return {}
+    monthly = closes.resample("ME").last().dropna()
+    returns = monthly.pct_change() * 100.0
+    result = {
+        MONTHS[index.month - 1]: round(float(value), 2)
+        for index, value in returns.items()
+        if index.year == today.year and index.month <= today.month and pd.notna(value)
+    }
+    # The current calendar month is still forming. Use the latest quote against the previous
+    # completed month-end so Refresh updates MTD instead of freezing at Yahoo's last daily bar.
+    if current_price is not None and current_price > 0:
+        before_current_month = monthly[(monthly.index.year < today.year) | (monthly.index.month < today.month)]
+        if not before_current_month.empty:
+            previous_month_close = float(before_current_month.iloc[-1])
+            if previous_month_close > 0:
+                result[MONTHS[today.month - 1]] = round((current_price / previous_month_close - 1.0) * 100.0, 2)
     return result
 
 

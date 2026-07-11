@@ -8,6 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request
 
 from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import normalize_agent_id
+from internal.ai.access import claim_ai_run, release_ai_run, require_ai_account
 from internal.ai.context import build_analysis_context
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_quant_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
 from internal.market.detail import build_detail_bundle, get_ai_financials, get_domain_insights, get_market_comparison
@@ -95,6 +96,7 @@ def _fetch_analysis_data(
 
 @router.post("/api/analysis/{symbol}", response_model=StockAnalysisResponse)
 def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
+    require_ai_account(request)
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
@@ -121,9 +123,11 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
         agent_id=agent_id,
     )
 
+    usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
@@ -132,6 +136,7 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
 
 @router.post("/api/analysis/{symbol}/quant", response_model=QuantPerspectiveResponse)
 def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
+    require_ai_account(request)
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
@@ -162,9 +167,11 @@ def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
         agent_id=agent_id,
     )
 
+    usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_quant_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
@@ -173,6 +180,7 @@ def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
 
 @router.post("/api/analysis/{symbol}/valuation", response_model=ValuationVerdictResponse)
 def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
+    require_ai_account(request)
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
@@ -199,9 +207,11 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
         agent_id=agent_id,
     )
 
+    usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_valuation_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # Keep objective valuation multiples authoritative even if the model omits an echo field.
@@ -221,6 +231,7 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
 
 @router.post("/api/analysis/{symbol}/today", response_model=TodayPerformanceResponse)
 def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Body(default=None), agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
+    require_ai_account(request, premium_required=True)
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
@@ -253,9 +264,11 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
         agent_id=agent_id,
     )
 
+    usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = analyze_today_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
@@ -360,6 +373,7 @@ def _position_cache_key(context: dict[str, Any]) -> str:
 
 @router.post("/api/strategy/recommendations", response_model=StrategyPlaybookResponse)
 def strategy_recommendations(payload: StrategyRecommendationRequest, request: Request, agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
+    require_ai_account(request, premium_required=True)
     strategy_prompt = payload.strategy.strip()
     base_strategy = _infer_base_strategy(strategy_prompt)
     agent_id = normalize_agent_id(agent)
@@ -392,9 +406,11 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
         "candidates": [_strategy_candidate_context(candidate, base_strategy) for candidate in candidates],
     }
 
+    usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = recommend_strategy_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     result = _filter_strategy_picks(result, candidates, payload.limit, strategy_prompt)
@@ -404,6 +420,7 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
 
 @router.post("/api/analysis/portfolio/review", response_model=PortfolioReviewResponse)
 def portfolio_review(request: Request, agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
+    require_ai_account(request)
     agent_id = normalize_agent_id(agent)
     user_id = user_id_from_request(request)
     account_scope = account_cache_scope(user_id)
@@ -417,9 +434,11 @@ def portfolio_review(request: Request, agent: str = Query("vera"), force: bool =
     if cached is not None and not force:
         return cached
 
+    usage_user_id, _ = claim_ai_run(request)
     try:
         result = review_portfolio_with_openai({"portfolioContext": context}, agent_id)
     except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)

@@ -8,7 +8,7 @@
       name="description"
       content="Track your Thai (SET/.BK) and US stock portfolio, get daily AI Agent buy/wait verdicts from distinct decision methods, dividend-cycle buy timing, and an honest AI-vs-DCA backtest — free to try."
     />
-    <meta name="keywords" content="AI stock investing, SET stock analysis, Thai stock portfolio tracker, DCA scanner, dividend calendar, AI investing agent, stock backtest, buy timing" />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
     <link rel="canonical" href="https://alpha-wolf.lufas2603.workers.dev/" />
 
     <!-- Open Graph -->
@@ -17,30 +17,27 @@
     <meta property="og:url" content="https://alpha-wolf.lufas2603.workers.dev/" />
     <meta property="og:title" content="Alpha Wolf — AI Agent Investing Dashboard for Thai &amp; US Stocks" />
     <meta property="og:description" content="Daily AI Agent buy/wait verdicts, dividend-cycle buy timing, and an honest AI-vs-DCA backtest for your Thai (SET) and US stock portfolio." />
-    <meta property="og:image" content="https://alpha-wolf.lufas2603.workers.dev/icon-512.png" />
+    <meta property="og:image" content="https://alpha-wolf.lufas2603.workers.dev/og-alpha-wolf.png" />
+    <meta property="og:image:width" content="1792" />
+    <meta property="og:image:height" content="1024" />
+    <meta property="og:image:alt" content="AlphaWolf AI Agent Investing for SET and US Stocks" />
 
     <!-- Twitter -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Alpha Wolf — AI Agent Investing Dashboard" />
     <meta name="twitter:description" content="Daily AI Agent buy/wait verdicts, dividend-cycle buy timing, and an honest AI-vs-DCA backtest for your Thai and US stock portfolio." />
-    <meta name="twitter:image" content="https://alpha-wolf.lufas2603.workers.dev/icon-512.png" />
+    <meta name="twitter:image" content="https://alpha-wolf.lufas2603.workers.dev/og-alpha-wolf.png" />
+    <meta name="twitter:image:alt" content="AlphaWolf AI Agent Investing for SET and US Stocks" />
 
     <!-- Structured data for search engines and AI answer engines -->
     <script type="application/ld+json">
-      {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "Alpha Wolf",
-        "applicationCategory": "FinanceApplication",
-        "operatingSystem": "Web, iOS, Android",
-        "description": "AI Agent investing dashboard for Thai (SET/.BK) and US stocks: daily buy/wait verdicts from distinct AI decision methods, dividend-cycle buy timing, and a walk-forward AI-vs-DCA backtest.",
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        }
-      }
+      {"@context":"https://schema.org","@graph":[
+        {"@type":"Organization","@id":"https://alpha-wolf.lufas2603.workers.dev/#organization","name":"AlphaWolf","url":"https://alpha-wolf.lufas2603.workers.dev/","logo":{"@type":"ImageObject","url":"https://alpha-wolf.lufas2603.workers.dev/icon-512.png"}},
+        {"@type":"WebSite","@id":"https://alpha-wolf.lufas2603.workers.dev/#website","url":"https://alpha-wolf.lufas2603.workers.dev/","name":"AlphaWolf","description":"AI Agent investing dashboard for Thai SET and US stocks.","publisher":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#organization"},"inLanguage":["en","th"]},
+        {"@type":"SoftwareApplication","@id":"https://alpha-wolf.lufas2603.workers.dev/#app","name":"AlphaWolf","url":"https://alpha-wolf.lufas2603.workers.dev/","applicationCategory":"FinanceApplication","applicationSubCategory":"Portfolio management and stock analysis","operatingSystem":"Web, iOS, Android","isAccessibleForFree":true,"description":"AI Agent investing dashboard for Thai SET and US stocks with daily decision support, dividend-cycle buy timing, portfolio tracking, and transparent AI-versus-DCA replay.","featureList":["Thai SET and US portfolio tracking","Distinct AI Agent decision methods","Dividend-cycle buy timing","Walk-forward AI versus DCA replay","Dividend cash-flow accumulation","Contribution-adjusted drawdown comparison"],"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#organization"}}
+      ]}
     </script>
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="AlphaWolf information for AI systems" />
 
     <!-- PWA manifest -->
     <link rel="manifest" href="/manifest.webmanifest" />
@@ -60,7 +57,19 @@
     <link rel="icon" type="image/png" href="/icon-192.png" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main style="max-width:1100px;margin:0 auto;padding:72px 24px;color:#ececee;background:#0e0e10;font-family:system-ui,sans-serif">
+        <p style="color:#3ecf8e;font:600 12px ui-monospace,monospace">AI AGENT INVESTING · THAI SET + US STOCKS</p>
+        <h1 style="max-width:760px;font-size:48px;line-height:1.08;margin:18px 0">An AI Agent desk for your Thai and US stock portfolio</h1>
+        <p style="max-width:720px;color:#a0a0a8;font-size:17px;line-height:1.7">AlphaWolf helps investors track SET (.BK) and US holdings, compare distinct AI Agent judgments, time dividend-cycle entries, and replay buy, hold, trim, and sell decisions against normal monthly DCA. Results include accumulated dividends, cash reserve, exposure, and drawdown. AI analysis is decision support—not financial advice.</p>
+        <nav aria-label="AlphaWolf guides" style="display:flex;flex-wrap:wrap;gap:16px;margin-top:30px">
+          <a href="/ai-stock-analysis.html" style="color:#3ecf8e">AI stock analysis for SET + US stocks</a>
+          <a href="/ai-vs-dca-backtest.html" style="color:#74a4ff">AI strategy vs normal DCA</a>
+          <a href="/dividend-buy-timing.html" style="color:#f5c451">Dividend buy timing</a>
+        </nav>
+        <section style="margin-top:44px"><h2>Five Agents, five decision methods</h2><p style="color:#a0a0a8;line-height:1.7">Ben studies owner earnings and durable business quality. Sam focuses on dividend income and payout safety. Vera applies CFA-level banking, cash-flow, capital-structure, and valuation discipline. Rex reads momentum and volume. Nadia relies on measurable quantitative evidence. Each Agent keeps its own character rather than repeating one generic answer.</p></section>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

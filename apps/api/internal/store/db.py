@@ -16,6 +16,7 @@ class LibsqlCursor:
     def __init__(self, result: Any):
         self._result = result
         self.lastrowid = getattr(result, "lastrowid", None)
+        self.rowcount = int(getattr(result, "rows_affected", getattr(result, "rowcount", -1)) or 0)
 
     def fetchone(self):
         if hasattr(self._result, "fetchone"):
@@ -195,6 +196,19 @@ def migrate() -> None:
 def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
     if "premium_redeemed_at" not in _table_columns(db, "users"):
         db.execute("ALTER TABLE users ADD COLUMN premium_redeemed_at TEXT")
+    if "premium_expires_at" not in _table_columns(db, "users"):
+        db.execute("ALTER TABLE users ADD COLUMN premium_expires_at TEXT")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ai_usage_monthly (
+            user_id INTEGER NOT NULL,
+            period TEXT NOT NULL,
+            used INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, period)
+        )
+        """
+    )
 
     holding_columns = _table_columns(db, "holdings")
     if "user_id" not in holding_columns:

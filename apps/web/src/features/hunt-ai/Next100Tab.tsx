@@ -1,7 +1,6 @@
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ArrowUpIcon } from "../../components/ui/icons";
 import { EmptyPanel, LoadingStrip, RetryPanel } from "../../components/ui/panels";
-import { N100_QUOTA_LIMIT } from "../../store/useWolfStore";
 import { realTimeframes, timeframes, type N100Timeframe } from "./lib";
 import { Next100Result } from "./Next100Result";
 import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
@@ -55,7 +54,7 @@ export function Next100Tab({ hunt }: { hunt: HuntAi }) {
             );
           })}
         </div>
-        <QuotaPill used={n100.quotaUsed} />
+        <QuotaPill used={n100.quotaUsed} limit={n100.quotaLimit} />
       </div>
 
       {!n100.report?.data && !n100.fetching ? (
@@ -90,12 +89,12 @@ export function Next100Tab({ hunt }: { hunt: HuntAi }) {
   );
 }
 
-function QuotaPill({ used }: { used: number }) {
-  const pct = (used / N100_QUOTA_LIMIT) * 100;
+function QuotaPill({ used, limit }: { used: number; limit: number }) {
+  const pct = limit > 0 ? (used / limit) * 100 : 0;
   return (
     <div className="ml-auto flex items-center gap-2 rounded-[8px] border border-[#2a2a31] bg-[#161619] px-3 py-1.5 text-[11px] text-[#8c8c95]">
       <span className="font-mono font-semibold" style={{ color: pct > 80 ? "#f2575c" : "#3ecf8e" }}>{used}</span>
-      <span>/ {N100_QUOTA_LIMIT} used</span>
+      <span>/ {limit} monthly AI runs</span>
       <div className="h-1 w-[54px] overflow-hidden rounded-full bg-[#0e0e10]">
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct > 80 ? "#f2575c" : "#3ecf8e" }} />
       </div>

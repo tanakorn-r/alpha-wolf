@@ -1,79 +1,54 @@
 import { useState } from "react";
-
-const SEEN_STORAGE_KEY = "aw_seen_pro_promo";
-
-function hasSeenPromo() {
-  return typeof window !== "undefined" && window.localStorage.getItem(SEEN_STORAGE_KEY) === "1";
-}
-
-function markSeenPromo() {
-  if (typeof window !== "undefined") window.localStorage.setItem(SEEN_STORAGE_KEY, "1");
-}
-
-function sinceLabel(accountCreatedAt: string | null) {
-  const since = accountCreatedAt ? new Date(accountCreatedAt) : null;
-  return since && !Number.isNaN(since.getTime())
-    ? `Your account joined ${since.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} — redeem now for a free first month.`
-    : "Redeem now for a free first month.";
-}
+import { GoogleAccountModal } from "../../components/auth/GoogleAccount";
 
 export function ProPromoBanner({
-  active,
-  accountCreatedAt,
+  open,
+  signedIn,
+  onClose,
   onRedeem,
   redeeming,
 }: {
-  active: boolean;
-  accountCreatedAt: string | null;
+  open: boolean;
+  signedIn: boolean;
+  onClose: () => void;
   onRedeem: () => void;
   redeeming: boolean;
 }) {
-  const [seen, setSeen] = useState(hasSeenPromo);
-  const [closed, setClosed] = useState(false);
-  if (!active || closed) return null;
+  const [signInOpen, setSignInOpen] = useState(false);
+  if (!open) return null;
 
-  const dismiss = () => { markSeenPromo(); setSeen(true); };
-  const redeem = () => { markSeenPromo(); setSeen(true); onRedeem(); };
-
-  if (!seen) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" role="dialog" aria-modal="true">
-        <div className="w-full max-w-[420px] rounded-[14px] border border-[#3ecf8e]/30 bg-[#111113] p-6 text-center shadow-[0_24px_70px_rgba(0,0,0,0.5)]">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-[14px] border border-[#3ecf8e]/30 bg-[#3ecf8e]/10">
-            <svg width="24" height="24" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.8 4.5 4.7 1.5-4.7 1.2L8 14 6.2 8.7 1.5 7.5 6.2 6z" stroke="#3ecf8e" strokeWidth="1.4" strokeLinejoin="round" /></svg>
-          </div>
-          <div className="mt-3 text-[17px] font-bold text-[#ececee]">Hunt AI Pro is free right now</div>
-          <p className="mx-auto mt-2 max-w-[340px] text-[12.5px] leading-[1.6] text-[#8c8c95]">
-            Redeem it and every tab — Daily Brief, Buy Timing, AI Replay, Analyst — opens up at no cost.
-            {" "}{sinceLabel(accountCreatedAt)}
-          </p>
-          <div className="mt-5 flex flex-col gap-2">
-            <button type="button" disabled={redeeming} onClick={redeem} className="rounded-[9px] bg-[#3ecf8e] px-4 py-2.5 text-[13px] font-bold text-[#0a0c0f] hover:opacity-90 disabled:opacity-60">
-              {redeeming ? "Redeeming…" : "Redeem Free Pro"}
+  return (
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-[3px]" role="dialog" aria-modal="true" aria-label="Start free Pro trial">
+        <div className="relative w-full max-w-[520px] rounded-[18px] bg-[linear-gradient(135deg,#3ecf8e,#4d96ff,#c77dff)] p-[2px] shadow-[0_30px_100px_rgba(0,0,0,0.7)]">
+          <div className="rounded-[16px] bg-[#101013] px-6 py-6 sm:px-8">
+            <button type="button" onClick={onClose} aria-label="Close" className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-[7px] text-lg text-[#6f6f78] hover:bg-white/[0.05] hover:text-[#ececee]">×</button>
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-[13px] border border-[#3ecf8e]/30 bg-[#3ecf8e]/10 text-[#3ecf8e]">
+              <svg width="24" height="24" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4.5 6.5 8 3l3.5 3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
+            </div>
+            <div className="mt-4 text-center">
+              <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#3ecf8e]">Launch offer · no card</div>
+              <h2 className="mt-1.5 text-[24px] font-extrabold tracking-[-0.5px] text-[#ececee]">Use Hunt AI Pro free for 30 days</h2>
+              <p className="mx-auto mt-2 max-w-[420px] text-[12.5px] leading-[1.65] text-[#8c8c95]">Unlock Daily Brief, Buy Timing, AI Replay, Stock Analyst, Strategy AI, and Next 10 immediately. Your trial ends automatically—no payment details and no surprise charge.</p>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-2 text-[11.5px] text-[#bcbcc2]">
+              {["100 AI runs this month", "All Hunt AI Pro tabs", "Real account usage tracking", "Cancel nothing—trial simply ends"].map((item) => (
+                <div key={item} className="flex items-center gap-2 rounded-[8px] border border-[#25252b] bg-[#161619] px-3 py-2"><span className="text-[#3ecf8e]">✓</span>{item}</div>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={redeeming}
+              onClick={() => signedIn ? onRedeem() : setSignInOpen(true)}
+              className="mt-5 w-full rounded-[10px] bg-[linear-gradient(90deg,#3ecf8e,#4d96ff)] px-4 py-3 text-[13.5px] font-extrabold text-white hover:opacity-90 disabled:opacity-60"
+            >
+              {!signedIn ? "Sign in to claim 30 days free" : redeeming ? "Activating Pro…" : "Activate my free Pro month"}
             </button>
-            <button type="button" onClick={dismiss} className="rounded-[9px] border border-[#2a2a31] bg-transparent px-4 py-2.5 text-[12.5px] font-semibold text-[#8c8c95] hover:border-[#5a5a62]">
-              Maybe later
-            </button>
+            <div className="mt-2 text-center text-[10px] text-[#5a5a62]">One trial per account · monthly AI limits are enforced server-side</div>
           </div>
         </div>
       </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border border-[#3ecf8e]/30 bg-[linear-gradient(135deg,rgba(62,207,142,0.08),rgba(116,164,255,0.05))] px-4 py-3">
-      <div className="min-w-0">
-        <div className="text-[12.5px] font-bold text-[#3ecf8e]">Hunt AI Pro is free right now</div>
-        <div className="mt-0.5 text-[11.5px] text-[#8c8c95]">{sinceLabel(accountCreatedAt)}</div>
-      </div>
-      <div className="flex flex-none items-center gap-2">
-        <button type="button" disabled={redeeming} onClick={redeem} className="rounded-[7px] bg-[#3ecf8e] px-3 py-1.5 text-[11px] font-bold text-[#0a0c0f] hover:opacity-90 disabled:opacity-60">
-          {redeeming ? "Redeeming…" : "Redeem Free Pro"}
-        </button>
-        <button type="button" onClick={() => setClosed(true)} aria-label="Dismiss" className="rounded-[7px] border border-[#2a2a31] bg-[#161619] px-2.5 py-1.5 text-[11px] text-[#8c8c95] hover:border-[#5a5a62]">
-          ×
-        </button>
-      </div>
-    </div>
+      {signInOpen ? <GoogleAccountModal user={null} onClose={() => setSignInOpen(false)} /> : null}
+    </>
   );
 }

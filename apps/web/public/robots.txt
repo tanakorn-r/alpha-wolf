@@ -1,6 +1,10 @@
 User-agent: *
 Allow: /
 
+# Public app routes contain personalized/runtime data. Crawl the durable public
+# explanations instead of spending crawl budget on query-state variants.
+Disallow: /*?*
+
 # AI answer engines / agent crawlers — explicitly welcomed so Alpha Wolf can be
 # discovered and cited by LLM-based search and agentic browsers.
 User-agent: GPTBot
@@ -25,6 +29,15 @@ User-agent: Google-Extended
 Allow: /
 
 User-agent: CCBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: Bytespider
 Allow: /
 
 Sitemap: https://alpha-wolf.lufas2603.workers.dev/sitemap.xml

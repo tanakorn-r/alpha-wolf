@@ -2,22 +2,26 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://alpha-wolf.lufas2603.workers.dev/</loc>
-    <changefreq>daily</changefreq>
+    <lastmod>2026-07-12</lastmod>
+    <changefreq>weekly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://alpha-wolf.lufas2603.workers.dev/scanner</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.8</priority>
+    <loc>https://alpha-wolf.lufas2603.workers.dev/ai-stock-analysis.html</loc>
+    <lastmod>2026-07-12</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://alpha-wolf.lufas2603.workers.dev/calendar</loc>
-    <changefreq>daily</changefreq>
-    <priority>0.8</priority>
+    <loc>https://alpha-wolf.lufas2603.workers.dev/ai-vs-dca-backtest.html</loc>
+    <lastmod>2026-07-12</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
   </url>
   <url>
-    <loc>https://alpha-wolf.lufas2603.workers.dev/hunt-ai</loc>
-    <changefreq>daily</changefreq>
+    <loc>https://alpha-wolf.lufas2603.workers.dev/dividend-buy-timing.html</loc>
+    <lastmod>2026-07-12</lastmod>
+    <changefreq>monthly</changefreq>
     <priority>0.9</priority>
   </url>
 </urlset>

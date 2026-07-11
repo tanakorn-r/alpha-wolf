@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from internal.store.db import connect
+from internal.store.entitlements import entitlement_status
 
 
 def upsert_google_user(*, google_sub: str, email: str, name: str, picture_url: str | None) -> dict[str, Any]:
@@ -24,7 +25,7 @@ def upsert_google_user(*, google_sub: str, email: str, name: str, picture_url: s
             (google_sub, email, name, picture_url, now, now),
         )
         row = db.execute(
-            "SELECT id, google_sub, email, name, picture_url, created_at, premium_redeemed_at FROM users WHERE google_sub = ?",
+            "SELECT id, google_sub, email, name, picture_url, created_at, premium_redeemed_at, premium_expires_at FROM users WHERE google_sub = ?",
             (google_sub,),
         ).fetchone()
         db.commit()
@@ -53,7 +54,7 @@ def user_for_session(raw_token: str | None) -> dict[str, Any] | None:
     with connect() as db:
         row = db.execute(
             """
-            SELECT u.id, u.google_sub, u.email, u.name, u.picture_url, u.created_at, u.premium_redeemed_at
+            SELECT u.id, u.google_sub, u.email, u.name, u.picture_url, u.created_at, u.premium_redeemed_at, u.premium_expires_at
             FROM auth_sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.token_hash = ? AND s.expires_at > ?
@@ -93,12 +94,15 @@ def _hash_token(raw_token: str) -> str:
 
 
 def _user(row: Any) -> dict[str, Any]:
+    user_id = int(row[0])
     return {
-        "id": int(row[0]),
+        "id": user_id,
         "googleSub": str(row[1]),
         "email": str(row[2]),
         "name": str(row[3]),
         "pictureUrl": str(row[4]) if row[4] else None,
         "createdAt": str(row[5]),
         "premiumRedeemedAt": str(row[6]) if row[6] else None,
+        "premiumExpiresAt": str(row[7]) if len(row) > 7 and row[7] else None,
+        **entitlement_status(user_id),
     }
