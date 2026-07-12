@@ -14,8 +14,8 @@ from internal.ai.agents import agent_badge, compose_instructions
 from internal.store.utils import parse_json_fragment
 from models import BacktradeDecision, BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
 
-OPENAI_TIMEOUT_SECONDS = 45
-OPENAI_MAX_RETRIES = 3
+OPENAI_TIMEOUT_SECONDS = 30
+OPENAI_MAX_RETRIES = 1
 DEFAULT_OPENAI_MODEL = "gpt-5.5"
 DEFAULT_FAST_MODEL = "gpt-5.4-mini"
 

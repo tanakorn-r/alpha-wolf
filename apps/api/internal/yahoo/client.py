@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import threading
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable
 
 import pandas as pd
@@ -11,18 +13,20 @@ from internal.store.utils import as_float
 from internal.store.utils import safe_dict
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 
-MODULES_TTL_SECONDS = 900
+MODULES_TTL_SECONDS = 60
 HISTORY_TTL_SECONDS = 900
 LONG_HISTORY_TTL_SECONDS = 3600
 FULL_HISTORY_REFRESH_SECONDS = 604_800
 NEWS_TTL_SECONDS = 900
-DIVIDENDS_TTL_SECONDS = 21_600
+DIVIDENDS_TTL_SECONDS = 86_400
 
 # Floor on how often we'll even ATTEMPT a refresh for the same key, regardless of outcome.
 # Without this, a symbol that keeps failing/timing out against Yahoo would get re-attempted
 # on every single request that finds it stale — the lock only stops concurrent duplicates,
 # not this kind of sequential retry storm against an already-struggling upstream.
 MIN_REFRESH_ATTEMPT_INTERVAL_SECONDS = 60
+YAHOO_BACKGROUND_WORKERS = max(1, int(os.getenv("YAHOO_BACKGROUND_WORKERS", "6")))
+_YAHOO_EXECUTOR = ThreadPoolExecutor(max_workers=YAHOO_BACKGROUND_WORKERS, thread_name_prefix="yahoo-refresh")
 
 
 def ticker(symbol: str) -> yf.Ticker:
@@ -54,7 +58,7 @@ def _refresh_in_background(namespace: str, key: str, task: Callable[[], None]) -
         finally:
             lock.release()
 
-    threading.Thread(target=_run, daemon=True).start()
+    _YAHOO_EXECUTOR.submit(_run)
 
 
 def _safe_info(t: yf.Ticker) -> dict[str, Any]:

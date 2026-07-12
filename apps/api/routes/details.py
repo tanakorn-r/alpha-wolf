@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import agent_badge, normalize_agent_id
@@ -105,14 +106,14 @@ def details_deep(symbol: str) -> dict[str, Any]:
     return result
 
 
-@router.get("/api/details/{symbol}/buy-timing")
+@router.get("/api/details/{symbol}/buy-timing", response_model=None)
 def details_buy_timing(
     symbol: str,
     request: Request,
     strategy: StrategyKey = Query("stable_dca"),
     agent: str = Query("vera"),
     force: bool = Query(False),
-) -> dict[str, Any]:
+) -> dict[str, Any] | JSONResponse:
     require_ai_account(request, premium_required=True)
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
@@ -125,6 +126,8 @@ def details_buy_timing(
     result = build_buy_timing(normalized, strategy, force_refresh=force)
     if not result:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    if result.get("dataPending"):
+        return JSONResponse(status_code=202, content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3})
     try:
         has_price = float(result.get("price") or 0) > 0
     except (TypeError, ValueError):
@@ -173,56 +176,11 @@ def details_upward_moves(
     if not historical:
         raise HTTPException(status_code=404, detail=f"Not enough history for {normalized}")
 
-    def _financials() -> dict[str, Any]:
-        try:
-            return get_financials(normalized) or {}
-        except Exception as exc:
-            print(f"Warning: Financials load failed for {normalized}: {exc}")
-            return {}
-
-    def _market() -> dict[str, Any]:
-        try:
-            return get_market_comparison(normalized) or {}
-        except Exception as exc:
-            print(f"Warning: Market comparison load failed for {normalized}: {exc}")
-            return {}
-
-    def _insights() -> dict[str, Any]:
-        try:
-            return get_domain_insights(normalized) or {}
-        except Exception as exc:
-            print(f"Warning: Domain insights load failed for {normalized}: {exc}")
-            return {}
-
-    financials_data: dict[str, Any] = {}
-    market_data: dict[str, Any] = {}
-    insights_data: dict[str, Any] = {}
-
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        futs = {
-            pool.submit(_financials): "financials",
-            pool.submit(_market): "market",
-            pool.submit(_insights): "insights",
-        }
-        for fut in as_completed(futs):
-            key = futs[fut]
-            try:
-                val = fut.result()
-            except Exception as exc:
-                print(f"Warning: {key} fetch failed for {normalized}: {exc}")
-                val = {}
-            if key == "financials":
-                financials_data = val
-            elif key == "market":
-                market_data = val
-            elif key == "insights":
-                insights_data = val
-
     context = build_analysis_context(
         bundle,
-        financials=financials_data,
-        market_comparison=market_data,
-        domain_insights=insights_data,
+        financials={},
+        market_comparison={},
+        domain_insights={},
         agent_id=agent_id,
     )
     context["forecastRequest"] = {

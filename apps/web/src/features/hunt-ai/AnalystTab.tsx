@@ -5,7 +5,6 @@ import { PaywallGate } from "../../components/ui/PaywallGate";
 import type { StockAnalysisResponse, StockDetailResponse } from "../../lib/api";
 import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
-import { AnalystPanels } from "./AnalystPanels";
 import { formatAnalyzedAt, signalLevel } from "./lib";
 import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
@@ -59,13 +58,15 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
         </div>
       </div>
 
-      {analyst.loading ? <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "analyst", selectedTicker || "this stock")} subject={selectedTicker || "AI"} agentId={hunt.activeAgentId} task="analyst" /> : null}
+      {analyst.loading ? <>
+        <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "analyst", selectedTicker || "this stock")} subject={selectedTicker || "AI"} agentId={hunt.activeAgentId} task="analyst" />
+        <div className="-mt-1 text-center text-[11px] text-[#8c8c95]">{analyst.stage === "market_data" ? "Reading stored market data and checking quote freshness…" : "Generating the Agent report…"}</div>
+      </> : null}
 
       {hasResult && analyst.detail && analyst.analysis ? (
         <div className="flex flex-col gap-3">
           <AnalystNoteCard analysis={analyst.analysis} />
           <LongTermStructureView analysis={analyst.analysis} />
-          <AnalystPanels detail={analyst.detail} analysis={analyst.analysis} />
           <AnalystReasons analysis={analyst.analysis} />
           <AnalystPriceChart detail={analyst.detail} analysis={analyst.analysis} />
         </div>

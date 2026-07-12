@@ -6,6 +6,7 @@ import {
   loadBuyTiming,
   loadAuthUser,
   loadDiscoveries,
+  loadAnalystReport,
   redeemPremiumPromo,
   loadPortfolio,
   loadPortfolioWatchlist,
@@ -59,6 +60,7 @@ export function useHuntAi() {
   const [analystDetail, setAnalystDetail] = useState<StockDetailResponse | null>(null);
   const [analystAnalysis, setAnalystAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [analystLoading, setAnalystLoading] = useState(false);
+  const [analystStage, setAnalystStage] = useState<"market_data" | "analysis">("market_data");
   const [intradayAnalysis, setIntradayAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [intradayAiLoading, setIntradayAiLoading] = useState(false);
   const [n100Timeframe, setN100Timeframe] = useState<N100Timeframe>("1D");
@@ -418,19 +420,19 @@ export function useHuntAi() {
       analysis: analystReport?.data.analysis ?? null,
       analyzedAt: analystReport?.analyzedAt ?? "",
       loading: analystLoading,
+      stage: analystStage,
       async run(ticker?: string) {
         const sym = (ticker || activeTicker).trim().toUpperCase();
         if (!sym) return;
+        const forceRefresh = Boolean(analystReport?.data.analysis);
         setAnalystTicker(sym);
         setAnalystDetail(null);
         setAnalystAnalysis(null);
         setAnalystLoading(true);
+        setAnalystStage("market_data");
         setAiError("");
         try {
-          const [detail, analysis] = await Promise.all([
-            loadStockDetail(sym, "capitalized"),
-            summarizeStock(sym, "capitalized", activeAgentId, true),
-          ]);
+          const { detail, analysis } = await loadAnalystReport(sym, "capitalized", activeAgentId, forceRefresh, setAnalystStage);
           setAnalystDetail(detail);
           setAnalystAnalysis(analysis);
           setHuntAiCache(`${accountScope}:${AGENT_REASONING_CACHE_VERSION}:analyst:${sym}:${activeAgentId}`, { analyzedAt: new Date().toISOString(), data: { detail, analysis } });

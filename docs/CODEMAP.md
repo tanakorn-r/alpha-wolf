@@ -43,7 +43,7 @@ export function FooPage() {
 | `features/dashboard/` | `useDashboard.ts`, `usePlanCard.ts` + StatsRow, HoldingsTable, PlanCard, SellModal, ChartsRow, AiAdvisor, EmptyPortfolio… |
 | `features/stock-hunt/` | `useStockHunt.ts` + HuntFilters, MatchList/MatchCard, RankBanner, Top5Panel |
 | `features/dividend-hunt/` | `useDividendHunt.ts`, `calendarModel.ts` + CalendarCard, CalendarSide |
-| `features/hunt-ai/` | `useHuntAi.ts` (grouped: watchlist/signals/timing/intraday/next100/strategy/analyst), `lib.ts`, `ui.tsx` (panel const, PremiumLoading…), ChartTooltip + HuntHero, WatchlistBar, HuntTabsBar, SignalsTab(Daily Signals), BuyTimingTab, IntradayTab, Next100Tab(Next 10), Next100Result, StrategyTab, AnalystTab, AnalystPanels |
+| `features/hunt-ai/` | `useHuntAi.ts` (grouped: watchlist/signals/timing/intraday/next100/strategy/analyst), `lib.ts`, `ui.tsx` (panel const, PremiumLoading…), ChartTooltip + HuntHero, WatchlistBar, HuntTabsBar, SignalsTab(Daily Signals), BuyTimingTab, IntradayTab, Next100Tab(Next 10), Next100Result, StrategyTab, AnalystTab |
 | `features/stock-detail/` | `StockDetailDrawer.tsx` + `DrawerMetric.tsx` + `AdvancedInsightCard.tsx`: compact 1040px research drawer, Agent Quick Read, equal six-tab navigation, reusable metric and advanced-analysis cards |
 | `components/ui/` | Shared atoms: `Surface.tsx` (tokenized card/inset/frame shells), `panels.tsx` (LoadingPanel/LoadingStrip/EmptyPanel/RetryPanel/ErrorBanner/ErrorCard), `Badge.tsx` (Badge/SignalChip/TagPill), `PillTabs.tsx`, `icons.tsx` (Spark/Search/ArrowUp), `Modal.tsx` |
 | `components/agents/` | Shared agent presentation: `AgentCall` canonical verdict anatomy, `AgentThinking` canonical progress state, plus `AgentCard`, `AgentByline`, and `AgentRecap` |

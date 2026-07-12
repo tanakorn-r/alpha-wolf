@@ -16,6 +16,8 @@ GCP_PROJECT="${GCP_PROJECT:-${GCP_PROJECT_ID:-alpha-wolf-501716}}"
 GCP_REGION="${GCP_REGION:-asia-southeast3}"
 REPO="${ARTIFACT_REPOSITORY:-alpha-wolf-be}"
 SERVICE="${CLOUD_RUN_SERVICE:-alpha-wolf-api}"
+CLOUD_RUN_CONCURRENCY="${CLOUD_RUN_CONCURRENCY:-12}"
+CLOUD_RUN_MEMORY="${CLOUD_RUN_MEMORY:-1Gi}"
 
 # GENERATE UNIQUE VERSION TAG (Fixes the Artifact Registry Immutability error)
 TAG=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d-%H%M%S)
@@ -157,6 +159,8 @@ gcloud run deploy "$SERVICE" \
   --platform managed \
   --allow-unauthenticated \
   --port 8080 \
+  --concurrency "$CLOUD_RUN_CONCURRENCY" \
+  --memory "$CLOUD_RUN_MEMORY" \
   --env-vars-file "$ENV_YAML" \
   --quiet
 

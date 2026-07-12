@@ -319,6 +319,12 @@ export type StockAnalysisResponse = {
   agentFitReason?: string | null;
 };
 
+export type AnalystReportResponse = {
+  status: "ready";
+  detail: StockDetailResponse;
+  analysis: StockAnalysisResponse;
+};
+
 export type AgentStyle = { Discipline: number; Patience: number; Data: number; Instinct: number };
 
 export type AgentBadge = {
@@ -1001,9 +1007,18 @@ export async function loadBuyTiming(symbol: string, agent?: string, force = fals
   if (agent) query.set("agent", agent);
   if (force) query.set("force", "true");
   const suffix = query.size ? `?${query}` : "";
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/buy-timing${suffix}`, { credentials: "include" });
-  if (!response.ok) throw new Error(`Failed to load buy timing: ${response.status}`);
-  return (await response.json()) as BuyTimingResponse;
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < 60_000) {
+    const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/buy-timing${suffix}`, { credentials: "include" });
+    if (response.status === 202) {
+      const pending = (await response.json()) as { retryAfterSeconds?: number };
+      await new Promise((resolve) => window.setTimeout(resolve, Math.max(1, pending.retryAfterSeconds ?? 3) * 1_000));
+      continue;
+    }
+    if (!response.ok) throw new Error(`Failed to load buy timing: ${response.status}`);
+    return (await response.json()) as BuyTimingResponse;
+  }
+  throw new Error("Buy Timing market data did not become ready within one minute.");
 }
 
 export async function summarizeStock(symbol: string, strategy?: string, agent?: string, force = false): Promise<StockAnalysisResponse> {
@@ -1032,6 +1047,60 @@ export async function summarizeStock(symbol: string, strategy?: string, agent?: 
   }
 
   return (await response.json()) as StockAnalysisResponse;
+}
+
+export async function loadAnalystReport(
+  symbol: string,
+  strategy: string,
+  agent: string,
+  force = false,
+  onStage?: (stage: "market_data" | "analysis") => void,
+): Promise<AnalystReportResponse> {
+  const startedAt = Date.now();
+  const deadlineMs = 60_000;
+  let firstRequest = true;
+
+  while (Date.now() - startedAt < deadlineMs) {
+    onStage?.(firstRequest ? "market_data" : "analysis");
+    const analysisStageTimer = window.setTimeout(() => onStage?.("analysis"), 1_000);
+    const params = new URLSearchParams({ agent });
+    if (force) params.set("force", "true");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 35_000);
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/report?${params}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("Stock Analyst timed out. Please retry.");
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+      window.clearTimeout(analysisStageTimer);
+    }
+
+    if (response.status === 202) {
+      firstRequest = false;
+      onStage?.("market_data");
+      const pending = (await response.json()) as { retryAfterSeconds?: number };
+      await new Promise((resolve) => window.setTimeout(resolve, Math.max(1, pending.retryAfterSeconds ?? 3) * 1_000));
+      continue;
+    }
+    if (!response.ok) {
+      let message = `Stock Analyst failed: ${response.status}`;
+      try { message = ((await response.json()) as { detail?: string }).detail ?? message; } catch { /* HTTP fallback */ }
+      throw new Error(message);
+    }
+    onStage?.("analysis");
+    return (await response.json()) as AnalystReportResponse;
+  }
+
+  throw new Error("Market data did not become ready within one minute. Please retry.");
 }
 
 export async function loadQuantPerspective(symbol: string, strategy?: string, mode?: string, agent?: string, force = false): Promise<QuantPerspectiveResponse> {

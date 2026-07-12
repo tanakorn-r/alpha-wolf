@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from internal.yahoo.client import fetch_news
+from internal.yahoo.client import _fetch_news_live
 
 
 class FakeTicker:
@@ -37,7 +37,7 @@ class LegacyFakeTicker:
 
 class YahooNewsTests(unittest.TestCase):
     def test_fetch_news_parses_nested_yfinance_content_payload(self) -> None:
-        news = fetch_news(FakeTicker())
+        news = _fetch_news_live(FakeTicker())
 
         self.assertEqual(news[0]["title"], "Apple plans new iPhones")
         self.assertEqual(news[0]["summary"], "A busy release cycle could affect Apple.")
@@ -46,7 +46,7 @@ class YahooNewsTests(unittest.TestCase):
         self.assertEqual(news[0]["publishedAt"], "2026-07-04T20:37:00+00:00")
 
     def test_fetch_news_keeps_legacy_flat_payload_support(self) -> None:
-        news = fetch_news(LegacyFakeTicker())
+        news = _fetch_news_live(LegacyFakeTicker())
 
         self.assertEqual(news[0]["title"], "Legacy title")
         self.assertEqual(news[0]["publisher"], "Yahoo Finance")

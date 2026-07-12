@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import normalize_agent_id
@@ -22,6 +24,20 @@ from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnaly
 router = APIRouter()
 
 DETAIL_TTL_SECONDS = 180
+ANALYST_REPORT_TTL_SECONDS = 900
+
+
+def _analyst_input_flags(agent_id: str) -> tuple[bool, bool, bool]:
+    """Only load research packs referenced by this Agent's context branch."""
+    return {
+        "rex": (False, True, False),
+        "kai": (False, True, False),
+        "nadia": (False, True, True),
+        "sam": (True, False, False),
+        "ben": (True, False, True),
+        "alphawolf": (True, True, True),
+        "vera": (True, False, True),
+    }.get(agent_id, (True, False, True))
 
 
 def _fetch_analysis_data(
@@ -67,6 +83,8 @@ def _fetch_analysis_data(
             print(f"Warning: Domain insights load failed for {symbol}: {exc}")
             return {}
 
+    started_at = time.monotonic()
+    stage_times: dict[str, float] = {}
     with ThreadPoolExecutor(max_workers=4) as pool:
         futures = {pool.submit(_bundle): "bundle"}
         if include_financials:
@@ -90,6 +108,9 @@ def _fetch_analysis_data(
                 market = result or {}
             elif key == "insights":
                 insights = result or {}
+            stage_times[key] = round(time.monotonic() - started_at, 3)
+
+    print(f"Analysis data timing {symbol}: total={time.monotonic() - started_at:.3f}s stages={stage_times}")
 
     return bundle, financials, market, insights
 
@@ -109,7 +130,14 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
     if cached is not None and not force:
         return cached
 
-    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(normalized, strategy)
+    include_financials, include_market, include_insights = _analyst_input_flags(agent_id)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
+        normalized,
+        strategy,
+        include_financials=include_financials,
+        include_market=include_market,
+        include_insights=include_insights,
+    )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
     _require_ai_market_data(bundle, normalized)
@@ -132,6 +160,73 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
 
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
+
+
+@router.post("/api/analysis/{symbol}/report", response_model=None)
+def analyst_report(
+    symbol: str,
+    request: Request,
+    payload: dict[str, Any] | None = Body(default=None),
+    agent: str = Query("vera"),
+    force: bool = Query(False),
+) -> dict[str, Any] | JSONResponse:
+    """Return the detail and Agent analysis together without duplicate market-data work.
+
+    Cold quote data returns 202 immediately while the cache-first loaders refresh the database;
+    the browser can poll without holding a Cloud Run request open on Yahoo.
+    """
+    require_ai_account(request, premium_required=True)
+    normalized = symbol.upper().strip()
+    strategy = parse_strategy((payload or {}).get("strategy"))
+    agent_id = normalize_agent_id(agent)
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
+    position_context = _position_context(normalized, user_id)
+    position_cache_key = _position_cache_key(position_context)
+    cache_key = f"{account_scope}:analyst-report:v1:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+
+    cached_analysis = cache_get("analysis", cache_key)
+    if cached_analysis is not None and not force:
+        bundle = build_detail_bundle(normalized, strategy)
+        if not bundle:
+            raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+        if bundle.get("dataPending"):
+            return JSONResponse(status_code=202, content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3})
+        return {"status": "ready", "detail": bundle, "analysis": cached_analysis}
+
+    include_financials, include_market, include_insights = _analyst_input_flags(agent_id)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
+        normalized,
+        strategy,
+        include_financials=include_financials,
+        include_market=include_market,
+        include_insights=include_insights,
+    )
+    if not bundle:
+        raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    if bundle.get("dataPending"):
+        return JSONResponse(status_code=202, content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3})
+
+    context = build_analysis_context(
+        bundle,
+        financials=financials_data,
+        market_comparison=market_data,
+        domain_insights=insights_data,
+        position_context=position_context,
+        agent_id=agent_id,
+    )
+    usage_user_id, _ = claim_ai_run(request, premium_required=True)
+    openai_started_at = time.monotonic()
+    try:
+        result = analyze_with_openai(context, agent_id)
+    except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        print(f"Analyst OpenAI timing {normalized}: {time.monotonic() - openai_started_at:.3f}s")
+
+    cache_set("analysis", cache_key, result, ANALYST_REPORT_TTL_SECONDS)
+    return {"status": "ready", "detail": bundle, "analysis": result}
 
 
 @router.post("/api/analysis/{symbol}/quant", response_model=QuantPerspectiveResponse)

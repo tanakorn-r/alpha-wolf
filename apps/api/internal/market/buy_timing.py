@@ -16,6 +16,7 @@ from internal.yahoo.client import fetch_dividends, fetch_history, ticker as make
 
 BUY_TIMING_CACHE_NAMESPACE = "buy_timing"
 BUY_TIMING_TTL_SECONDS = 900
+BUY_TIMING_PENDING_TTL_SECONDS = 2
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -177,8 +178,14 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_re
             "resistance": as_float(deep.get("resistance")),
             "dividendPattern": detail.get("dividendPattern"),
         },
+        "dataPending": bool(not current_price or history.empty),
     }
-    cache_set(BUY_TIMING_CACHE_NAMESPACE, cache_key, result, BUY_TIMING_TTL_SECONDS)
+    cache_set(
+        BUY_TIMING_CACHE_NAMESPACE,
+        cache_key,
+        result,
+        BUY_TIMING_PENDING_TTL_SECONDS if result["dataPending"] else BUY_TIMING_TTL_SECONDS,
+    )
     return result
 
 

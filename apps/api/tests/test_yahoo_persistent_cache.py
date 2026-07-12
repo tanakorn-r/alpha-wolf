@@ -38,9 +38,15 @@ class YahooPersistentCacheTests(unittest.TestCase):
         self.url_patch = patch.object(store_db, "DATABASE_URL", None)
         self.db_patch.start()
         self.url_patch.start()
+        self.background_patch = patch(
+            "internal.yahoo.client._refresh_in_background",
+            side_effect=lambda _namespace, _key, task: task(),
+        )
+        self.background_patch.start()
         store_db.migrate()
 
     def tearDown(self) -> None:
+        self.background_patch.stop()
         self.url_patch.stop()
         self.db_patch.stop()
         self.tempdir.cleanup()
@@ -61,8 +67,8 @@ class YahooPersistentCacheTests(unittest.TestCase):
         second = fetch_history(ticker, "5y")
 
         self.assertEqual(ticker.calls, 1)
-        self.assertEqual(len(first), 2)
-        self.assertEqual(first["Close"].tolist(), second["Close"].tolist())
+        self.assertTrue(first.empty)
+        self.assertEqual(len(second), 2)
         cached = load_yahoo_data("CACHE", "history", "5y")
         self.assertIsNotNone(cached)
 

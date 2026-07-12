@@ -71,7 +71,9 @@ def update_dca_order_amount(order_id: int, amount: float, shares: float | None =
 def list_watchlist(user_id: int = 0) -> list[str]:
     with connect() as db:
         rows = db.execute("SELECT symbol FROM portfolio_watchlist WHERE user_id = ? ORDER BY created_at, id", (user_id,)).fetchall()
-    return [str(row["symbol"]) for row in rows]
+    # SQLite returns sqlite3.Row while the remote libSQL client returns a tuple for this
+    # single-column projection.
+    return [str(row["symbol"] if hasattr(row, "keys") else row[0]) for row in rows]
 
 
 def add_watchlist_symbols(symbols: list[str], user_id: int = 0) -> list[str]:

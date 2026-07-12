@@ -18,7 +18,7 @@ from internal.store.cache import cache_compute_lock, cache_get, cache_set
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
 from internal.news.kaohoon import market_news as fetch_kaohoon_news
-from internal.yahoo.client import _modules_have_market_data, fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
+from internal.yahoo.client import _modules_have_market_data, _refresh_in_background, fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
 
 DETAIL_CACHE_NAMESPACE = "stock_detail"
 FINANCIALS_CACHE_NAMESPACE = "stock_financials"
@@ -26,9 +26,9 @@ INSIGHTS_CACHE_NAMESPACE = "stock_insights"
 MARKET_COMPARISON_CACHE_NAMESPACE = "stock_market_comparison"
 DOMAIN_CACHE_NAMESPACE = "domain"
 
-DETAIL_TTL_SECONDS = 180
+DETAIL_TTL_SECONDS = 60
 PENDING_DETAIL_TTL_SECONDS = 2
-DOMAIN_TTL_SECONDS = 1800
+DOMAIN_TTL_SECONDS = 86_400
 
 
 def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None = None) -> dict[str, Any] | None:
@@ -213,13 +213,14 @@ def get_ai_financials(symbol: str) -> dict[str, Any] | None:
         cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, persistent.payload, DOMAIN_TTL_SECONDS)
         return persistent.payload
 
-    ticker = make_ticker(normalized)
-    result = build_ai_financial_snapshot(ticker)
-    if _has_research_data(result):
-        save_yahoo_data(normalized, "financials", result, period="ai", ttl_seconds=21_600)
-        cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
-        return result
-    return persistent.payload if persistent and isinstance(persistent.payload, dict) else result
+    def _refresh() -> None:
+        result = build_ai_financial_snapshot(make_ticker(normalized))
+        if _has_research_data(result):
+            save_yahoo_data(normalized, "financials", result, period="ai", ttl_seconds=86_400)
+            cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
+
+    _refresh_in_background("yahoo_ai_financials", normalized, _refresh)
+    return persistent.payload if persistent and isinstance(persistent.payload, dict) else {}
 
 def get_domain_insights(symbol: str) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
@@ -234,20 +235,22 @@ def get_domain_insights(symbol: str) -> dict[str, Any] | None:
         cache_set(INSIGHTS_CACHE_NAMESPACE, normalized, persistent.payload, DOMAIN_TTL_SECONDS)
         return persistent.payload
 
-    from internal.market.symbol import fetch_symbol_record
+    def _refresh() -> None:
+        from internal.market.symbol import fetch_symbol_record
 
-    stock = fetch_symbol_record(normalized)
-    if not stock:
-        return persistent.payload if persistent and isinstance(persistent.payload, dict) else None
-    sector_insight = fetch_sector_insight(stock.get("sectorKey") or stock.get("sector") or "")
-    industry_insight = fetch_industry_insight(stock.get("industryKey") or stock.get("industry") or "")
-    result = {"sectorInsight": sector_insight, "industryInsight": industry_insight}
-    if _has_research_data(result):
-        save_yahoo_data(normalized, "domain_insights", result, ttl_seconds=21_600)
-    elif persistent and isinstance(persistent.payload, dict):
-        return persistent.payload
-    cache_set(INSIGHTS_CACHE_NAMESPACE, normalized, result, DOMAIN_TTL_SECONDS)
-    return result
+        stock = fetch_symbol_record(normalized)
+        if not stock:
+            return
+        result = {
+            "sectorInsight": fetch_sector_insight(stock.get("sectorKey") or stock.get("sector") or ""),
+            "industryInsight": fetch_industry_insight(stock.get("industryKey") or stock.get("industry") or ""),
+        }
+        if _has_research_data(result):
+            save_yahoo_data(normalized, "domain_insights", result, ttl_seconds=86_400)
+            cache_set(INSIGHTS_CACHE_NAMESPACE, normalized, result, DOMAIN_TTL_SECONDS)
+
+    _refresh_in_background("yahoo_domain_insights", normalized, _refresh)
+    return persistent.payload if persistent and isinstance(persistent.payload, dict) else {}
 
 
 def get_market_comparison(symbol: str) -> dict[str, Any] | None:
@@ -845,7 +848,6 @@ def build_ai_financial_snapshot(ticker) -> dict[str, Any]:
         "cashFlow": lambda: statement_bundle(safe_call(ticker.get_cash_flow, pretty=True, freq="yearly")),
         "dividends": lambda: _ai_dividend_records(safe_call(ticker.get_dividends, period="5y")),
         "calendar": lambda: safe_dict(safe_call(ticker.get_calendar)),
-        "analystPriceTargets": lambda: safe_dict(safe_call(ticker.get_analyst_price_targets)),
     }
     result: dict[str, Any] = {}
     with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
