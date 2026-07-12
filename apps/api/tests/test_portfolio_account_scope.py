@@ -9,11 +9,20 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.store import db as store_db
-from internal.store.portfolio import add_watchlist_symbols, delete_watchlist_symbol, list_holdings, list_watchlist, upsert_holding
+from internal.store.portfolio import _holding, _order, add_watchlist_symbols, delete_watchlist_symbol, list_holdings, list_watchlist, upsert_holding
 from models import HoldingInput
 
 
 class PortfolioAccountScopeTests(unittest.TestCase):
+    def test_turso_tuple_rows_decode_for_holding_and_order(self) -> None:
+        holding = _holding((7, 2, "AAPL", 3.0, 190.0, "capitalized", 0.0, "2026-07-13T00:00:00+00:00"))
+        order = _order((8, 2, "AAPL", 500.0, "2026-08-01", "stable_dca", "planned", None, 2.5, "2026-07-13T00:00:00+00:00"))
+
+        self.assertEqual(holding.symbol, "AAPL")
+        self.assertEqual(holding.averageCost, 190.0)
+        self.assertEqual(order.scheduledFor, "2026-08-01")
+        self.assertEqual(order.shares, 2.5)
+
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.db_patch = patch.object(store_db, "DB_PATH", Path(self.tempdir.name) / "portfolio.sqlite3")

@@ -96,8 +96,30 @@ def delete_watchlist_symbol(symbol: str, user_id: int = 0) -> None:
 
 
 def _holding(row) -> Holding:
-    return Holding(id=row["id"], symbol=row["symbol"], shares=row["shares"], averageCost=row["average_cost"], strategy=row["strategy"], monthlyDca=row["monthly_dca"], createdAt=row["created_at"])
+    return Holding(
+        id=_row_value(row, "id", 0),
+        symbol=_row_value(row, "symbol", 2),
+        shares=_row_value(row, "shares", 3),
+        averageCost=_row_value(row, "average_cost", 4),
+        strategy=_row_value(row, "strategy", 5),
+        monthlyDca=_row_value(row, "monthly_dca", 6),
+        createdAt=_row_value(row, "created_at", 7),
+    )
 
 
 def _order(row) -> DcaOrder:
-    return DcaOrder(id=row["id"], symbol=row["symbol"], amount=row["amount"], scheduledFor=row["scheduled_for"], strategy=row["strategy"], status=row["status"], executedPrice=row["executed_price"], shares=row["shares"], createdAt=row["created_at"])
+    return DcaOrder(
+        id=_row_value(row, "id", 0),
+        symbol=_row_value(row, "symbol", 2),
+        amount=_row_value(row, "amount", 3),
+        scheduledFor=_row_value(row, "scheduled_for", 4),
+        strategy=_row_value(row, "strategy", 5),
+        status=_row_value(row, "status", 6),
+        executedPrice=_row_value(row, "executed_price", 7),
+        shares=_row_value(row, "shares", 8),
+        createdAt=_row_value(row, "created_at", 9),
+    )
+
+
+def _row_value(row, key: str, tuple_index: int):
+    return row[key] if hasattr(row, "keys") else row[tuple_index]

@@ -111,6 +111,8 @@ def _build_detail_bundle_uncached(
 
     news = merge_thai_market_news(raw_news, symbol)
 
+    stock = hydrate_stock_quote_from_history(stock, history)
+
     technicals = build_technicals(history)
     business = build_business_profile(modules, history, stock)
     performance = build_performance_profile(history)
@@ -137,9 +139,36 @@ def _build_detail_bundle_uncached(
         # placeholder, not real data. The frontend must show a "still loading" state instead of
         # formatting these as if they were genuine — a $0.00 price reads as "this stock is
         # worthless," not "we don't have data yet."
-        "dataPending": not _modules_have_market_data(modules, symbol),
+        "dataPending": not (as_float(stock.get("price")) and not history.empty),
     }
     return result
+
+
+def hydrate_stock_quote_from_history(stock: dict[str, Any], history: pd.DataFrame) -> dict[str, Any]:
+    """Use the latest stored close when Yahoo's quote modules omit the current price.
+
+    Long history is already persisted and loaded cache-first, so this repairs a partial quote
+    response without adding another upstream request or presenting a real stock as $0.00.
+    """
+    if (as_float(stock.get("price")) or 0) > 0 or history.empty or "Close" not in history.columns:
+        return stock
+    closes = history["Close"].dropna()
+    if closes.empty or float(closes.iloc[-1]) <= 0:
+        return stock
+    latest = float(closes.iloc[-1])
+    previous = float(closes.iloc[-2]) if len(closes) > 1 else latest
+    change_pct = ((latest - previous) / previous * 100.0) if previous else 0.0
+    symbol = str(stock.get("symbol") or "")
+    # This is a native-market label only. The stored close is never converted between
+    # THB and USD; .BK history is already denominated in THB.
+    native_currency = stock.get("currency") or ("THB" if symbol.endswith(".BK") else "USD")
+    return {
+        **stock,
+        "price": round(latest, 4),
+        "changePct": round(change_pct, 2),
+        "currency": native_currency,
+        "priceSource": "stored_history_close",
+    }
 
 
 def get_financials(symbol: str) -> dict[str, Any] | None:
