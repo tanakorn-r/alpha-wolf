@@ -12,7 +12,7 @@ from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import normalize_agent_id
 from internal.ai.access import claim_ai_run, release_ai_run, require_ai_account
 from internal.ai.context import build_analysis_context
-from internal.ai.openai_client import OpenAIAnalysisError, analyze_quant_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
+from internal.ai.openai_client import OpenAIAnalysisError, analyze_brief_with_openai, analyze_quant_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
 from internal.market.detail import build_detail_bundle, get_ai_financials, get_domain_insights, get_market_comparison
 from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
@@ -183,7 +183,7 @@ def analyst_report(
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:analyst-report:v1:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"{account_scope}:analyst-report:v3-focused:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
 
     cached_analysis = cache_get("analysis", cache_key)
     if cached_analysis is not None and not force:
@@ -218,7 +218,7 @@ def analyst_report(
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     openai_started_at = time.monotonic()
     try:
-        result = analyze_with_openai(context, agent_id)
+        result = analyze_brief_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
         release_ai_run(usage_user_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc

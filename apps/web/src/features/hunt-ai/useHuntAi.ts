@@ -16,6 +16,7 @@ import {
   loadValuationVerdict,
   summarizeStock,
   type BuyTimingResponse,
+  type AnalystBriefResponse,
   type StockAnalysisResponse,
   type StockDetailResponse,
   type StrategyPlaybookResponse,
@@ -29,7 +30,7 @@ export type HuntAi = ReturnType<typeof useHuntAi>;
 
 type AnalystReport = {
   detail: StockDetailResponse;
-  analysis: StockAnalysisResponse;
+  analysis: AnalystBriefResponse;
 };
 
 type AgentStamped = {
@@ -38,7 +39,7 @@ type AgentStamped = {
 
 // Bump when persona reasoning changes so persisted browser reports cannot make a newly fixed
 // Agent appear to repeat an older, generic answer.
-const AGENT_REASONING_CACHE_VERSION = "persona-v19-vera-banker";
+const AGENT_REASONING_CACHE_VERSION = "persona-v21-focused-analyst";
 
 function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentId: string) {
   return data?.agent?.id === agentId;
@@ -58,7 +59,7 @@ export function useHuntAi() {
   const [analystQuery, setAnalystQuery] = useState("");
   const [analystTicker, setAnalystTicker] = useState("");
   const [analystDetail, setAnalystDetail] = useState<StockDetailResponse | null>(null);
-  const [analystAnalysis, setAnalystAnalysis] = useState<StockAnalysisResponse | null>(null);
+  const [analystAnalysis, setAnalystAnalysis] = useState<AnalystBriefResponse | null>(null);
   const [analystLoading, setAnalystLoading] = useState(false);
   const [analystStage, setAnalystStage] = useState<"market_data" | "analysis">("market_data");
   const [intradayAnalysis, setIntradayAnalysis] = useState<StockAnalysisResponse | null>(null);
@@ -202,6 +203,7 @@ export function useHuntAi() {
     setAnalystTicker("");
     setAnalystDetail(null);
     setAnalystAnalysis(null);
+    setAiError("");
   }, [activeTicker]);
   const analystCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:analyst:${activeTicker}:${activeAgentId}`;
   const analystCached = getHuntAiCache<AnalystReport>(analystCacheKey);
@@ -252,6 +254,7 @@ export function useHuntAi() {
 
   const premiumTabs = new Set<HuntTab>(["brief", "timing", "replay", "analyst"]);
   function setTab(next: HuntTab) {
+    setAiError("");
     setTabState(next);
     if (premiumTabs.has(next) && !premium) setTrialModalOpen(true);
   }

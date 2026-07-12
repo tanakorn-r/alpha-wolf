@@ -319,10 +319,30 @@ export type StockAnalysisResponse = {
   agentFitReason?: string | null;
 };
 
+export type AnalystBriefResponse = {
+  signal: string;
+  headline: string;
+  tone: "good" | "warn" | "bad";
+  confidence: number | null;
+  summary: string;
+  thesis: string;
+  actionPlan: string;
+  evidence: string[];
+  risks: string[];
+  changeTrigger: string;
+  recap: string;
+  agentFit: "aligned" | "neutral" | "against";
+  agentFitReason: string;
+  source?: "openai";
+  model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
+};
+
 export type AnalystReportResponse = {
   status: "ready";
   detail: StockDetailResponse;
-  analysis: StockAnalysisResponse;
+  analysis: AnalystBriefResponse;
 };
 
 export type AgentStyle = { Discipline: number; Patience: number; Data: number; Instinct: number };

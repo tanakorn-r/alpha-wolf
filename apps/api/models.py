@@ -319,6 +319,24 @@ class StockAnalysisResponse(StockAnalysis):
     agentFitReason: str | None = None
 
 
+class AnalystBrief(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal: str
+    headline: str
+    tone: Literal["good", "warn", "bad"]
+    confidence: DecisiveScore | None = None
+    summary: str
+    thesis: str
+    actionPlan: str
+    evidence: list[str] = Field(min_length=3, max_length=3)
+    risks: list[str] = Field(min_length=2, max_length=2)
+    changeTrigger: str
+    recap: str
+    agentFit: Literal["aligned", "neutral", "against"]
+    agentFitReason: str
+
+
 class StrategyPick(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

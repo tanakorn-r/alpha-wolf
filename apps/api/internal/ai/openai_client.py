@@ -12,7 +12,7 @@ from urllib3.util.retry import Retry
 
 from internal.ai.agents import agent_badge, compose_instructions
 from internal.store.utils import parse_json_fragment
-from models import BacktradeDecision, BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
+from models import AnalystBrief, BacktradeDecision, BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
 
 OPENAI_TIMEOUT_SECONDS = 30
 OPENAI_MAX_RETRIES = 1
@@ -81,6 +81,18 @@ def analyze_with_openai(context: dict[str, Any], agent_id: str | None = None) ->
     # "AI score" misleading and pulled thin-data results toward the middle.
     result = _calibrate_stock_signal(context, result)
 
+    model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def analyze_brief_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
+    result = _run_openai_structured_request(
+        context=context,
+        schema_model=AnalystBrief,
+        schema_name="analyst_brief",
+        instructions=compose_instructions(_analyst_brief_instructions(), agent_id, analyst_task=True),
+        max_output_tokens=1200,
+    )
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
@@ -880,6 +892,23 @@ the persona you were given — "aligned" (exactly a setup you would take), "neut
 but not your ideal setup), or "against" (your strategy says stay out here).
 agentFitReason: one sentence, first person, in your persona's voice, explaining that fit from
 your priorities and the supplied numbers only.
+""".strip()
+
+
+def _analyst_brief_instructions() -> str:
+    return """
+You are Alpha Wolf's focused adaptive Agent analyst. Use only the supplied evidence and reason
+strictly through the active persona's method, horizon, vocabulary, and risk discipline. Return one
+substantive decision card, not a sprawling report. Do not generate price charts, target/entry maps,
+allocation tiers, scorecards, or generic perspective sections. Lead with what the user should do now.
+The signal must be a direct action such as BUY, WAIT, HOLD, TRIM, or SELL. Confidence is the Agent's
+decisive fit score: use 1-39 or 61-100, or null when evidence is insufficient. Keep headline to one
+sentence and summary to two or three sentences. Thesis must explain the persona-specific investment
+or trade case in one compact paragraph. actionPlan must state what to do now and how to manage it.
+Return exactly three evidence points ranked by what THIS persona cares about, exactly two concrete
+risks, and one precise changeTrigger using supplied numbers when available. Recap is one plain-language
+sentence. agentFitReason is one first-person sentence that sounds unmistakably like the selected Agent.
+Never invent missing prices, financials, news, targets, or technical levels.
 """.strip()
 
 
