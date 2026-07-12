@@ -2,7 +2,9 @@
 // Strategy: cache the app shell on install, serve from cache first,
 // fall back to network. API calls always go to network (never cached).
 
-const CACHE = "alpha-wolf-v1";
+// Bumped so the activate handler's cleanup actually purges every stale entry
+// left behind by the old cache-first-navigation bug (see the fetch handler).
+const CACHE = "alpha-wolf-v2";
 
 const SHELL = [
   "/",
@@ -30,7 +32,7 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// Fetch: network-first for API, cache-first for everything else
+// Fetch: network-first for API and navigations, cache-first for static assets.
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
@@ -43,20 +45,35 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(event.request).then((cached) => {
-      const network = fetch(event.request).then((response) => {
-        // Cache fresh navigations and static assets
-        if (response.ok && (event.request.mode === "navigate" || url.pathname.match(/\.(js|css|png|svg|woff2|webp|gif)$/))) {
-          const clone = response.clone();
-          caches.open(CACHE).then((cache) => cache.put(event.request, clone));
-        }
-        return response;
-      });
+  // Navigations (full page loads) must always prefer the network. Serving them
+  // "cached || network" meant the stale response won every time a cache entry
+  // existed — the fresh network response only updated the cache for *next* time,
+  // which would also be stale by then — so visitors stayed permanently one
+  // version behind whatever's actually deployed. Only fall back to a cached
+  // shell when genuinely offline.
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+          }
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/")))
+    );
+    return;
+  }
 
-      // For navigations: serve stale while revalidating so the app loads
-      // instantly even offline, then updates in the background.
-      return cached || network;
-    })
+  // Static assets: cache-first is safe here since production builds content-hash filenames.
+  event.respondWith(
+    caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
+      if (response.ok && url.pathname.match(/\.(js|css|png|svg|woff2|webp|gif)$/)) {
+        const clone = response.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, clone));
+      }
+      return response;
+    }))
   );
 });

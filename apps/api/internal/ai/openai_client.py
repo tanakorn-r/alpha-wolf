@@ -8,12 +8,14 @@ from typing import Any
 import requests
 from pydantic import ValidationError
 from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from internal.ai.agents import agent_badge, compose_instructions
 from internal.store.utils import parse_json_fragment
 from models import BacktradeDecision, BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
 
 OPENAI_TIMEOUT_SECONDS = 45
+OPENAI_MAX_RETRIES = 3
 DEFAULT_OPENAI_MODEL = "gpt-5.5"
 DEFAULT_FAST_MODEL = "gpt-5.4-mini"
 
@@ -21,7 +23,23 @@ DEFAULT_FAST_MODEL = "gpt-5.4-mini"
 # time. Backtrade alone can fire 60+ sequential calls in one job, so a pooled, keep-alive session
 # reused across every AI feature in the app removes that per-call handshake entirely.
 _SESSION = requests.Session()
-_SESSION.mount("https://", HTTPAdapter(pool_connections=20, pool_maxsize=20))
+_SESSION.mount(
+    "https://",
+    HTTPAdapter(
+        pool_connections=20,
+        pool_maxsize=20,
+        max_retries=Retry(
+            total=OPENAI_MAX_RETRIES,
+            connect=OPENAI_MAX_RETRIES,
+            read=OPENAI_MAX_RETRIES,
+            status=OPENAI_MAX_RETRIES,
+            allowed_methods=frozenset({"POST"}),
+            status_forcelist=(408, 429, 500, 502, 503, 504),
+            backoff_factor=0.5,
+            respect_retry_after_header=True,
+        ),
+    ),
+)
 EXPECTED_SCORE_LABELS = ["Value", "Financial health", "Dividend safety", "Growth", "Timing"]
 
 
@@ -1015,6 +1033,12 @@ Do not over-focus on RSI. Mention RSI only if it materially changes the decision
 with other evidence. A useful answer should combine multiple evidence families when available:
 price action, volume, support/resistance, business quality, valuation/upside, income/catalysts,
 relative strength, sector/market context, and news.
+
+When agentInputPack supplies marketStructure, use aligned frameworks as cross-checks: Dow trend,
+Wyckoff phase proxy, multiple-timeframe alignment, and Fibonacci swing zones. Elliott bias is a
+low-confidence heuristic, never an exact count. Do not list frameworks mechanically; mention only
+those that change the rule, entry, invalidation, or risk. Conflicting frameworks reduce position
+size or require confirmation rather than being averaged into false certainty.
 
 The input includes quantScorecard. Use it as numeric context, especially componentScores.swingEntry
 for momentum/swing mode, but do not copy its positives/negatives as prose. You may disagree with

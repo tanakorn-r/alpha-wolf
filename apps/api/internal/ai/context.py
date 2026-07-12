@@ -192,6 +192,7 @@ def _agent_input_pack(
                     "volumeRatio",
                 ),
                 "recentPriceAction": latest_history[-15:],
+                "marketStructure": _pick(technicals, "dowTheory", "wyckoff", "elliottWave", "fibonacci", "multiTimeframe"),
                 "riskMap": _risk_map(price, support, resistance, target),
                 "recentNews": news[:3],
             },
@@ -228,6 +229,7 @@ def _agent_input_pack(
                     "recentReturns": {key: returns.get(key) for key in ("1d", "1w", "1m", "ytd", "1y")},
                 },
                 "recentPriceAction": latest_history[-12:],
+                "marketStructure": _pick(technicals, "dowTheory", "wyckoff", "elliottWave", "fibonacci", "multiTimeframe"),
                 "quickFlipMap": _risk_map(price, support, resistance, target),
                 "recentNews": news[:5],
             },
@@ -268,6 +270,7 @@ def _agent_input_pack(
                     "volumeRatio",
                     "volatility",
                 ),
+                "marketStructure": _pick(technicals, "dowTheory", "wyckoff", "elliottWave", "fibonacci", "multiTimeframe"),
                 "relativePerformance": {"peerRank": peer_rank, "marketComparison": market_comparison},
             },
             "secondary": {
@@ -291,6 +294,7 @@ def _agent_input_pack(
                     "dividendDipPattern": dividend_pattern,
                 },
                 "durability": _pick(business, "marketCap", "sector", "industry", "roe", "profitMargin", "operatingMargin", "debtToEquity", "beta"),
+                "structuralAdvantageAudit": _structural_advantage_audit(business, financials or {}),
                 "longTermReturns": {key: returns.get(key) for key in ("1y", "2y", "3y", "4y", "ytd")},
                 "valuationForDca": {"price": price, "peRatio": pe, "priceToBook": pbv, "targetMeanPrice": target},
             },
@@ -320,6 +324,7 @@ def _agent_input_pack(
                     "revenueGrowth": business.get("revenueGrowth"),
                     "earningsGrowth": business.get("earningsGrowth"),
                 },
+                "structuralAdvantageAudit": _structural_advantage_audit(business, financials or {}),
                 # The forward lens: is this business's earnings power likely bigger in 5 years?
                 "forwardView": {
                     "forwardPE": forward_pe,
@@ -357,7 +362,9 @@ def _agent_input_pack(
                     "income": {"dividendYield": dividend_yield, "payoutRatio": payout_ratio, "dividendPattern": dividend_pattern},
                     "riskReward": _risk_map(price, support, resistance, target),
                     "relativePerformance": {"returns": returns, "peerRank": peer_rank, "marketComparison": market_comparison},
+                    "marketStructure": _pick(technicals, "dowTheory", "wyckoff", "elliottWave", "fibonacci", "multiTimeframe"),
                 },
+                "structuralAdvantageAudit": _structural_advantage_audit(business, financials or {}),
                 "quantScorecard": _build_quant_scorecard(bundle, market_comparison),
                 "fundingQualityAudit": _funding_quality_audit(financials or {}, business),
                 "recentNews": news,
@@ -385,6 +392,7 @@ def _agent_input_pack(
                 "analystRating": business.get("analystRating"),
             },
             "financialHealth": _pick(business, "roe", "roa", "profitMargin", "operatingMargin", "grossMargin", "debtToEquity", "payoutRatio"),
+            "structuralAdvantageAudit": _structural_advantage_audit(business, financials or {}),
             "growthQuality": _pick(business, "revenueGrowth", "earningsGrowth"),
             # Track record so the call rests on years of evidence, not a single snapshot.
             "multiYearReturns": {key: returns.get(key) for key in ("1y", "2y", "3y", "4y", "ytd")},
@@ -393,7 +401,7 @@ def _agent_input_pack(
             "marginOfSafety": _risk_map(price, support, resistance, target),
         },
         "secondary": {
-            "technicals": _pick(technicals, "signal", "rsi14", "sma20", "sma50", "sma200", "support", "resistance"),
+            "technicals": _pick(technicals, "signal", "rsi14", "sma20", "sma50", "sma200", "support", "resistance", "dowTheory", "multiTimeframe"),
             "industryRanking": peer_rank,
             "sectorAndIndustryResearch": domain_insights,
             "recentNews": news,
@@ -454,6 +462,52 @@ def _funding_quality_audit(financials: dict[str, Any], business: dict[str, Any])
         "totalLiabilities": total_liabilities,
         "fundingRead": funding_read,
         "guardrail": "Total assets and market capitalization are not spendable budget. Classify reinvestment as internally funded only when operating/free cash flow supports it.",
+    }
+
+
+def _structural_advantage_audit(business: dict[str, Any], financials: dict[str, Any]) -> dict[str, Any]:
+    funding = _funding_quality_audit(financials, business)
+    gross_margin = _num(business.get("grossMargin"))
+    operating_margin = _num(business.get("operatingMargin"))
+    profit_margin = _num(business.get("profitMargin"))
+    roe = _num(business.get("roe"))
+    revenue_growth = _num(business.get("revenueGrowth"))
+    earnings_growth = _num(business.get("earningsGrowth"))
+    dividend_yield = _num(business.get("dividendYield"))
+    payout_ratio = _num(business.get("payoutRatio"))
+
+    proxy_strength = 0
+    proxy_strength += 1 if gross_margin is not None and gross_margin >= 35 else 0
+    proxy_strength += 1 if operating_margin is not None and operating_margin >= 15 else 0
+    proxy_strength += 1 if roe is not None and roe >= 15 else 0
+    proxy_strength += 1 if revenue_growth is not None and revenue_growth > 0 else 0
+    proxy_strength += 1 if funding.get("freeCashFlow") is not None and float(funding["freeCashFlow"]) > 0 else 0
+    advantage_status = "STRONG_PROXY" if proxy_strength >= 4 else "POSSIBLE" if proxy_strength >= 2 else "UNPROVEN"
+
+    if not dividend_yield or dividend_yield <= 0:
+        dividend_status = "NOT_AN_INCOME_CASE"
+    elif payout_ratio is None or funding.get("freeCashFlow") is None:
+        dividend_status = "UNPROVEN_FUNDING"
+    elif payout_ratio > 100 or float(funding["freeCashFlow"]) <= 0:
+        dividend_status = "AT_RISK"
+    elif payout_ratio <= 70:
+        dividend_status = "SUPPORTED_PROXY"
+    else:
+        dividend_status = "WATCH_COVERAGE"
+
+    return {
+        "comparativeAdvantageStatus": advantage_status,
+        "proxyEvidenceCount": proxy_strength,
+        "pricingPowerProxies": {
+            "grossMarginPct": gross_margin,
+            "operatingMarginPct": operating_margin,
+            "profitMarginPct": profit_margin,
+        },
+        "capitalEfficiency": {"roePct": roe, "revenueGrowthPct": revenue_growth, "earningsGrowthPct": earnings_growth},
+        "fundingQuality": funding,
+        "dividendQuality": {"status": dividend_status, "yieldPct": dividend_yield, "payoutRatioPct": payout_ratio},
+        "monopolyEvidence": "UNPROVEN: Yahoo financial data does not establish market share, legal monopoly, network effects, switching costs, or regulatory protection.",
+        "guardrail": "High margins and scale are moat proxies, not proof. Call monopoly/comparative advantage proven only with supplied competitive evidence.",
     }
 
 

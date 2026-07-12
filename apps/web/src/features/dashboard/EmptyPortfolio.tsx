@@ -24,7 +24,7 @@ export function EmptyPortfolio({ onAdd }: { onAdd: () => void }) {
 
 function OnboardStep({ n, title, body }: { n: string; title: string; body: string }) {
   return (
-    <div className="w-[200px] rounded-xl border border-[#2a2a31] bg-[#161619] p-[18px] text-left">
+    <div className="w-[200px] rounded-[var(--aw-radius-card)] border border-[var(--aw-border)] bg-[var(--aw-surface)] p-[18px] text-left">
       <div className="font-mono text-[13px] font-semibold text-[#3ecf8e]">{n}</div>
       <div className="mt-2 text-sm font-semibold">{title}</div>
       <div className="mt-1 text-xs leading-[1.5] text-[#8c8c95]">{body}</div>

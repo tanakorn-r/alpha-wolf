@@ -1,15 +1,17 @@
 import type { AgentBadge } from "../../lib/api";
 
-export function AgentByline({ agent, label = "Agent analysis", className = "mb-3" }: { agent?: AgentBadge | null; label?: string; className?: string }) {
+export function AgentByline({ agent, label = "Agent analysis", detail, className = "mb-3" }: { agent?: AgentBadge | null; label?: string; detail?: string; className?: string }) {
   if (!agent) return null;
   return (
-    <div className={`inline-flex items-center gap-2 rounded-full border border-[#2a2a31] bg-[#0e0e10] px-2.5 py-1.5 ${className}`}>
-      <span className="flex h-6 w-6 items-center justify-center rounded-full border font-mono text-[9px] font-extrabold" style={{ color: agent.color, borderColor: `${agent.color}55`, background: `${agent.color}18` }}>
-        {agent.avatarUrl ? <img src={agent.avatarUrl} alt="" className="h-full w-full rounded-full object-cover" /> : agent.mono}
+    <div className={`flex items-center gap-2.5 ${className}`}>
+      <span className="flex h-[30px] w-[30px] items-center justify-center overflow-hidden rounded-[9px] border font-mono text-[9px] font-extrabold" style={{ color: agent.color, borderColor: `${agent.color}55`, background: `${agent.color}18` }}>
+        {agent.avatarUrl ? <img src={agent.avatarUrl} alt="" className="h-full w-full object-cover" /> : agent.mono}
       </span>
-      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#5a5a62]">{label}</span>
-      <span className="text-[11px] font-semibold" style={{ color: agent.color }}>{agent.name}</span>
-      {agent.premium ? <span className="rounded-full border border-[#f5c451]/35 px-1.5 py-[1px] text-[8px] font-bold uppercase text-[#f5c451]">Pro</span> : null}
+      <span className="min-w-0">
+        <span className="block text-[12.5px] font-bold text-[#ececee]">{agent.name}{detail ? <span className="font-medium text-[#5a5a62]"> · {label}</span> : null}</span>
+        <span className="block text-[10px] font-semibold" style={{ color: detail ? "#8c8c95" : agent.color }}>{detail ?? label}</span>
+      </span>
+      {agent.premium ? <span className="rounded-[var(--aw-radius-chip)] border border-[#f5c451]/35 px-1.5 py-[1px] text-[8px] font-bold uppercase text-[#f5c451]">Pro</span> : null}
     </div>
   );
 }

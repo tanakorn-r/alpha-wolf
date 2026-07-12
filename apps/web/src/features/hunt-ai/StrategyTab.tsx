@@ -2,8 +2,8 @@ import type { StrategyPlaybookResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
 import { STRAT_CARDS, clamp, colorForTone, formatAnalyzedAt } from "./lib";
 import { StrategyIcon } from "../../components/ui/icons";
-import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
-import { AgentRecap } from "../../components/agents/AgentRecap";
+import { AgentCall } from "../../components/agents/AgentCall";
+import { PaywallGate } from "../../components/ui/PaywallGate";
 import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
@@ -12,20 +12,13 @@ export function StrategyTab({ hunt }: { hunt: HuntAi }) {
 
   if (!hunt.premium) {
     return (
-      <div className="rounded-[14px] p-[2px]" style={{ background: "linear-gradient(135deg,#3ecf8e,#4d96ff,#c77dff,#3ecf8e)", backgroundSize: "300% 300%" }}>
-        <div className="flex flex-col items-center gap-4 rounded-[12px] bg-[#0a0c0f] px-6 py-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-[14px] border border-[#3ecf8e]/30 bg-gradient-to-br from-[#3ecf8e]/10 to-[#c77dff]/10">
-            <svg width="26" height="26" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.5 4L14 7l-4.5 1L8 12.5 6.5 8 2 7l4.5-1.5L8 1.5z" stroke="url(#sLkG)" strokeWidth="1.4"/><defs><linearGradient id="sLkG" x1="0" y1="0" x2="16" y2="16"><stop offset="0%" stopColor="#3ecf8e"/><stop offset="100%" stopColor="#c77dff"/></linearGradient></defs></svg>
-          </div>
-          <div>
-            <div className="aw-rainbow-text mb-2 text-[20px] font-bold">Strategy AI</div>
-            <div className="mx-auto max-w-[400px] text-[12.5px] leading-[1.6] text-[#8c8c95]">Pick your strategy and AlphaWolf builds a custom playbook from your actual holdings — swing, day trade, long-term, value or FOMO.</div>
-          </div>
-          <button type="button" onClick={hunt.unlockPremium} className="flex items-center gap-[9px] rounded-[11px] px-8 py-3 text-[14px] font-bold text-white hover:opacity-90" style={{ background: "linear-gradient(135deg,#3ecf8e,#4d96ff,#c77dff)" }}>
-            Unlock Strategy AI — from $29/mo
-          </button>
-        </div>
-      </div>
+      <PaywallGate
+        icon={<svg width="22" height="22" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.5 4L14 7l-4.5 1L8 12.5 6.5 8 2 7l4.5-1.5L8 1.5z" stroke="currentColor" strokeWidth="1.4" /></svg>}
+        title="Strategy AI"
+        description="Pick your strategy and AlphaWolf builds a custom playbook from your actual holdings — swing, day trade, long-term, value or FOMO."
+        ctaLabel="Unlock Strategy AI — from $29/mo"
+        onUnlock={hunt.unlockPremium}
+      />
     );
   }
 
@@ -82,21 +75,10 @@ export function StrategyTab({ hunt }: { hunt: HuntAi }) {
 }
 
 function PlaybookCard({ playbook, stratLabel, stratColor }: { playbook: StrategyPlaybookResponse; stratLabel: string; stratColor: string }) {
+  const score = playbook.picks.length ? Math.round(playbook.picks.reduce((sum, pick) => sum + pick.conviction, 0) / playbook.picks.length) : null;
   return (
-    <div className={`${panel} overflow-hidden`}>
-      <div className="px-4 py-3" style={{ background: `linear-gradient(90deg,${stratColor}22,transparent)`, borderBottom: `1px solid ${stratColor}33` }}>
-        <AgentByline agent={playbook.agent} label="Strategy agent" className="mb-2" />
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="text-[14px] font-bold">{stratLabel} Top 5</div>
-          <span className="rounded-[5px] border border-[#3ecf8e]/30 bg-[#3ecf8e]/10 px-[7px] py-[2px] text-[10px] font-bold text-[#3ecf8e]">AI-BUILT FOR YOUR HOLDINGS</span>
-          {playbook.generatedAt ? (
-            <span className="ml-auto font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">Last sync {formatAnalyzedAt(playbook.generatedAt)}</span>
-          ) : null}
-        </div>
-        <div className="mt-2 text-[12px] leading-[1.55] text-[#bcbcc2]">{playbook.headline}</div>
-      </div>
-      <div className="flex flex-col gap-2.5 p-3.5">
-        <div className="rounded-[9px] border border-[#252529] bg-[#0e0e10] px-3 py-2.5 text-[12px] leading-[1.5] text-[#8c8c95]">{playbook.marketRead}</div>
+    <AgentCall agent={playbook.agent} label="Strategy agent" score={score} scoreLabel="average conviction" signal={stratLabel} headline={playbook.headline} summary={playbook.marketRead} accent={stratColor} meta={playbook.generatedAt ? `Generated ${formatAnalyzedAt(playbook.generatedAt)} · built for your holdings` : "Built for your holdings"}>
+      <div className="mt-5 flex flex-col gap-2.5">
         <div className="grid gap-2.5">
           {playbook.picks.map((pick, index) => {
             const color = colorForTone(pick.tone);
@@ -141,10 +123,8 @@ function PlaybookCard({ playbook, stratLabel, stratColor }: { playbook: Strategy
             );
           })}
         </div>
-        <AgentRecap agent={playbook.agent} recap={playbook.recap} fit={playbook.agentFit} reason={playbook.agentFitReason} />
-        <AgentSignoff agent={playbook.agent} />
       </div>
-    </div>
+    </AgentCall>
   );
 }
 

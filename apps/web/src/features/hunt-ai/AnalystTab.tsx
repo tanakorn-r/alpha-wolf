@@ -1,7 +1,7 @@
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
-import { AgentRecap } from "../../components/agents/AgentRecap";
+import { AgentCall } from "../../components/agents/AgentCall";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { PaywallGate } from "../../components/ui/PaywallGate";
 import type { StockAnalysisResponse, StockDetailResponse } from "../../lib/api";
 import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
@@ -15,20 +15,13 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
 
   if (!hunt.premium) {
     return (
-      <div className="rounded-[14px] p-[2px]" style={{ background: "linear-gradient(135deg,#74a4ff,#3ecf8e,#c77dff,#74a4ff)", backgroundSize: "300% 300%" }}>
-        <div className="flex flex-col items-center gap-4 rounded-[12px] bg-[#0a0c0f] px-6 py-8 text-center">
-          <div className="flex h-12 w-12 items-center justify-center rounded-[14px] border border-[#74a4ff]/30 bg-gradient-to-br from-[#74a4ff]/10 to-[#3ecf8e]/10">
-            <svg width="26" height="26" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" stroke="url(#aLkG)" strokeWidth="1.4"/><path d="M4 6h8M4 9h5" stroke="url(#aLkG)" strokeWidth="1.3" strokeLinecap="round"/><defs><linearGradient id="aLkG" x1="0" y1="0" x2="16" y2="16"><stop offset="0%" stopColor="#74a4ff"/><stop offset="100%" stopColor="#3ecf8e"/></linearGradient></defs></svg>
-          </div>
-          <div>
-            <div className="mb-2 text-[20px] font-bold" style={{ background: "linear-gradient(90deg,#74a4ff,#3ecf8e,#c77dff)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text" }}>Stock Analyst</div>
-            <div className="mx-auto max-w-[400px] text-[12.5px] leading-[1.6] text-[#8c8c95]">Pick a ticker from the Hunt watchlist and AlphaWolf pulls price action, news, revenue, cost structure, and fundamentals.</div>
-          </div>
-          <button type="button" onClick={hunt.unlockPremium} className="flex items-center gap-[9px] rounded-[11px] px-8 py-3 text-[14px] font-bold text-white hover:opacity-90" style={{ background: "linear-gradient(135deg,#74a4ff,#3ecf8e,#c77dff)" }}>
-            Unlock Stock Analyst — from $29/mo
-          </button>
-        </div>
-      </div>
+      <PaywallGate
+        icon={<svg width="22" height="22" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" stroke="currentColor" strokeWidth="1.4" /><path d="M4 6h8M4 9h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>}
+        title="Stock Analyst"
+        description="Pick a ticker from the Hunt watchlist and AlphaWolf pulls price action, news, revenue, cost structure, and fundamentals."
+        ctaLabel="Unlock Stock Analyst — from $29/mo"
+        onUnlock={hunt.unlockPremium}
+      />
     );
   }
 
@@ -70,13 +63,11 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
 
       {hasResult && analyst.detail && analyst.analysis ? (
         <div className="flex flex-col gap-3">
-          <AgentRecap agent={analyst.analysis.agent} recap={analyst.analysis.recap} fit={analyst.analysis.agentFit} reason={analyst.analysis.agentFitReason} className="" />
           <AnalystNoteCard analysis={analyst.analysis} />
           <LongTermStructureView analysis={analyst.analysis} />
           <AnalystPanels detail={analyst.detail} analysis={analyst.analysis} />
           <AnalystReasons analysis={analyst.analysis} />
           <AnalystPriceChart detail={analyst.detail} analysis={analyst.analysis} />
-          <AgentSignoff agent={analyst.analysis.agent} />
         </div>
       ) : null}
 
@@ -179,30 +170,18 @@ function AnalystNoteCard({ analysis }: { analysis: StockAnalysisResponse }) {
   const color = analysis.agent?.color ?? verdict.color;
   const perspectiveScore = analysis.confidence;
   return (
-    <div
-      className="relative overflow-hidden rounded-[10px] border px-3.5 py-3.5 shadow-[0_18px_54px_rgba(0,0,0,0.28)]"
-      style={{
-        borderColor: `${color}58`,
-        background: `radial-gradient(circle at 4% 0%, ${color}24, transparent 33%), radial-gradient(circle at 92% 8%, ${color}1a, transparent 30%), linear-gradient(135deg, ${color}10, rgba(19,19,23,0.88) 58%, rgba(14,14,16,0.98))`,
-        boxShadow: `0 0 0 1px ${color}16 inset, 0 18px 54px rgba(0,0,0,0.32), 0 0 46px ${color}12`,
-      }}
-    >
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }} />
-      <div className="mb-2.5 flex flex-wrap items-center justify-between gap-3">
-        <AgentByline agent={analysis.agent} label="Analyst note" className="mb-0" />
-        <div className="flex items-center gap-2">
-          <span className="rounded-[7px] border px-2.5 py-1 font-mono text-[10px] font-bold uppercase tracking-[0.04em]" style={{ color, borderColor: `${color}66`, background: `${color}12` }}>
-            {analysis.longTermView.outlookRating}
-          </span>
-          <span className="font-mono text-[18px] font-extrabold leading-none" style={{ color }}>{perspectiveScore ?? "N/A"}</span>
-          {perspectiveScore != null ? <span className="font-mono text-[10px] text-[#5a5a62]">/100 Agent fit</span> : null}
-        </div>
-      </div>
-      <div className="h-[4px] overflow-hidden rounded-full bg-[#1a1a1f]">
-        <div className="h-full rounded-full" style={{ width: `${perspectiveScore ?? 0}%`, background: color }} />
-      </div>
-      <p className="mt-3 max-w-[1120px] whitespace-pre-line text-[13px] leading-[1.65] text-[#d8d8dd]">{analysis.summary}</p>
-    </div>
+    <AgentCall
+      agent={analysis.agent}
+      label="Analyst note"
+      score={perspectiveScore}
+      scoreLabel="Agent fit"
+      signal={analysis.signal}
+      headline={analysis.headline}
+      summary={<span className="whitespace-pre-line">{analysis.summary}</span>}
+      accent={color}
+      metrics={[{ label: "Long-term outlook", value: analysis.longTermView.outlookRating, note: analysis.longTermView.outlookHorizon, color }]}
+      meta="Agent-specific company structure analysis · not financial advice"
+    />
   );
 }
 
@@ -284,4 +263,3 @@ function AnalystReasons({ analysis }: { analysis: StockAnalysisResponse }) {
     </div>
   );
 }
-

@@ -1,6 +1,7 @@
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ArrowUpIcon } from "../../components/ui/icons";
 import { EmptyPanel, LoadingStrip, RetryPanel } from "../../components/ui/panels";
+import { PaywallGate } from "../../components/ui/PaywallGate";
 import { realTimeframes, timeframes, type N100Timeframe } from "./lib";
 import { Next100Result } from "./Next100Result";
 import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
@@ -12,19 +13,13 @@ export function Next100Tab({ hunt }: { hunt: HuntAi }) {
 
   if (!hunt.premium) {
     return (
-      <div className="aw-rainbow-border rounded-[14px] p-[2px]">
-        <div className="flex flex-col items-center gap-4 rounded-[12px] bg-[#0a0c0f] px-6 py-8 text-center">
-          <div className="relative flex h-14 w-14 items-center justify-center rounded-[16px] border border-[#c77dff]/30 bg-gradient-to-br from-[#3ecf8e]/10 to-[#c77dff]/10">
-            <ArrowUpIcon size={28} />
-            <span className="absolute -right-1.5 -top-1.5 grid h-6 w-6 place-items-center rounded-full border border-[#c77dff]/50 bg-[#0a0c0f] text-[11px] text-[#c77dff]">L</span>
-          </div>
-          <div>
-            <div className="aw-rainbow-text mb-2 text-[21px] font-bold tracking-[-0.02em]">Next 10 ↑</div>
-            <p className="mx-auto max-w-[440px] text-[12.5px] leading-[1.6] text-[#8c8c95]">Premium AI forecast for the next 10 technical moves. No mock prediction is shown until the feature is unlocked and the API returns real data.</p>
-          </div>
-          <PremiumAiButton label="Unlock Next 10 ↑" sublabel="Premium · from $29/mo" onClick={hunt.unlockPremium} size="wide" />
-        </div>
-      </div>
+      <PaywallGate
+        icon={<><ArrowUpIcon size={20} /><span className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full border border-[#c77dff]/50 bg-[#0a0c0f] text-[10px] text-[#c77dff]">L</span></>}
+        title="Next 10 ↑"
+        description="Premium AI forecast for the next 10 technical moves. No mock prediction is shown until the feature is unlocked and the API returns real data."
+        ctaLabel="Unlock Next 10 ↑"
+        onUnlock={hunt.unlockPremium}
+      />
     );
   }
 

@@ -1,4 +1,5 @@
 import { ErrorBanner } from "../components/ui/panels";
+import { SectionHeading } from "../components/ui/Surface";
 import { AiAdvisor } from "../features/dashboard/AiAdvisor";
 import { ChartsRow } from "../features/dashboard/ChartsRow";
 import { DashboardSkeleton } from "../features/dashboard/DashboardSkeleton";
@@ -14,35 +15,38 @@ import { useDashboard } from "../features/dashboard/useDashboard";
 export function DashboardPage() {
   const dash = useDashboard();
 
-  if (dash.isSkeleton) return <DashboardSkeleton />;
-
   return (
-    <div className="flex flex-col gap-5 text-[#ececee]">
-      {dash.isError || dash.actionError ? (
-        <ErrorBanner message={dash.actionError || "Portfolio service is unavailable."} busy={dash.isFetching} onRetry={dash.refresh} />
-      ) : null}
-
-      {dash.showEmptyHero ? (
-        <EmptyPortfolio onAdd={dash.holdingForm.show} />
-      ) : (
+    <div className="mx-auto flex w-full max-w-[980px] flex-col gap-[14px] text-[#ececee]">
+      <SectionHeading title="Strategy Dashboard" body="Everything happening with your money, in one view" />
+      {dash.isSkeleton ? <DashboardSkeleton /> : (
         <>
-          <StatsRow dash={dash} />
-          <PortfolioValueCard dash={dash} />
-          {dash.hasHoldings ? <ChartsRow dash={dash} /> : null}
+          {dash.isError || dash.actionError ? (
+            <ErrorBanner message={dash.actionError || "Portfolio service is unavailable."} busy={dash.isFetching} onRetry={dash.refresh} />
+          ) : null}
+
+          {dash.showEmptyHero ? (
+            <EmptyPortfolio onAdd={dash.holdingForm.show} />
+          ) : (
+            <>
+              <AiAdvisor dash={dash} />
+              <StatsRow dash={dash} />
+              <PortfolioValueCard dash={dash} />
+              {dash.hasHoldings ? <ChartsRow dash={dash} /> : null}
+            </>
+          )}
+
+          {dash.hasHoldings || dash.hasIncome ? (
+            <section className={`grid items-start gap-[14px] ${dash.hasHoldings && dash.hasIncome ? "min-[980px]:grid-cols-[1.35fr_.95fr]" : "grid-cols-1"}`}>
+              {dash.hasHoldings ? <HoldingsTable dash={dash} /> : null}
+              {dash.hasIncome ? <IncomeList dash={dash} /> : null}
+            </section>
+          ) : null}
+          {dash.showEmptyHero ? <AiAdvisor dash={dash} /> : null}
+
+          {dash.holdingForm.open ? <HoldingFormModal dash={dash} /> : null}
+          <SellModal dash={dash} />
         </>
       )}
-
-      {dash.hasHoldings || dash.hasIncome ? (
-        <section className={`grid gap-[14px] ${dash.hasHoldings && dash.hasIncome ? "xl:grid-cols-[1fr_320px]" : "xl:grid-cols-1"}`}>
-          {dash.hasHoldings ? <HoldingsTable dash={dash} /> : null}
-          {dash.hasIncome ? <IncomeList dash={dash} /> : null}
-        </section>
-      ) : null}
-
-      <AiAdvisor dash={dash} />
-
-      {dash.holdingForm.open ? <HoldingFormModal dash={dash} /> : null}
-      <SellModal dash={dash} />
     </div>
   );
 }

@@ -186,6 +186,18 @@ def build_technicals(history: pd.DataFrame) -> dict[str, Any]:
     volume_ratio = safe_ratio(current_volume, avg_volume)
     support = float(low_series.tail(20).min()) if len(low_series) else None
     resistance = float(high_series.tail(20).max()) if len(high_series) else None
+    advanced = build_advanced_technicals(
+        closes,
+        high_series,
+        low_series,
+        price=float(closes.iloc[-1]) if len(closes) else None,
+        sma20=sma20,
+        sma50=sma50,
+        sma200=sma200,
+        rsi14=rsi14,
+        macd_hist=macd_hist,
+        volume_ratio=volume_ratio,
+    )
 
     return {
         "rsi14": round(rsi14, 2) if rsi14 is not None else None,
@@ -206,4 +218,131 @@ def build_technicals(history: pd.DataFrame) -> dict[str, Any]:
         "resistance": round(resistance, 2) if resistance is not None else None,
         "trend": trend_summary(closes),
         "signal": technical_signal(rsi14, macd, macd_signal, sma20, sma50),
+        **advanced,
+    }
+
+
+def build_advanced_technicals(
+    closes: pd.Series,
+    highs: pd.Series,
+    lows: pd.Series,
+    *,
+    price: float | None,
+    sma20: float | None,
+    sma50: float | None,
+    sma200: float | None,
+    rsi14: float | None,
+    macd_hist: float | None,
+    volume_ratio: float | None,
+) -> dict[str, Any]:
+    def window_return(window: int) -> float | None:
+        return round(return_over_window(closes, window), 2) if len(closes) > window else None
+
+    returns = {
+        "1d": window_return(1),
+        "1w": window_return(5),
+        "1m": window_return(21),
+        "3m": window_return(63),
+        "1y": window_return(252),
+    }
+    directional = [value for value in (returns["1w"], returns["1m"], returns["3m"]) if value is not None]
+    positive = sum(value > 0 for value in directional)
+    negative = sum(value < 0 for value in directional)
+    timeframe_alignment = "BULLISH" if directional and positive == len(directional) else "BEARISH" if directional and negative == len(directional) else "MIXED"
+
+    recent_high = float(highs.tail(20).max()) if len(highs) >= 20 else None
+    prior_high = float(highs.iloc[-40:-20].max()) if len(highs) >= 40 else None
+    recent_low = float(lows.tail(20).min()) if len(lows) >= 20 else None
+    prior_low = float(lows.iloc[-40:-20].min()) if len(lows) >= 40 else None
+    higher_high = recent_high is not None and prior_high is not None and recent_high > prior_high
+    higher_low = recent_low is not None and prior_low is not None and recent_low > prior_low
+    lower_high = recent_high is not None and prior_high is not None and recent_high < prior_high
+    lower_low = recent_low is not None and prior_low is not None and recent_low < prior_low
+    dow_trend = (
+        "PRIMARY_UPTREND" if price and sma50 and sma200 and price > sma50 > sma200 and higher_high and higher_low
+        else "PRIMARY_DOWNTREND" if price and sma50 and sma200 and price < sma50 < sma200 and lower_high and lower_low
+        else "UPTREND_UNCONFIRMED" if price and sma50 and sma200 and price > sma50 > sma200
+        else "DOWNTREND_UNCONFIRMED" if price and sma50 and sma200 and price < sma50 < sma200
+        else "RANGE_OR_TRANSITION"
+    )
+
+    range_high = float(highs.tail(60).max()) if len(highs) >= 20 else recent_high
+    range_low = float(lows.tail(60).min()) if len(lows) >= 20 else recent_low
+    range_position = ((price - range_low) / (range_high - range_low)) if price is not None and range_low is not None and range_high is not None and range_high > range_low else None
+    wyckoff_phase = "UNCONFIRMED"
+    if price and sma50 and sma200 and range_position is not None:
+        if price > sma50 > sma200 and range_position >= 0.65:
+            wyckoff_phase = "MARKUP"
+        elif price < sma50 < sma200 and range_position <= 0.35:
+            wyckoff_phase = "MARKDOWN"
+        elif range_position <= 0.4 and (volume_ratio or 0) >= 1.0:
+            wyckoff_phase = "POSSIBLE_ACCUMULATION"
+        elif range_position >= 0.6 and (volume_ratio or 0) >= 1.0:
+            wyckoff_phase = "POSSIBLE_DISTRIBUTION"
+        else:
+            wyckoff_phase = "RANGE"
+
+    wave_bias = "NO_RELIABLE_COUNT"
+    if price and sma20 and sma50 and macd_hist is not None:
+        if price > sma20 > sma50 and macd_hist > 0 and (rsi14 or 50) >= 50:
+            wave_bias = "IMPULSE_UP_CANDIDATE"
+        elif price < sma20 < sma50 and macd_hist < 0 and (rsi14 or 50) <= 50:
+            wave_bias = "IMPULSE_DOWN_CANDIDATE"
+        elif price > sma50 and macd_hist < 0:
+            wave_bias = "CORRECTIVE_PULLBACK_CANDIDATE"
+        elif price < sma50 and macd_hist > 0:
+            wave_bias = "RELIEF_BOUNCE_CANDIDATE"
+
+    fibonacci = _fibonacci_map(closes, highs, lows)
+    return {
+        "multiTimeframe": {"returns": returns, "alignment": timeframe_alignment, "note": "Derived from daily closes; higher-timeframe confirmation is approximate."},
+        "dowTheory": {
+            "trend": dow_trend,
+            "higherHigh": higher_high,
+            "higherLow": higher_low,
+            "lowerHigh": lower_high,
+            "lowerLow": lower_low,
+            "confirmation": timeframe_alignment,
+        },
+        "wyckoff": {
+            "phase": wyckoff_phase,
+            "rangePositionPct": round(range_position * 100, 1) if range_position is not None else None,
+            "volumeRatio": round(volume_ratio, 2) if volume_ratio is not None else None,
+            "note": "Heuristic phase proxy; volume/price structure does not prove operator intent.",
+        },
+        "elliottWave": {
+            "bias": wave_bias,
+            "confidence": "LOW" if wave_bias == "NO_RELIABLE_COUNT" else "MEDIUM",
+            "note": "Heuristic context only; no exact wave count is claimed without validated pivots and multiple timeframes.",
+        },
+        "fibonacci": fibonacci,
+    }
+
+
+def _fibonacci_map(closes: pd.Series, highs: pd.Series, lows: pd.Series) -> dict[str, Any]:
+    if len(closes) < 20 or len(highs) < 20 or len(lows) < 20:
+        return {"direction": "UNAVAILABLE", "swingLow": None, "swingHigh": None, "retracements": {}, "extensions": {}, "note": "Insufficient history."}
+    window_highs = highs.tail(60)
+    window_lows = lows.tail(60)
+    swing_high = float(window_highs.max())
+    swing_low = float(window_lows.min())
+    span = swing_high - swing_low
+    if span <= 0:
+        return {"direction": "UNAVAILABLE", "swingLow": swing_low, "swingHigh": swing_high, "retracements": {}, "extensions": {}, "note": "No usable swing range."}
+    upswing = window_lows.idxmin() < window_highs.idxmax()
+    if upswing:
+        retracements = {"38.2": swing_high - span * 0.382, "50.0": swing_high - span * 0.5, "61.8": swing_high - span * 0.618}
+        extensions = {"127.2": swing_high + span * 0.272, "161.8": swing_high + span * 0.618}
+        direction = "UPSWING"
+    else:
+        retracements = {"38.2": swing_low + span * 0.382, "50.0": swing_low + span * 0.5, "61.8": swing_low + span * 0.618}
+        extensions = {"127.2": swing_low - span * 0.272, "161.8": swing_low - span * 0.618}
+        direction = "DOWNSWING"
+    return {
+        "direction": direction,
+        "swingLow": round(swing_low, 2),
+        "swingHigh": round(swing_high, 2),
+        "retracements": {key: round(value, 2) for key, value in retracements.items()},
+        "extensions": {key: round(value, 2) for key, value in extensions.items()},
+        "note": "Mechanical 60-session swing map; levels are conditional zones, not forecasts.",
     }

@@ -6,7 +6,7 @@ import type { Dashboard } from "./useDashboard";
 export function PortfolioValueCard({ dash }: { dash: Dashboard }) {
   if (!dash.portfolio) return null;
   return (
-    <div className="rounded-xl border border-[#2a2a31] bg-[#161619] px-[18px] pb-[14px] pt-[18px]">
+    <div className="rounded-[var(--aw-radius-card)] border border-[var(--aw-border)] bg-[var(--aw-surface)] px-4 pb-3 pt-4">
       <div className="flex items-start justify-between">
         <div>
           <h2 className="font-semibold">Portfolio value</h2>
@@ -19,11 +19,11 @@ export function PortfolioValueCard({ dash }: { dash: Dashboard }) {
             <Legend color="#3ecf8e" label="Capital added" dot />
           </div>
         </div>
-        <button type="button" onClick={dash.holdingForm.show} className="flex items-center gap-1.5 rounded-lg bg-[#3ecf8e] px-3.5 py-2 text-xs font-bold text-[#06120c] hover:opacity-90">
+        <button type="button" onClick={dash.holdingForm.show} className="flex items-center gap-1.5 rounded-[var(--aw-radius-control)] bg-[#3ecf8e] px-3.5 py-2 text-xs font-bold text-[#06120c] hover:opacity-90">
           <span className="text-sm leading-none">+</span> Add stock
         </button>
       </div>
-      <div className="relative mt-1 h-[300px]">
+      <div className="relative mt-1 h-[210px]">
         <PortfolioPerformanceChart data={dash.portfolio} loading={false} error={dash.isError} onRetry={dash.refresh}>
           {dash.firstBuyDate ? (
             <>

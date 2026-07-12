@@ -1,11 +1,12 @@
 import { formatMoney, formatShortDate } from "../../lib/format";
+import { MetricCard } from "../../components/ui/Surface";
 import { eventDotTone, eventLabel } from "./calendarModel";
 import type { DividendHunt } from "./useDividendHunt";
 
 export function CalendarSide({ hunt }: { hunt: DividendHunt }) {
   return (
     <aside className="min-w-0 space-y-4">
-      <div className="rounded-xl border border-[#285f48] bg-[#173528] p-4">
+      <div className="rounded-[var(--aw-radius-card)] border border-[#285f48] bg-[#173528] p-4">
         <div className="text-[10px] uppercase tracking-wider text-[#3ecf8e]">Holding dividend events</div>
         <div className="mt-2 font-mono text-3xl font-semibold">{hunt.summary?.holdingEvents ?? 0}</div>
         <div className="mt-1 text-xs text-[#82b99f]">{formatMoney(hunt.summary?.paymentsTotal)} expected from dividend payments on held names</div>
@@ -18,7 +19,7 @@ export function CalendarSide({ hunt }: { hunt: DividendHunt }) {
         <MiniStat label="Month" value={hunt.monthShortLabel} />
       </div>
 
-      <div className="rounded-xl border border-[#2a2a31] bg-[#161619] p-4">
+      <div className="rounded-[var(--aw-radius-card)] border border-[var(--aw-border)] bg-[var(--aw-surface)] p-4">
         <div className="flex items-center justify-between">
           <h3 className="font-semibold">Month events</h3>
           <span className="text-[11px] uppercase tracking-[0.14em] text-[#5a5a62]">{hunt.regionLabel}</span>
@@ -28,7 +29,7 @@ export function CalendarSide({ hunt }: { hunt: DividendHunt }) {
             <button
               key={`${event.date}-${event.symbol}-${event.kind}`}
               onClick={() => hunt.openDetail(event.symbol)}
-              className={`w-full rounded-xl border px-3 py-3 text-left ${event.isHolding ? "border-[#285f48] bg-[#173528]/55" : "border-[#2a2a31] bg-[#0e0e10]"}`}
+              className={`w-full rounded-[var(--aw-radius-control)] border px-3 py-3 text-left transition-colors hover:border-[#3ecf8e] ${event.isHolding ? "border-[#285f48] bg-[#173528]/55" : "border-[#2a2a31] bg-[#0e0e10]"}`}
             >
               <div className="flex items-start gap-3">
                 <span className={`mt-1 h-2.5 w-2.5 rounded-full ${eventDotTone(event)}`} />
@@ -56,10 +57,5 @@ export function CalendarSide({ hunt }: { hunt: DividendHunt }) {
 }
 
 function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-[#2a2a31] bg-[#161619] p-4">
-      <div className="text-[10px] uppercase tracking-wider text-[#5a5a62]">{label}</div>
-      <div className="mt-2 font-mono text-xl font-semibold">{value}</div>
-    </div>
-  );
+  return <MetricCard label={label} value={value} />;
 }

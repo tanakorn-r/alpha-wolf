@@ -103,6 +103,18 @@ export type StockTechnicals = {
     quarter?: number;
   };
   signal?: string;
+  multiTimeframe?: { returns: Record<string, number | null>; alignment: "BULLISH" | "BEARISH" | "MIXED"; note: string };
+  dowTheory?: { trend: string; higherHigh: boolean; higherLow: boolean; lowerHigh: boolean; lowerLow: boolean; confirmation: string };
+  wyckoff?: { phase: string; rangePositionPct?: number | null; volumeRatio?: number | null; note: string };
+  elliottWave?: { bias: string; confidence: "LOW" | "MEDIUM"; note: string };
+  fibonacci?: {
+    direction: string;
+    swingLow?: number | null;
+    swingHigh?: number | null;
+    retracements: Record<string, number>;
+    extensions: Record<string, number>;
+    note: string;
+  };
 };
 
 export type StockNewsItem = {

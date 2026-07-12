@@ -1,29 +1,34 @@
 import type { HuntTab } from "./lib";
 import type { HuntAi } from "./useHuntAi";
 
-const tabs: Array<{ key: HuntTab; label: string; tag?: string; tone?: "live" | "ultra" | "pro" }> = [
-  { key: "signals", label: "Signals", tag: "PRO", tone: "pro"  },
-  { key: "brief", label: "Daily Brief", tag: "PRO", tone: "pro" },
-  { key: "timing", label: "Buy Timing", tag: "PRO", tone: "pro" },
-  { key: "replay", label: "AI Replay", tag: "LAB", tone: "ultra" },
-  { key: "analyst", label: "Analyst", tag: "PRO", tone: "pro" },
+const tabs: Array<{ key: HuntTab; label: string; premium?: boolean; tag?: string; tone?: "live" | "ultra" | "pro" }> = [
+  { key: "signals", label: "Signals" },
+  { key: "brief", label: "Daily Brief", premium: true, tag: "PRO", tone: "pro" },
+  { key: "timing", label: "Buy Timing", premium: true, tag: "PRO", tone: "pro" },
+  { key: "replay", label: "AI Replay", premium: true, tag: "LAB", tone: "ultra" },
+  { key: "analyst", label: "Analyst", premium: true, tag: "PRO", tone: "pro" },
 ];
 
 export function HuntTabsBar({ hunt }: { hunt: HuntAi }) {
   return (
-    <div className="flex gap-[3px] overflow-x-auto rounded-[9px] border border-[#2a2a31] bg-[#0e0e10] p-[3px] [scrollbar-width:none]">
-      {tabs.map((tab) => (
-        <button
-          key={tab.key}
-          type="button"
-          onClick={() => hunt.setTab(tab.key)}
-          className={`flex flex-none items-center gap-1.5 rounded-[7px] px-3.5 py-1.5 text-[12.5px] font-medium transition-colors ${hunt.tab === tab.key ? "bg-[#1c1c20] text-[#ececee]" : "text-[#8c8c95] hover:text-[#ececee]"}`}
-        >
-          <TabGlyph tab={tab.key} />
-          {tab.label}
-          {tab.tag ? <Tag tone={tab.tone ?? "pro"}>{tab.tag}</Tag> : null}
-        </button>
-      ))}
+    <div className="flex gap-1 overflow-x-auto rounded-[var(--aw-radius-control)] border border-[var(--aw-border)] bg-[#0e0e10] p-1 [scrollbar-width:none]">
+      {tabs.map((tab) => {
+        const active = hunt.tab === tab.key;
+        // A badge on the tab you're already viewing is redundant — only flag tabs you haven't opened yet.
+        const showTag = tab.premium && !active;
+        return (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => hunt.setTab(tab.key)}
+            className={`flex flex-none items-center gap-1.5 rounded-[var(--aw-radius-chip)] px-3.5 py-2 text-[12.5px] font-medium transition-colors ${active ? "bg-[#1c1c20] text-[#ececee] shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]" : "text-[#8c8c95] hover:bg-[#161619] hover:text-[#ececee]"}`}
+          >
+            <TabGlyph tab={tab.key} />
+            {tab.label}
+            {showTag ? <Tag tone={tab.tone ?? "pro"}>{tab.tag}</Tag> : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

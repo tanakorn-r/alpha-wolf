@@ -10,13 +10,12 @@ import {
   YAxis,
 } from "recharts";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
-import { AgentByline, AgentSignoff } from "../../components/agents/AgentByline";
-import { AgentRecap } from "../../components/agents/AgentRecap";
+import { AgentCall } from "../../components/agents/AgentCall";
 import { EmptyPanel, RetryPanel } from "../../components/ui/panels";
 import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
 import { PremiumChartTooltip } from "./ChartTooltip";
-import { buildTechnicalChartData, colorForTone, compact, formatAnalyzedAt, moneyMaybe, stopFromEntry } from "./lib";
+import { buildTechnicalChartData, colorForTone, formatAnalyzedAt, moneyMaybe, stopFromEntry } from "./lib";
 import { ChartLoading, SpinnerOrb, agentName, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
@@ -58,7 +57,7 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
           </button>
         ))}
       </div>
-      <div className="grid items-start gap-3 max-[1100px]:grid-cols-1" style={{ gridTemplateColumns: "1fr 280px" }}>
+      <div className="grid items-start gap-3 min-[1100px]:grid-cols-[minmax(0,1fr)_380px]">
         <div className={`${panel} p-3.5`}>
           <div className="mb-2.5 flex flex-wrap items-baseline gap-3">
             <span className="font-mono text-[22px] font-bold tracking-[-0.3px]">{price == null ? "—" : formatCurrency(price, currency)}</span>
@@ -116,36 +115,30 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
           </div>
         </div>
         <div className="flex flex-col gap-2.5">
-          <div className={analysis ? "aw-rainbow-border rounded-xl p-[2px]" : ""}>
-            <div className={`${analysis ? "rounded-[10px]" : "rounded-[10px] border border-[#2a2a31]"} bg-[#161619] p-3.5`}>
-              {analysis ? (
-                <>
-                  <AgentByline agent={analysis.agent} label="Signal agent" className="mb-2" />
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-[10px] uppercase tracking-[0.5px] text-[#8c8c95]">AI Signal · now</span>
-                    <span className="rounded-[5px] border border-[#f5c451]/30 bg-[#f5c451]/10 px-2 py-0.5 text-[10px] font-semibold text-[#f5c451]">{intraday.ticker}</span>
-                  </div>
-                  <div className="mb-1 text-[22px] font-extrabold tracking-[-0.2px]" style={{ color: tone }}>{analysis.signal}</div>
-                  <p className="mb-2.5 text-[11px] leading-[1.5] text-[#bcbcc2]">{compact(analysis.summary, 160)}</p>
-                  <div className="mb-2.5 flex flex-col gap-1">
-                    <IntradayLevel label="Enter at" value={moneyMaybe(analysis.entryPrice?.entryPrice, currency)} color={tone} />
-                    <IntradayLevel label="Stop loss" value={moneyMaybe(stopFromEntry(analysis.entryPrice?.entryPrice), currency)} color="#f2575c" />
-                    <IntradayLevel label="Take profit" value={moneyMaybe(analysis.targetPrice?.targetPrice, currency)} color="#3ecf8e" />
-                    <IntradayLevel label="Agent perspective" value={analysis.confidence != null ? `${analysis.confidence}/100` : "N/A"} color={tone} />
-                  </div>
-                  <div className="font-mono text-[10px] text-[#5a5a62]">Cached {formatAnalyzedAt(intraday.analyzedAt)}</div>
-                  <AgentRecap agent={analysis.agent} recap={analysis.recap} fit={analysis.agentFit} reason={analysis.agentFitReason} className="mt-2.5 text-left" />
-                  <AgentSignoff agent={analysis.agent} />
-                </>
-              ) : (
-                <div className="text-center">
-                  <SpinnerOrb />
-                  <div className="mb-1.5 text-[13px] font-semibold">{intraday.aiLoading ? `${agentName(hunt.activeAgentId)} is reading...` : `${agentName(hunt.activeAgentId)} is watching...`}</div>
-                  <div className="mx-auto max-w-[240px] text-[12px] leading-[1.6] text-[#8c8c95]">One explicit read. Entry, stop, target and signal score appear here when requested.</div>
-                </div>
-              )}
+          {analysis ? (
+            <AgentCall
+              agent={analysis.agent}
+              label="Intraday signal"
+              score={analysis.confidence}
+              scoreLabel="Agent perspective"
+              signal={analysis.signal}
+              headline={`${intraday.ticker} · live tape read`}
+              summary={analysis.summary}
+              accent={tone}
+              metrics={[
+                { label: "Enter at", value: moneyMaybe(analysis.entryPrice?.entryPrice, currency), color: tone },
+                { label: "Stop loss", value: moneyMaybe(stopFromEntry(analysis.entryPrice?.entryPrice), currency), color: "#f2575c" },
+                { label: "Take profit", value: moneyMaybe(analysis.targetPrice?.targetPrice, currency), color: "#3ecf8e" },
+              ]}
+              meta={`Cached ${formatAnalyzedAt(intraday.analyzedAt)} · delayed quote`}
+            />
+          ) : (
+            <div className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-5 text-center">
+              <SpinnerOrb />
+              <div className="mb-1.5 text-[13px] font-semibold">{intraday.aiLoading ? `${agentName(hunt.activeAgentId)} is reading...` : `${agentName(hunt.activeAgentId)} is watching...`}</div>
+              <div className="mx-auto max-w-[260px] text-[12px] leading-[1.6] text-[#8c8c95]">One explicit read. Entry, stop, target and signal score appear here when requested.</div>
             </div>
-          </div>
+          )}
           <div className="flex flex-col gap-1.5">
             {analysis ? (
               <div className="text-right font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">
@@ -165,15 +158,6 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
         </div>
       </div>
       <div className="text-center font-mono text-[10px] text-[#5a5a62]">Real delayed quotes - technical read only - not financial advice</div>
-    </div>
-  );
-}
-
-function IntradayLevel({ label, value, color }: { label: string; value: string; color: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-[7px] bg-[#0e0e10] px-2.5 py-1.5 text-[11.5px]">
-      <span className="text-[#8c8c95]">{label}</span>
-      <span className="font-mono font-semibold" style={{ color }}>{value}</span>
     </div>
   );
 }

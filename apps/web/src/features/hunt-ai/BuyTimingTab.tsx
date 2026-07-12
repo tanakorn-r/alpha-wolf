@@ -1,6 +1,5 @@
 import { EmptyPanel, LoadingPanel, RetryPanel } from "../../components/ui/panels";
-import { AgentSignoff } from "../../components/agents/AgentByline";
-import { AgentRecap } from "../../components/agents/AgentRecap";
+import { AgentCall } from "../../components/agents/AgentCall";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import type { BuyTimingResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
@@ -24,7 +23,7 @@ export function BuyTimingTab({ hunt }: { hunt: HuntAi }) {
 
 function TimingStart({ symbol, fetching, onRun }: { symbol: string; fetching: boolean; onRun: () => void }) {
   return (
-    <section className="flex flex-wrap items-center gap-3 rounded-[10px] border border-[#2a2a31] bg-[#1a1a1e] px-4 py-3">
+    <section className="flex flex-wrap items-center gap-3 rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#1a1a1e] px-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="font-mono text-[15px] font-extrabold text-[#ececee]">{symbol}</div>
         <div className="mt-0.5 text-[11px] text-[#8c8c95]">Run the selected Agent&apos;s buy timing analysis when you are ready.</div>
@@ -43,7 +42,18 @@ function TimingPage({ timing, analyzedAt, refreshing, onRefresh }: { timing: Buy
 
   return (
     <div className="flex flex-col gap-3">
-      <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-3.5">
+      <AgentCall
+        agent={timing.agent}
+        label="Buy timing agent"
+        score={timing.perspectiveScore}
+        scoreLabel="setup fit"
+        signal={timing.action}
+        headline={timing.headline}
+        summary={timing.recap ?? timing.summary}
+        accent={timing.agent?.color}
+        meta={`Cached ${formatAnalyzedAt(analyzedAt)} · historical timing evidence · not financial advice`}
+        onRerun={onRefresh}
+      >
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="rounded-[5px] border border-[#2a2a31] bg-[#0e0e10] px-[10px] py-[3px] font-mono text-[10px] font-bold uppercase tracking-[0.04em] text-[#8c8c95]">
@@ -58,9 +68,7 @@ function TimingPage({ timing, analyzedAt, refreshing, onRefresh }: { timing: Buy
               </span>
             ) : null}
           </div>
-          <PremiumAiButton label={refreshing ? "Refreshing" : "Refresh"} sublabel="Timing" disabled={refreshing} loading={refreshing} onClick={onRefresh} size="xs" />
         </div>
-        <AgentRecap agent={timing.agent} recap={timing.recap ?? timing.summary} fit={timing.agentFit} reason={timing.agentFitReason} className="" />
         <div className="mt-3 grid gap-2.5 min-[760px]:grid-cols-3">
           <PlainAnswer label="Today" value={timing.action} detail={timing.todayInstruction ?? (timing.price != null ? `Price now ${formatCurrency(timing.price, timing.currency)}` : currentMonthLabel())} />
           <PlainAnswer label="Next move" value={timing.nextMove ?? wait} detail={timing.nextMoveTiming ?? (timing.nextBuy.label ? `Buy window ${timing.nextBuy.label}` : "Wait for entry price")} />
@@ -80,11 +88,9 @@ function TimingPage({ timing, analyzedAt, refreshing, onRefresh }: { timing: Buy
             body={hasAgentPlan ? `${timing.agent?.name ?? "Agent"} risk rule` : timing.cycle.nextExDate ? `inferred next ex-div ${formatDate(timing.cycle.nextExDate)}` : "waiting for a confirmed next ex-dividend date"}
           />
         </div>
-        <AgentSignoff agent={timing.agent} />
-      </section>
-      <div className="text-center font-mono text-[10px] text-[#5a5a62]">Buy Timing cached {formatAnalyzedAt(analyzedAt)}.</div>
+      </AgentCall>
 
-      <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-3.5">
+      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-3.5">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <div className="text-[15px] font-bold">{timing.agentMonthlyPlan?.length ? `${timing.agent?.name ?? "Agent"}'s monthly plan` : "Buy / trim by month"}</div>
           <div className="text-[12px] text-[#5a5a62]">{cycleLabel(timing)} · seasonality is evidence, not a promise</div>
@@ -95,7 +101,7 @@ function TimingPage({ timing, analyzedAt, refreshing, onRefresh }: { timing: Buy
 
       <BacktestStats timing={timing} />
 
-      <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-3.5">
+      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-3.5">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-[15px] font-bold">5-year seasonality · avg monthly return</div>
@@ -109,7 +115,7 @@ function TimingPage({ timing, analyzedAt, refreshing, onRefresh }: { timing: Buy
         <SeasonalityChart values={timing.seasonality} cheapestMonth={timing.cheapestMonth ?? ""} peakMonth={timing.peakMonth ?? ""} />
       </section>
 
-      <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-3.5">
+      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-3.5">
         <div className="mb-3 text-[10px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Calculation drivers</div>
         <div className="grid gap-3 text-[12.5px] text-[#bcbcc2] min-[760px]:grid-cols-3">
           <Driver label="Post-ex pattern" value={`${hitRate} · sample ${timing.postExDipPattern.sampleSize}`} />

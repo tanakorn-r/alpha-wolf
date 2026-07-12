@@ -13,6 +13,7 @@ export function AppHeader() {
   const setActiveAgent = useWolfStore((state) => state.setActiveAgent);
   const { data: agents = [] } = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
   const activeAgent = agents.find((agent) => agent.id === activeAgentId) ?? agents[0];
+  if (location.pathname === "/") return null;
   const isHuntAi = location.pathname === "/hunt-ai";
   const page = location.pathname === "/scanner"
     ? { title: "DCA Scanner", subtitle: "Search any stock, then tap for an AI buy / wait verdict" }

@@ -5,7 +5,7 @@ import type { MatchVM, StockHunt } from "./useStockHunt";
 
 export function MatchCard({ match, hunt }: { match: MatchVM; hunt: StockHunt }) {
   return (
-    <div className={`grid min-w-0 gap-3 rounded-[11px] border bg-[#111114] px-3.5 py-3 text-left transition-colors hover:border-[#3ecf8e] min-[760px]:grid-cols-[68px_minmax(0,1fr)_auto] min-[760px]:items-start min-[760px]:gap-3.5 min-[760px]:px-4 min-[760px]:py-3.5 ${match.rank === 1 ? "border-[#3ecf8e]/60" : "border-[#2a2a31]"}`}>
+    <div className={`grid min-w-0 gap-3 rounded-[var(--aw-radius-card)] border bg-[#111114] px-3.5 py-3 text-left transition-all hover:-translate-y-px hover:border-[#3ecf8e] hover:bg-[#161619] min-[760px]:grid-cols-[68px_minmax(0,1fr)_auto] min-[760px]:items-start min-[760px]:gap-3.5 min-[760px]:px-4 min-[760px]:py-3.5 ${match.rank === 1 ? "border-[#3ecf8e]/60" : "border-[#2a2a31]"}`}>
       <div className="flex min-w-0 items-start justify-between gap-3 min-[760px]:contents">
         <button type="button" onClick={() => hunt.openDetail(match.item.symbol)} className="flex min-w-0 items-center gap-3 text-left min-[760px]:w-[68px] min-[760px]:flex-col min-[760px]:gap-0.5">
           <div className="flex h-[52px] w-[52px] flex-none flex-col items-center justify-center rounded-full border-2 min-[760px]:h-[58px] min-[760px]:w-[58px]" style={{ borderColor: match.scoreColor, background: `${match.scoreColor}14` }}>

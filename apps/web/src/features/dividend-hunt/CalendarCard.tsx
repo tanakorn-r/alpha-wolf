@@ -11,7 +11,7 @@ export function CalendarCard({ hunt }: { hunt: DividendHunt }) {
   const eventDates = Object.keys(eventsByDate).sort();
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-xl border border-[#2a2a31] bg-[#161619]">
+    <section className="min-w-0 overflow-hidden rounded-[var(--aw-radius-card)] border border-[var(--aw-border)] bg-[var(--aw-surface)]">
       <div className="border-b border-[#2a2a31] p-4">
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-3 max-[639px]:w-full min-[640px]:w-auto">

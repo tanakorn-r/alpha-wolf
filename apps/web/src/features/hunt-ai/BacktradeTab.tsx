@@ -35,11 +35,11 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
     }
   }
 
-  if (!symbol) return <div className="rounded-[10px] border border-[#2a2a31] bg-[#161619] px-5 py-8 text-center text-[13px] text-[#8c8c95]">Pick a stock from the Hunt watchlist first.</div>;
+  if (!symbol) return <div className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] px-5 py-8 text-center text-[13px] text-[#8c8c95]">Pick a stock from the Hunt watchlist first.</div>;
 
   return (
     <div className="flex flex-col gap-3">
-      <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-4">
+      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#3ecf8e]">Walk-forward AI Replay</div>
@@ -75,7 +75,7 @@ function Control({ label, children }: { label: string; children: React.ReactNode
 
 function ReplayProgress({ job }: { job: BacktradeJob }) {
   return (
-    <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-4">
+    <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-4">
       <div className="flex items-center justify-between gap-3"><div className="text-[13px] font-bold text-[#ececee]">{job.stage}</div><div className="font-mono text-[15px] font-bold text-[#3ecf8e]">{job.progress}%</div></div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#242429]"><div className="h-full rounded-full bg-[#3ecf8e] transition-[width]" style={{ width: `${job.progress}%` }} /></div>
       <div className="mt-2 text-[10px] text-[#6f6f78]">The replay runs independently; other Alpha Wolf pages remain available.</div>
@@ -88,7 +88,7 @@ function ReplayResult({ result }: { result: BacktradeResult }) {
   const won = difference >= 0;
   return (
     <>
-      <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-4">
+      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-4">
         <div className="text-[10px] font-bold uppercase tracking-[0.08em] text-[#6f6f78]">Replay outcome</div>
         <div className="mt-1 text-[17px] font-bold" style={{ color: won ? "#3ecf8e" : "#f2575c" }}>
           {result.agent.name} finished {Math.abs(difference).toFixed(0)} budget units {won ? "above" : "below"} normal monthly DCA.
@@ -100,7 +100,7 @@ function ReplayResult({ result }: { result: BacktradeResult }) {
         <Metric label={`${result.agent.name} final value`} value={result.endingValue.toFixed(0)} context={`${signed(result.returnPct)}% return · ${result.maxDrawdownPct.toFixed(1)}% max drawdown · +${result.agentDividendsReceived.toFixed(0)} dividends banked as cash`} color={result.returnPct >= 0 ? "#3ecf8e" : "#f2575c"} />
         <Metric label="Normal DCA final value" value={result.dcaEndingValue.toFixed(0)} context={`${signed(result.dcaReturnPct)}% return · ${result.dcaMaxDrawdownPct.toFixed(1)}% max drawdown · +${result.dcaDividendsReinvested.toFixed(0)} dividends auto-reinvested`} color="#ececee" />
       </section>
-      <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-4">
+      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-4">
         <div className="flex flex-wrap items-baseline justify-between gap-2"><div className="text-[15px] font-bold">Price and accumulated P/L</div><div className="text-[10px] text-[#6f6f78]">{result.aiDecisionCount} AI decisions · {result.fallbackDecisionCount} fallback</div></div>
         <ReplayCharts result={result} />
       </section>
@@ -212,7 +212,7 @@ function exposureChartPaths(points: BacktradeResult["equity"], width: number, he
 function DecisionTimeline({ decisions }: { decisions: BacktradeDecision[] }) {
   const visible = decisions.slice(-30).reverse();
   return (
-    <section className="rounded-[10px] border border-[#2a2a31] bg-[#161619] p-4">
+    <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-4">
       <div className="flex items-baseline justify-between gap-2"><div className="text-[15px] font-bold">Decision audit</div><div className="text-[10px] text-[#6f6f78]">Latest {visible.length} of {decisions.length}</div></div>
       <div className="mt-3 divide-y divide-[#24242a]">
         {visible.map((decision) => <div key={decision.date} className="grid gap-1 py-2.5 text-[11px] min-[760px]:grid-cols-[90px_70px_90px_110px_minmax(0,1fr)]"><span className="font-mono text-[#8c8c95]">{decision.date}</span><span className="font-bold" style={{ color: actionColor(decision.action) }}>{decision.action}</span><span className="font-mono text-[#ececee]">Price {decision.close.toFixed(2)}</span><span className="font-mono text-[#bcbcc2]">{decision.action === "BUY" ? `${decision.buyCashPct}% cash` : decision.action === "TRIM" || decision.action === "SELL" ? `${decision.trimPositionPct}% shares` : "No trade"}</span><div className="text-[#8c8c95]"><div><span className="mr-1.5 rounded border border-[#32323a] px-1.5 py-0.5 font-mono text-[9px] text-[#b0b0b8]">{decision.decisionBasis ?? decision.evidenceFocus ?? "BLENDED"}</span>{decision.reason} · executed next open {decision.executedPrice?.toFixed(2) ?? "n/a"} · {decision.source === "ai" ? "AI" : "fallback"}</div>{decision.signalRead && decision.timingRead && decision.analystRead ? <div className="mt-1 text-[10px] text-[#696972]">Signal: {decision.signalRead} · Timing: {decision.timingRead} · Analyst: {decision.analystRead}</div> : null}</div></div>)}

@@ -26,7 +26,6 @@ export function HuntAiPage() {
   return (
     <section className="flex flex-col gap-3 text-[#ececee]">
       <ProPromoBanner open={hunt.trialModalOpen} signedIn={hunt.signedIn} onClose={hunt.closeTrialModal} onRedeem={hunt.redeemPremium} redeeming={hunt.redeemingPremium} />
-      {hunt.signedIn ? <UsageBar hunt={hunt} /> : null}
       <WatchlistBar hunt={hunt} />
       <HuntTabsBar hunt={hunt} />
       {hunt.tab === "signals" ? <SignalsTab hunt={hunt} /> : null}
@@ -36,19 +35,6 @@ export function HuntAiPage() {
       {hunt.aiError ? <ErrorCard message={hunt.aiError} /> : null}
       {hunt.tab === "analyst" ? <AnalystTab hunt={hunt} /> : null}
     </section>
-  );
-}
-
-function UsageBar({ hunt }: { hunt: ReturnType<typeof useHuntAi> }) {
-  const expiry = hunt.premiumExpiresAt ? new Date(hunt.premiumExpiresAt) : null;
-  const expiryLabel = expiry && !Number.isNaN(expiry.getTime()) ? expiry.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null;
-  return (
-    <div className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[#25252b] bg-[#121215] px-3 py-2 text-[10.5px] text-[#8c8c95]">
-      <span className={`font-bold uppercase tracking-[0.06em] ${hunt.premium ? "text-[#3ecf8e]" : "text-[#f5c451]"}`}>{hunt.premium ? "Pro trial" : "Free plan"}</span>
-      <span>{hunt.aiUsage.remaining} of {hunt.aiUsage.limit} AI runs left this month</span>
-      {hunt.premium && expiryLabel ? <span>· Trial ends {expiryLabel}</span> : null}
-      {!hunt.premium ? <button type="button" onClick={hunt.unlockPremium} className="ml-auto rounded-[6px] bg-[#3ecf8e] px-2.5 py-1 font-bold text-[#07110c]">Claim 30 days free</button> : null}
-    </div>
   );
 }
 

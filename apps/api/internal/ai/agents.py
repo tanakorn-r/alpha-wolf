@@ -151,6 +151,7 @@ ANALYST_PERSPECTIVES: dict[str, dict[str, str]] = {
         "outlookTitle": "Intrinsic value & earnings bridge",
         "sections": "1) cash-flow and earnings quality, 2) balance-sheet funding/liquidity, 3) returns on capital and margin durability, 4) valuation expectations versus the earnings bridge",
         "sizing": "Reserve FULL for strong cash conversion, balance-sheet safety, and a defensible margin of safety. Use STARTER when quality passes but valuation evidence is incomplete.",
+        "analytics": "Lead with comparative-advantage proxies, funding quality, dividend quality, and capital efficiency. Multiple-timeframe/Dow context may adjust entry risk; Wyckoff, Elliott, and Fibonacci must not drive the owner-value conclusion.",
         "northStar": "risk-adjusted owner value: free cash flow, balance-sheet strength, capital efficiency, and a defensible five-year earnings bridge",
         "projection": "Build a sober base case from margins, reinvestment needs, cash generation, leverage, and valuation expectations. A bright sector cannot rescue weak unit economics.",
         "breakers": "cash-flow deterioration, leverage/refinancing stress, margin compression, or returns below the hurdle rate",
@@ -162,6 +163,7 @@ ANALYST_PERSPECTIVES: dict[str, dict[str, str]] = {
         "outlookTitle": "Swing setup & exit map",
         "sections": "1) liquidity and volume behavior, 2) trend/MA structure, 3) catalyst and reaction quality, 4) swing reward/risk and gap/event danger",
         "sizing": "Size from stop distance and setup quality. FULL means one full planned risk unit, never the whole account; cold or incomplete tape should be STARTER or OBSERVE.",
+        "analytics": "Use Dow Theory, Wyckoff phase, multiple-timeframe alignment, Fibonacci swing zones, and Elliott bias as a heuristic. Require price/volume confirmation and a hard invalidation; business structure is only a veto.",
         "northStar": "whether the business and sector can keep producing liquid catalysts, earnings reactions, and tradable institutional attention",
         "projection": "Judge whether the structure supports a swing now. Use trend, volume, RSI, MACD, moving averages, support/resistance and catalysts to define entry, trim/target, stop, and maximum holding window; permanent ownership is outside your edge.",
         "breakers": "drying liquidity, dead catalyst cadence, repeated failed reactions, or a sector losing trader attention",
@@ -173,6 +175,7 @@ ANALYST_PERSPECTIVES: dict[str, dict[str, str]] = {
         "outlookTitle": "Technical & factor compatibility",
         "sections": "1) trend regime using SMA20/50/200 and EMA20, 2) momentum compatibility using RSI/MACD/stochastic, 3) quality/value/growth factor stack, 4) volatility, drawdown and rebalance risk",
         "sizing": "Map factor/technical compatibility and volatility budget to the tier. Failed thresholds mean OBSERVE; partial compatibility means STARTER; FULL requires the rule stack to pass.",
+        "analytics": "Use Dow and multiple-timeframe alignment as measurable regimes; use Wyckoff and Fibonacci only when rule-confirmed. Elliott is low-weight/heuristic because wave counts are subjective. Cross-check RSI, MACD, stochastic, MAs, volume, volatility, and factor rank.",
         "northStar": "persistence of quality, value, growth, momentum, and low-risk factors across a full cycle",
         "projection": "Produce a rule-based compatibility read using RSI, MACD/signal/histogram, stochastic %K/%D, SMA20/50/200, EMA20, volume, volatility, relative strength and factor quality. Name passed and failed conditions plus the rebalance rule—not a company story.",
         "breakers": "factor-rank decay, volatility/drawdown expansion, unstable profitability, or loss of relative strength",
@@ -184,6 +187,7 @@ ANALYST_PERSPECTIVES: dict[str, dict[str, str]] = {
         "outlookTitle": "Income compounding path",
         "sections": "1) payout funding from free cash flow, 2) dividend durability/growth, 3) balance-sheet survivability, 4) yield-on-cost and reinvestment compounding",
         "sizing": "Prefer BUILD through installments. STARTER is appropriate when income is covered but the record is short; AVOID only for a real yield trap or unsafe funding.",
+        "analytics": "Lead with comparative advantage, cash-funded dividend safety, payout durability, and compounding. Dow/multiple-timeframe structure is only a drawdown-risk context. Do not use Elliott/Wyckoff/Fibonacci to decide dividend quality.",
         "northStar": "a durable and growing income engine: payout coverage, cash-flow survivability, balance-sheet safety, and reinvested distributions",
         "projection": "Explain whether five years of dividends plus reinvestment can compound income and whether the company can fund that payout through a bad cycle.",
         "breakers": "payout coverage failure, dividend cuts, debt-funded distributions, or a moat weakening enough to impair cash generation",
@@ -195,6 +199,7 @@ ANALYST_PERSPECTIVES: dict[str, dict[str, str]] = {
         "outlookTitle": "Fast buy / fast sell map",
         "sections": "1) crowd/volume heat, 2) price and momentum acceleration, 3) catalyst/narrative energy, 4) rug-pull risk and fast exit",
         "sizing": "Even FULL means the full pre-planned small trade size. Use STARTER for early heat, BUILD for confirmed acceleration, and AVOID only when rug risk or invalidation is already active.",
+        "analytics": "Use Dow, Wyckoff, Elliott bias, Fibonacci extensions, and multiple timeframes to map the fast trade, but volume and momentum must confirm them. No volume means no chase regardless of the pattern label.",
         "northStar": "whether the company sits inside a sector with durable adoption, narrative heat, accelerating demand, and repeated upside catalysts",
         "projection": "Ignore a five-year holding forecast. Decide whether the setup is hot now; give a supplied-data fast-buy trigger, fast-sell/trim level, hard stop, maximum hold window, and the volume or momentum condition required to keep the trade alive.",
         "breakers": "narrative exhaustion, adoption slowing, volume/catalyst heat disappearing, or a newer theme taking the crowd",
@@ -206,6 +211,7 @@ ANALYST_PERSPECTIVES: dict[str, dict[str, str]] = {
         "outlookTitle": "Owner earnings projection",
         "sections": "1) moat and business economics, 2) owner-earnings quality (operating cash flow minus capital spending), 3) reinvestment funding audit (internally generated cash versus debt/equity funding), 4) management capital allocation and balance-sheet honesty",
         "sizing": "Translate conviction into ownership size. A wonderful, honestly funded compounder may earn FULL planned ownership; an understandable but unproven runway earns STARTER, not automatic rejection.",
+        "analytics": "Lead with comparative advantage, monopoly/moat proof, owner earnings, reinvestment funding, and dividend economics. Treat all Dow/Wyckoff/Elliott/Fibonacci signals as quote-screen noise unless they reveal a truly extreme valuation opportunity.",
         "northStar": "moat durability, trusted capital allocation, pricing power, owner earnings, and the ability to reinvest retained earnings at high returns",
         "projection": "Describe how owner earnings could compound over five years. Calculate or cite operating cash flow minus capital spending/free cash flow, compare net income with operating cash flow, compare cash with debt/liabilities, and judge whether reinvestment is internally funded or borrowed. Total assets are not a spendable budget.",
         "breakers": "owner earnings failing to convert to cash, debt-funded reinvestment, moat erosion, poor capital allocation, declining returns on capital, management distrust, or exhausted reinvestment runway",
@@ -217,6 +223,7 @@ ANALYST_PERSPECTIVES: dict[str, dict[str, str]] = {
         "outlookTitle": "Full-corner decision path",
         "sections": "1) business/moat and sector runway, 2) cash-flow funding quality and balance sheet, 3) valuation plus expected return, 4) the single portfolio/risk bottleneck",
         "sizing": "Size by the controlling bottleneck and portfolio risk budget. Do not average; reduce the tier until that bottleneck is proven or resolved.",
+        "analytics": "Use comparative advantage and funding quality for structure; Dow/Wyckoff/multiple timeframes for regime; Fibonacci for conditional zones; Elliott only as a labeled heuristic. Require cross-confirmation and name the controlling bottleneck.",
         "northStar": "the single material bottleneck across business quality, sector runway, balance sheet, cash generation, valuation, and portfolio survivability",
         "projection": "Integrate every corner but do not average them. Identify the one bottleneck that decides whether the five-year structure is investable.",
         "breakers": "the named bottleneck worsening, cash-flow or balance-sheet damage, sector thesis failure, or portfolio risk becoming unacceptable",
@@ -346,6 +353,7 @@ AGENT-SPECIFIC ANALYST MANDATE (apply whenever the task returns longTermView):
 - Your outlook section title: {lens["outlookTitle"]}.
 - Your four required investigation sections: {lens["sections"]}.
 - Your sizing method: {lens["sizing"]}
+- Your aligned analytics: {lens["analytics"]}
 - Your decision north star: {lens["northStar"]}.
 - Projection method: {lens["projection"]}
 - Your thesis breakers should prioritize: {lens["breakers"]}.
@@ -358,6 +366,12 @@ the same mandate. Set outlookHorizon and outlookTitle to the required values abo
 company may receive a materially different
 structureScore and outlookRating from another Agent because your definition of a good setup is
 different. Do not summarize all investment styles and do not converge toward a generic analyst.
+
+ANALYTIC DISCIPLINE: do not mention every framework for decoration. Use only the analytics aligned
+above and only when their supplied fields are available. Dow/Wyckoff/Fibonacci/Elliott are
+conditional chart frameworks, not facts about the business. Elliott bias is never an exact wave
+count; Wyckoff phase never proves operator intent; Fibonacci levels are zones, not forecasts.
+If frameworks conflict, lower the size or wait for the Agent's primary confirmation rule.
 
 RESOURCE HONESTY RULE: total assets, market cap, and accounting profit are not spendable budget.
 Whenever you claim the company has resources or reinvestment capacity, distinguish liquid cash
@@ -397,10 +411,12 @@ horizon, evidence hierarchy, trigger, and risk because their method is genuinely
 
 def _daily_brief_perspective_directive(agent_id: str) -> str:
     lens = DAILY_BRIEF_PERSPECTIVES[normalize_agent_id(agent_id)]
+    analytics = ANALYST_PERSPECTIVES[normalize_agent_id(agent_id)]["analytics"]
     return f"""
 AGENT-SPECIFIC DAILY PLAN RULE:
 - Plan horizon: {lens["horizon"]}.
 - Endurance rule: {lens["endurance"]}
+- Aligned analytics: {analytics}
 - Required analysis title: {lens["analysisTitle"]}.
 - Required analysis sections: {lens["analysisSections"]}.
 

@@ -6,12 +6,12 @@ import type { Dashboard } from "./useDashboard";
 export function AiAdvisor({ dash }: { dash: Dashboard }) {
   return (
     <>
-      {dash.hasHoldings ? (
-        <section className="flex items-center justify-between gap-5 rounded-xl border border-[#285f48] bg-[#161619] p-5">
+      {dash.hasHoldings && !dash.analysis && !dash.analyzing ? (
+        <section className="flex items-center justify-between gap-4 rounded-[var(--aw-radius-card)] border border-[#285f48] bg-[#161619] p-4 max-[680px]:flex-col max-[680px]:items-stretch">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[.14em] text-[#3ecf8e]">AI · on demand</div>
-            <h2 className="mt-1 text-lg font-semibold">Need a second opinion on this month?</h2>
-            <p className="mt-1 text-sm text-[#8c8c95]">Your active Agent grades concentration, P/L, yield, and next actions from live portfolio data.</p>
+            <h2 className="mt-1 text-[16px] font-semibold">Need a second opinion on this month?</h2>
+            <p className="mt-1 text-[12px] text-[#8c8c95]">Your active Agent grades concentration, P/L, yield, and next actions from live portfolio data.</p>
           </div>
           <PremiumAiButton label={dash.analyzing ? "Analyzing" : "Review portfolio"} sublabel="Portfolio AI" disabled={!dash.hasHoldings || dash.analyzing} loading={dash.analyzing} onClick={() => void dash.askAi()} size="compact" />
         </section>

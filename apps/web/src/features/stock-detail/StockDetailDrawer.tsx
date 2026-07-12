@@ -10,10 +10,14 @@ import { Modal } from "../../components/ui/Modal";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
 import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
-import { loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, saveHolding, summarizeStock, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
-import { negative, panel, positive } from "../../lib/ui";
+import { loadAgents, loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, saveHolding, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
+import { negative, positive } from "../../lib/ui";
 import { useWolfStore } from "../../store/useWolfStore";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
+import { AdvancedInsightCard, type AdvancedInsightTone } from "./AdvancedInsightCard";
+import { DrawerMetric, type DrawerMetricTone } from "./DrawerMetric";
+
+const panel = "rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-3.5";
 
 const returnWindows = ["ytd", "1y", "2y", "3y", "4y"] as const;
 type ResearchTab = "overview" | "consensus" | "financials" | "calendar" | "market" | "news";
@@ -48,6 +52,8 @@ export function StockDetailDrawer() {
     enabled: detailOpen && Boolean(selectedSymbol)
   });
   const detail = detailQuery.data ?? null;
+  const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
+  const activeAgent = agentsQuery.data?.find((agent) => agent.id === activeAgentId) ?? analysis?.agent ?? null;
   const loading = detailQuery.isPending && detailOpen;
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
@@ -163,7 +169,7 @@ export function StockDetailDrawer() {
     <>
       <button type="button" aria-label="Close stock detail" onClick={closeDetail} className={`aw-overlay fixed inset-0 z-30 bg-slate-900/30 transition-opacity ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} />
       <aside ref={drawerRef} onClick={closeDetail} className={`aw-drawer fixed inset-0 z-40 flex items-end justify-center overflow-hidden px-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-opacity min-[720px]:items-start min-[720px]:overflow-y-auto min-[720px]:px-6 min-[720px]:py-8 ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} aria-label="Stock detail panel">
-        <div onClick={(event) => event.stopPropagation()} className="aw-detail-panel relative flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-w-0 w-full max-w-[940px] flex-col overflow-hidden rounded-t-2xl border border-[#2a2a31] bg-[#0e0e10] shadow-[0_30px_90px_rgba(0,0,0,.55)] min-[720px]:max-h-none min-[720px]:rounded-2xl">
+        <div onClick={(event) => event.stopPropagation()} className="aw-detail-panel relative flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-w-0 w-full max-w-[1040px] flex-col overflow-hidden rounded-t-[var(--aw-radius-frame)] border border-[#2a2a31] bg-[#0e0e10] shadow-[0_30px_90px_rgba(0,0,0,.55)] min-[720px]:max-h-none min-[720px]:rounded-[var(--aw-radius-frame)]">
           <DrawerHeader
             detail={detail}
             symbol={selectedSymbol}
@@ -180,28 +186,28 @@ export function StockDetailDrawer() {
               >
                 <label className="grid gap-1 text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">
                   Units bought
-                  <input autoFocus required type="number" min="0" step="any" value={addShares} onChange={(event) => setAddShares(event.target.value)} placeholder="Number of shares" className="h-10 rounded-lg border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]" />
+                  <input autoFocus required type="number" min="0" step="any" value={addShares} onChange={(event) => setAddShares(event.target.value)} placeholder="Number of shares" className="h-10 rounded-[var(--aw-radius-control)] border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]" />
                 </label>
                 <label className="grid gap-1 text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">
                   Price paid (per share)
-                  <input required type="number" min="0" step="any" value={addPrice} onChange={(event) => setAddPrice(event.target.value)} placeholder="Your buy price" className="h-10 rounded-lg border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]" />
+                  <input required type="number" min="0" step="any" value={addPrice} onChange={(event) => setAddPrice(event.target.value)} placeholder="Your buy price" className="h-10 rounded-[var(--aw-radius-control)] border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]" />
                 </label>
                 <p className="text-[11px] leading-[1.5] text-[#5a5a62]">Prefilled with the live price ({formatCurrency(detail.stock.price, detail.stock.currency)}) — change it to what you actually paid. Adding more averages into your existing position.</p>
                 {addHoldingMutation.isError ? <p className="text-[11px] text-[#f2575c]">{addStatus}</p> : null}
-                <button disabled={addHoldingMutation.isPending} className="mt-1 flex items-center justify-center gap-2 rounded-lg bg-[#3ecf8e] py-3 text-sm font-bold text-[#06120c] disabled:opacity-60">
+                <button disabled={addHoldingMutation.isPending} className="mt-1 flex items-center justify-center gap-2 rounded-[var(--aw-radius-control)] bg-[#3ecf8e] py-3 text-sm font-bold text-[#06120c] disabled:opacity-60">
                   {addHoldingMutation.isPending ? <LoadingSpinner size={14} /> : null}Add to portfolio
                 </button>
               </form>
             </Modal>
           ) : null}
-          <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto p-4 min-[720px]:max-h-[calc(100vh-180px)] min-[720px]:p-[22px]">
+          <div className="grid min-w-0 flex-1 content-start gap-3 overflow-x-hidden overflow-y-auto p-3.5 min-[720px]:max-h-[calc(100vh-148px)] min-[720px]:p-[18px]">
             {loading ? <DetailSkeleton symbol={selectedSymbol} /> : null}
             {detailQuery.isError ? <div className={`${panel} flex items-center justify-between text-sm text-[#f2575c]`}>Unable to load live stock detail.<button type="button" disabled={detailQuery.isFetching} onClick={() => detailQuery.refetch()} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">{detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button></div> : null}
             {error ? <div className={`${panel} text-sm text-rose-600`}>{error}</div> : null}
             {addStatus ? <div className={`${panel} text-sm ${addHoldingMutation.isError ? "text-[#f2575c]" : "text-[#3ecf8e]"}`}>{addStatus}</div> : null}
             {detail && !loading ? <>
-              {analyzing || analysis ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
-              <QuickReadCard detail={detail} analysis={analysis} />
+              {analyzing ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
+              <QuickReadCard detail={detail} analysis={analysis} agent={activeAgent} />
               <ResearchTabs ref={tabsRef} active={tab} onSelect={selectTab} />
               {tab === "overview" ? <DetailContent detail={detail} huntAdvice={huntAdvice} huntLoading={huntLoading} onHunt={runAlphaHunt} /> : tab === "news" ? <NewsSection detail={detail} research={research} researchLoading={researchLoading} /> : researchLoading ? <DetailSkeleton symbol={selectedSymbol} /> : tab === "market" ? <MarketResearch market={market} analyzing={analyzing} onAnalyze={analyze} /> : <ResearchContent tab={tab} research={research} detail={detail} />}
             </> : null}
@@ -222,7 +228,7 @@ function ResearchTabs({ ref, active, onSelect }: { ref: React.Ref<HTMLDivElement
     { key: "news", label: "News" },
   ];
   return (
-    <div ref={ref} className="sticky top-0 z-20 flex min-w-0 flex-none gap-1 overflow-x-auto rounded-[10px] border border-[#2a2a31] bg-[#111113] p-1 backdrop-blur min-[720px]:grid min-[720px]:grid-cols-6 min-[720px]:overflow-visible">
+    <div ref={ref} className="sticky top-0 z-20 flex gap-1 overflow-x-auto rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#111113] p-1 backdrop-blur [scrollbar-width:none]">
       {tabs.map((item) => {
         const isActive = active === item.key;
         return (
@@ -230,10 +236,9 @@ function ResearchTabs({ ref, active, onSelect }: { ref: React.Ref<HTMLDivElement
             key={item.key}
             type="button"
             onClick={() => onSelect(item.key)}
-            className={`min-w-[74px] rounded-[7px] px-2 py-2 text-center transition-colors hover:bg-[#161619] min-[720px]:min-w-0 ${isActive ? "bg-[#1c1c20]" : ""}`}
+            className={`flex min-w-[96px] flex-1 items-center justify-center rounded-[var(--aw-radius-chip)] px-3 py-2 text-[12px] font-medium transition-colors ${isActive ? "bg-[#1c1c20] text-[#3ecf8e]" : "text-[#8c8c95] hover:bg-[#161619] hover:text-[#ececee]"}`}
           >
-            <TabIcon tab={item.key} active={isActive} />
-            <span className={`mt-0.5 block text-[10.5px] font-semibold ${isActive ? "text-[#3ecf8e]" : "text-[#8c8c95]"}`}>{item.label}</span>
+            {item.label}
           </button>
         );
       })}
@@ -261,35 +266,27 @@ function TabIcon({ tab, active }: { tab: ResearchTab; active: boolean }) {
   return <svg width="13" height="13" viewBox="0 0 16 16" fill="none" className="mx-auto"><path d="M1.5 11l4-5 3 3 4-6 2.5 3" stroke={stroke} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>;
 }
 
-function QuickReadCard({ detail, analysis }: { detail: StockDetailResponse; analysis: StockAnalysisResponse | null }) {
-  const score = detail.verdict?.score ?? analysis?.confidence ?? 0;
+function QuickReadCard({ detail, analysis, agent }: { detail: StockDetailResponse; analysis: StockAnalysisResponse | null; agent: AgentBadge | null }) {
   const yieldValue = detail.business?.dividendYield;
   const pe = detail.business?.peRatio;
   const oneYear = detail.performance?.returns?.["1y"] ?? detail.business?.oneYearReturn;
   const quickRead = analysis?.summary
     ?? `${detail.stock.symbol} is trading at ${formatCurrency(detail.stock.price, detail.stock.currency)} with ${formatPercent(detail.stock.changePct)} today. ${yieldValue != null ? `Dividend yield is ${formatPercent(yieldValue)}. ` : ""}${pe != null ? `P/E is ${formatMultiple(pe)}. ` : ""}${oneYear != null ? `One-year return is ${formatPercent(oneYear)}. ` : ""}Use the tabs below to inspect valuation, analyst view, calendar, and market-relative performance.`;
-  const used = Math.min(5, Math.max(1, Math.round(score / 20)));
-  const pct = `${(used / 5) * 100}%`;
-  const color = score >= 70 ? "#3ecf8e" : score >= 45 ? "#f5c451" : "#f2575c";
+  const color = agent?.color ?? "#74a4ff";
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[#3ecf8e]/20 bg-[linear-gradient(135deg,rgba(62,207,142,0.04),rgba(77,150,255,0.03))]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#3ecf8e]/10 px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.6 4.3L14 7l-4.4 1.2L8 12.5 6.4 8.2 2 7l4.4-1.2L8 1.5z" fill="#3ecf8e"/></svg>
-          <span className="text-[11.5px] font-bold tracking-[0.2px] text-[#3ecf8e]">AI Quick Read</span>
-          <span className="rounded bg-[#3ecf8e]/10 px-1.5 py-0.5 text-[9px] font-bold tracking-[0.6px] text-[#3ecf8e] ring-1 ring-[#3ecf8e]/20">LIVE DATA</span>
-          <div className="flex items-center gap-1.5 rounded-[5px] border border-[#2a2a31] bg-black/30 px-2 py-1">
-            <div className="h-[3px] w-10 overflow-hidden rounded bg-[#1c1c20]"><div className="h-full rounded" style={{ width: pct, background: color }} /></div>
-            <span className="font-mono text-[10px] text-[#8c8c95]">{used}/5 signals</span>
-          </div>
+    <section className="rounded-[var(--aw-radius-card)] border px-3.5 py-3" style={{ borderColor: `${color}66`, background: `linear-gradient(135deg,${color}16,rgba(14,14,16,0.95) 58%)` }}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-[var(--aw-radius-control)] border font-mono text-[8.5px] font-bold" style={{ borderColor: `${color}66`, color, background: `${color}16` }}>
+            {agent?.avatarUrl ? <img src={agent.avatarUrl} alt="" className="h-full w-full object-cover" /> : agent?.mono ?? "AI"}
+          </span>
+          <span className="text-[12.5px] font-bold text-[#ececee]">{agent ? `${agent.name}'s quick read` : "Quick read"}</span>
         </div>
-        <span className="font-mono text-[10.5px] text-[#5a5a62]">AI only runs when requested</span>
+        <span className="font-mono text-[10px] text-[#5a5a62]">runs only when you ask</span>
       </div>
-      <div className="px-4 py-3">
-        <div className="text-[13px] leading-[1.7] text-[#cfcfd4]">{quickRead}</div>
-      </div>
-    </div>
+      <div className="mt-2.5 text-[12px] leading-[1.6] text-[#cfcfd4]">{quickRead}</div>
+    </section>
   );
 }
 
@@ -316,7 +313,11 @@ function MarketResearch({ market, analyzing, onAnalyze }: { market: MarketCompar
 }
 
 function LegendLine({ color, label, dashed }: { color: string; label: string; dashed?: boolean }) { return <span className="flex items-center gap-2"><span className="w-4 border-t-2" style={{ borderColor: color, borderStyle: dashed ? "dashed" : "solid" }}/>{label}</span>; }
-function ReturnCard({ label, value, badge, good, description, tone }: { label: string; value: number; badge?: string; good?: boolean; description?: string; tone: "stock" | "benchmark" | "peer" }) { const valueColor = value < 0 ? "text-[#f2575c]" : tone === "peer" ? "text-[#f5c451]" : tone === "benchmark" ? "text-[#ececee]" : "text-[#3ecf8e]"; return <div className={`${panel} relative p-[18px]`}><div className="text-[11px] uppercase tracking-[.08em] text-[#8c8c95]">{label}</div>{badge ? <span className={`absolute right-[18px] top-[15px] rounded-md border px-2 py-1 font-mono text-[10px] font-semibold ${good ? "border-[#3ecf8e] text-[#3ecf8e]" : "border-[#f2575c] text-[#f2575c]"}`}>{badge}</span> : null}<div className={`mt-4 font-mono text-[28px] font-semibold ${valueColor}`}>{formatPercent(value)}</div><div className="mt-1 truncate text-xs text-[#8c8c95]">{description ?? "12-month total return"}</div></div>; }
+function ReturnCard({ label, value, badge, good, description, tone }: { label: string; value: number; badge?: string; good?: boolean; description?: string; tone: "stock" | "benchmark" | "peer" }) {
+  const metricTone: DrawerMetricTone = value < 0 ? "bad" : tone === "peer" ? "warn" : tone === "stock" ? "good" : "neutral";
+  const badgeNode = badge ? <span className="rounded-[5px] border px-2 py-0.5 text-[9px] font-bold" style={{ color: good ? "#3ecf8e" : "#f2575c", borderColor: good ? "#3ecf8e66" : "#f2575c66" }}>{badge}</span> : undefined;
+  return <DrawerMetric label={label} value={formatPercent(value)} tone={metricTone} detail={description ?? "12-month total return"} badge={badgeNode} />;
+}
 
 function NewsSection({ detail, research, researchLoading }: { detail: StockDetailResponse; research: StockResearchResponse | null; researchLoading: boolean }) {
   const news = [...(detail.news ?? [])].sort((a, b) => newsTime(b) - newsTime(a));
@@ -327,7 +328,7 @@ function NewsSection({ detail, research, researchLoading }: { detail: StockDetai
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3 rounded-xl border p-4" style={{ borderColor: `${color}66`, background: `${color}0d` }}>
+      <div className="flex items-center gap-3 rounded-[var(--aw-radius-card)] border p-4" style={{ borderColor: `${color}66`, background: `${color}0d` }}>
         <span className="grid h-6 w-6 shrink-0 place-items-center" style={{ color: "#74a4ff" }}>
           <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.6 4.3L14 7l-4.4 1.2L8 12.5 6.4 8.2 2 7l4.4-1.2L8 1.5z" fill="currentColor"/></svg>
         </span>
@@ -335,7 +336,7 @@ function NewsSection({ detail, research, researchLoading }: { detail: StockDetai
       </div>
 
       {news.length ? (
-        <div className="overflow-hidden rounded-xl border border-[#2a2a31] bg-[#121214]">
+        <div className="overflow-hidden rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#121214]">
           {news.map((item, index) => <NewsItemRow key={`${item.title}-${index}`} item={item} />)}
         </div>
       ) : (
@@ -464,6 +465,7 @@ function AnalystSection({ research, detail }: { research: StockResearchResponse;
   const summary = (research.recommendationsSummary?.[0] ?? {}) as Record<string, number>;
   const total = REC_SEGMENTS.reduce((sum, segment) => sum + (summary[segment.key] ?? 0), 0);
   const targets = research.analystPriceTargets as { current?: number; low?: number; high?: number; mean?: number } | undefined;
+  const hasTargets = Boolean(targets && (targets.mean != null || targets.low != null || targets.high != null));
   const current = targets?.current ?? detail.stock.price;
   const low = targets?.low ?? current;
   const high = targets?.high ?? current;
@@ -502,13 +504,22 @@ function AnalystSection({ research, detail }: { research: StockResearchResponse;
           <div className="flex flex-col gap-[7px]">{REC_SEGMENTS.map((segment) => <div key={segment.key} className="flex justify-between text-[12.5px]"><span className="text-[#bcbcc2]">{segment.label}</span><span className="font-mono text-[#8c8c95]">{summary[segment.key] ?? 0}</span></div>)}</div>
         </div>
         <div className={panel}>
-          <div className="flex items-baseline justify-between"><div className="font-semibold">Price target</div><span className={`font-mono font-semibold ${upside >= 0 ? positive : negative}`}>{formatPercent(upside)}</span></div>
-          <div className="relative mt-[26px] h-[54px]">
-            <div className="absolute left-0 right-0 top-6 h-[5px] rounded-[3px]" style={{ background: "linear-gradient(90deg,#f2575c,#f5c451,#3ecf8e)" }} />
-            <div className="absolute flex -translate-x-1/2 flex-col items-center" style={{ left: `${curPct}%`, top: "14px" }}><div className="h-6 w-[3px] rounded-sm bg-[#ececee]" /><div className="mt-[3px] whitespace-nowrap font-mono text-[11px]">now {formatMoney(current)}</div></div>
-            <div className="absolute flex -translate-x-1/2 flex-col items-center" style={{ left: `${meanPct}%`, top: "-22px" }}><div className="whitespace-nowrap font-mono text-[11px] text-[#3ecf8e]">target {formatMoney(mean)}</div><div className="mt-0.5 h-[22px] w-[3px] rounded-sm bg-[#3ecf8e]" /></div>
+          <div className="flex items-baseline justify-between">
+            <div className="font-semibold">Price target</div>
+            {hasTargets ? <span className={`font-mono font-semibold ${upside >= 0 ? positive : negative}`}>{formatPercent(upside)}</span> : null}
           </div>
-          <div className="mt-1.5 flex justify-between font-mono text-[11px] text-[#8c8c95]"><span>low {formatMoney(low)}</span><span>high {formatMoney(high)}</span></div>
+          {hasTargets ? (
+            <>
+              <div className="relative mt-[26px] h-[54px]">
+                <div className="absolute left-0 right-0 top-6 h-[5px] rounded-[3px]" style={{ background: "linear-gradient(90deg,#f2575c,#f5c451,#3ecf8e)" }} />
+                <div className="absolute flex -translate-x-1/2 flex-col items-center" style={{ left: `${curPct}%`, top: "14px" }}><div className="h-6 w-[3px] rounded-sm bg-[#ececee]" /><div className="mt-[3px] whitespace-nowrap font-mono text-[11px]">now {formatMoney(current)}</div></div>
+                <div className="absolute flex -translate-x-1/2 flex-col items-center" style={{ left: `${meanPct}%`, top: "-22px" }}><div className="whitespace-nowrap font-mono text-[11px] text-[#3ecf8e]">target {formatMoney(mean)}</div><div className="mt-0.5 h-[22px] w-[3px] rounded-sm bg-[#3ecf8e]" /></div>
+              </div>
+              <div className="mt-1.5 flex justify-between font-mono text-[11px] text-[#8c8c95]"><span>low {formatMoney(low)}</span><span>high {formatMoney(high)}</span></div>
+            </>
+          ) : (
+            <div className="mt-3 text-[12.5px] text-[#8c8c95]">No analyst price target yet. Current price {formatMoney(current)}.</div>
+          )}
         </div>
       </div>
 
@@ -603,21 +614,9 @@ type CalendarDateItem = {
 };
 
 function CalendarDateCard({ label, item, tone }: { label: string; item: CalendarDateItem; tone: MetricTone }) {
-  const color = tone === "good" ? "#3ecf8e" : tone === "warn" ? "#f5c451" : "#8c8c95";
-  return (
-    <div className={panel}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] uppercase tracking-[.5px]" style={{ color }}>{label}</div>
-        {item.date ? (
-          <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[.06em] ${item.estimated ? "bg-[#f5c451]/10 text-[#f5c451] ring-1 ring-[#f5c451]/25" : "bg-[#3ecf8e]/10 text-[#3ecf8e] ring-1 ring-[#3ecf8e]/25"}`}>
-            {item.estimated ? "Estimated" : "Reported"}
-          </span>
-        ) : null}
-      </div>
-      <div className="mt-2 font-mono text-[17px] font-semibold" style={{ color: item.date ? color : "#ececee" }}>{item.date ? formatShortDate(item.date) : "—"}</div>
-      {item.note ? <div className="mt-1.5 text-[11px] leading-[1.35] text-[#8c8c95]">{item.note}</div> : null}
-    </div>
-  );
+  const badge = item.date ? <span className={`rounded-[5px] border px-1.5 py-0.5 text-[8px] font-bold uppercase ${item.estimated ? "border-[#f5c451]/30 text-[#f5c451]" : "border-[#3ecf8e]/30 text-[#3ecf8e]"}`}>{item.estimated ? "Estimated" : "Reported"}</span> : undefined;
+  const metricTone: DrawerMetricTone = tone === "neutral" ? "warn" : tone === "warn" ? "amber" : tone;
+  return <DrawerMetric label={label} value={item.date ? formatShortDate(item.date) : "—"} tone={metricTone} detail={item.note} badge={badge} />;
 }
 
 function reportedOrEstimatedDate(value: unknown, estimate: () => CalendarDateItem | null, estimatedNote: string): CalendarDateItem {
@@ -691,31 +690,29 @@ function DrawerHeader({
 }) {
   const hasHolding = typeof holdingShares === "number" && holdingShares > 0;
   return (
-    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#2a2a31] bg-[#141417] px-4 py-4 min-[720px]:items-center min-[720px]:gap-4 min-[720px]:px-[22px] min-[720px]:py-[18px]">
+    <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#2a2a31] bg-[#141417] px-3.5 py-3 min-[720px]:items-center min-[720px]:gap-3 min-[720px]:px-[18px] min-[720px]:py-[14px]">
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 flex-wrap items-center gap-2 min-[720px]:gap-[11px]">
-          <strong className="min-w-0 max-w-full truncate font-mono text-lg min-[720px]:text-xl">{detail?.stock.symbol ?? symbol ?? "Live data"}</strong>
+          <strong className="min-w-0 max-w-full truncate font-mono text-lg">{detail?.stock.symbol ?? symbol ?? "Live data"}</strong>
           <span className="min-w-0 max-w-full truncate text-xs text-[#8c8c95] min-[720px]:text-sm">{detail?.stock.name ?? "Live data panel"}</span>
           <span className="rounded-[5px] border border-[#2a2a31] px-[7px] py-0.5 text-[10px] text-[#8c8c95]">{detail?.stock.symbol.endsWith(".BK") ? "Thai SET" : "US"}</span>
         </div>
         {detail ? <div className="mt-[3px] flex items-baseline gap-[9px]"><span className="font-mono text-lg font-semibold">{formatCurrency(detail.stock.price, detail.stock.currency)}</span><span className={`font-mono text-[13px] ${detail.stock.changePct >= 0 ? positive : negative}`}>{formatPercent(detail.stock.changePct)}</span></div> : null}
       </div>
-      <button type="button" onClick={onClose} aria-label="Close detail panel" className="grid h-9 w-9 flex-none place-items-center rounded-lg border border-[#2a2a31] bg-[#0e0e10] text-[22px] leading-none text-[#8c8c95] hover:text-[#ececee] min-[720px]:order-last min-[720px]:border-0 min-[720px]:bg-transparent">×</button>
+      <button type="button" onClick={onClose} aria-label="Close detail panel" className="grid h-9 w-9 flex-none place-items-center rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#0e0e10] text-[#8c8c95] transition-colors hover:border-[#5a5a62] hover:text-[#ececee] min-[720px]:order-last">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+      </button>
       <div className="flex w-full min-w-0 items-stretch gap-2 min-[720px]:w-auto min-[720px]:items-center min-[720px]:gap-3">
         {detail ? (
           <button
             type="button"
             onClick={onAdd}
             disabled={adding}
-            className="min-w-0 flex-1 rounded-lg border border-[#34343c] bg-[#1c1c20] px-3 py-2 text-left text-xs font-semibold text-[#ececee] transition-colors hover:border-[#676771] hover:bg-[#24242a] disabled:cursor-not-allowed disabled:opacity-60 min-[720px]:flex-none"
+            className="min-w-0 flex-1 rounded-[var(--aw-radius-control)] border border-[#3ecf8e]/45 bg-[#3ecf8e]/10 px-3.5 py-2 text-left text-[11.5px] font-bold text-[#3ecf8e] transition-colors hover:border-[#3ecf8e] hover:bg-[#3ecf8e]/15 disabled:cursor-not-allowed disabled:opacity-60 min-[720px]:flex-none"
           >
-            <span className="block">{adding ? "Adding..." : hasHolding ? "Add more" : "Add to port"}</span>
-            <span className="mt-0.5 block font-mono text-[10px] font-medium text-[#a6a6af]">
-              {hasHolding ? `${formatNumber(holdingShares)} shares` : formatCurrency(detail.stock.price, detail.stock.currency)}
-            </span>
+            <span className="block">{adding ? "Adding..." : hasHolding ? "+ Add more" : "+ Add to portfolio"}</span>
           </button>
         ) : null}
-        {detail ? <IndustryRankBadge detail={detail} /> : null}
       </div>
     </div>
   );
@@ -750,29 +747,16 @@ function IndustryRankBadge({ detail }: { detail: StockDetailResponse }) {
 function AiGate({ symbol, analysis, analyzing, onAnalyze, activeAgentId }: { symbol: string; analysis: StockAnalysisResponse | null; analyzing: boolean; onAnalyze: () => void; activeAgentId: string }) {
   if (analyzing) return <PremiumLoading title={agentLoadingTitle(activeAgentId, "deep", symbol)} subject={symbol} agentId={activeAgentId} task="deep" />;
   if (analysis) return <AiVerdictCard value={analysis} onRerun={onAnalyze} size="modal" />;
-  return <div className="flex flex-col items-center gap-3.5 rounded-[14px] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask AI to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">OpenAI will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><PremiumAiButton label={`Analyze ${symbol}`} sublabel="Premium · full picture" onClick={onAnalyze} size="wide" /></div>;
+  return <div className="flex flex-col items-center gap-3.5 rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask AI to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">OpenAI will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><PremiumAiButton label={`Analyze ${symbol}`} sublabel="Premium · full picture" onClick={onAnalyze} size="wide" /></div>;
 }
 
 function V4HeroMetric({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: "good" | "warn" | "neutral" }) {
-  const color = tone === "good" ? "#3ecf8e" : tone === "warn" ? "#74a4ff" : "#ececee";
-  return (
-    <div className="relative min-w-0 overflow-hidden rounded-xl border border-[#2a2a31] bg-[#121214] px-4 py-[18px]">
-      <span className="absolute inset-x-4 top-0 h-[2px] rounded-b-full" style={{ background: tone === "neutral" ? "#34343c" : color }} />
-      <div className="mb-2 text-[9px] uppercase tracking-[0.8px]" style={{ color: tone === "neutral" ? "#5a5a62" : color }}>{label}</div>
-      <div className="truncate font-mono text-[28px] font-bold leading-none tracking-[-0.8px]" style={{ color }} title={value}>{value}</div>
-      <div className="mt-2 truncate text-[11px] font-semibold text-[#8c8c95]" title={sub}>{sub}</div>
-    </div>
-  );
+  return <DrawerMetric label={label} value={value} detail={sub} tone={tone} />;
 }
 
 function V4MetricCell({ label, value, sub, color }: { label: string; value: string; sub: string; color?: string }) {
-  return (
-    <div className="min-w-0 bg-[#121214] px-4 py-[15px]">
-      <div className="mb-1.5 text-[9px] uppercase tracking-[0.6px] text-[#5a5a62]">{label}</div>
-      <div className="truncate font-mono text-[20px] font-bold" style={{ color: color ?? "#ececee" }}>{value}</div>
-      <div className="mt-1 truncate text-[10.5px] font-semibold text-[#8c8c95]">{sub}</div>
-    </div>
-  );
+  const tone: DrawerMetricTone = color === "#3ecf8e" ? "good" : color === "#f5c451" ? "warn" : "neutral";
+  return <DrawerMetric label={label} value={value} detail={sub} tone={tone} className="rounded-none border-0" />;
 }
 
 function buildPriceRange(detail: StockDetailResponse) {
@@ -900,6 +884,47 @@ function huntTone(tone: MetricTone | "good" | "warn" | "bad") {
 }
 
 function DetailContent({ detail, huntAdvice, huntLoading, onHunt }: { detail: StockDetailResponse; huntAdvice: QuantPerspectiveResponse | null; huntLoading: boolean; onHunt: () => void }) {
+  const overviewReturns = detail.performance?.returns ?? {};
+  const overviewSeries = buildReturnSeries(overviewReturns);
+  const positiveCount = overviewSeries.filter((item) => item.value > 0).length;
+  const overviewTechnicals = [
+    { label: "RSI", value: formatNumber(detail.technicals?.rsi14), tone: toneRsi(detail.technicals?.rsi14), detail: rsiHint(detail.technicals?.rsi14) },
+    { label: "P/E", value: formatMultiple(detail.business?.peRatio), tone: tonePe(detail.business?.peRatio), detail: peHint(detail.business?.peRatio) },
+    { label: "Volume", value: formatMultiple(detail.technicals?.volumeRatio), tone: toneVolume(detail.technicals?.volumeRatio), detail: volumeHint(detail.technicals?.volumeRatio) },
+  ];
+  const advancedInsights = buildAdvancedInsights(detail);
+
+  if (!huntAdvice && !huntLoading) {
+    return (
+      <>
+        <section className={panel}>
+          <PanelHeader title="Return profile" description={`${describeReturnPattern(overviewSeries)} · ${positiveCount}/${overviewSeries.length} winning windows`} />
+          <div className="grid grid-cols-2 gap-2.5 min-[680px]:grid-cols-5">
+            {overviewSeries.map((item) => <DrawerMetric key={item.key} label={item.label} value={formatPercent(item.value)} tone={toneReturn(item.value)} />)}
+          </div>
+        </section>
+        <section className={panel}>
+          <PanelHeader title="Technical analysis" description={detail.technicals?.signal ?? "Neutral"} />
+          <div className="grid gap-2.5 min-[680px]:grid-cols-3">
+            {overviewTechnicals.map((item) => <DrawerMetric key={item.label} label={item.label} value={item.value} tone={item.tone} detail={item.detail} />)}
+          </div>
+        </section>
+        {advancedInsights.length ? (
+          <section className={panel}>
+            <PanelHeader title="Advanced analytics" description="Mechanical reads from price, volume, trend, and peer data" />
+            <div className="grid gap-2.5 min-[760px]:grid-cols-2">
+              {advancedInsights.map((item) => <AdvancedInsightCard key={item.label} {...item} />)}
+            </div>
+          </section>
+        ) : null}
+        <section className={panel}>
+          <PanelHeader title="Business outlook" />
+          <p className="text-[13px] leading-[1.7] text-[#bcbcc2]">{detail.outlook?.summary ?? detail.business?.companySummary ?? "No outlook available."}</p>
+        </section>
+      </>
+    );
+  }
+
   const returns = detail.performance?.returns ?? {};
   const returnSeries = buildReturnSeries(returns);
   const positiveWindows = returnSeries.filter((item) => item.value > 0).length;
@@ -1022,20 +1047,107 @@ function DetailContent({ detail, huntAdvice, huntLoading, onHunt }: { detail: St
   );
 }
 
-type MetricTone = "good" | "warn" | "bad" | "neutral";
+type AdvancedInsight = {
+  label: string;
+  title: string;
+  detail: string;
+  badge?: string;
+  tone: AdvancedInsightTone;
+};
+
+function buildAdvancedInsights(detail: StockDetailResponse): AdvancedInsight[] {
+  const technicals = detail.technicals;
+  const cards: AdvancedInsight[] = [];
+  const rank = detail.peerRank?.rank;
+  const count = detail.peerRank?.count;
+  const qualityFacts = [
+    detail.business?.roe != null ? `ROE ${formatPercent(detail.business.roe)}` : null,
+    detail.business?.profitMargin != null ? `margin ${formatPercent(detail.business.profitMargin)}` : null,
+    detail.business?.revenueGrowth != null ? `revenue growth ${formatPercent(detail.business.revenueGrowth)}` : null,
+  ].filter(Boolean).join(" · ");
+
+  if ((rank && count) || qualityFacts) {
+    const percentile = rank && count ? Math.ceil((rank / count) * 100) : null;
+    cards.push({
+      label: "Comparative position",
+      title: rank && count ? `#${rank} of ${count} in its peer screen` : "Business quality snapshot",
+      badge: percentile ? `Top ${percentile}%` : "Reported data",
+      detail: qualityFacts || `Peer ranking is based on the current ${detail.peerRank?.industry ?? "industry"} screen.`,
+      tone: rank === 1 || (percentile != null && percentile <= 20) ? "green" : "neutral",
+    });
+  }
+
+  if (technicals?.dowTheory) {
+    const dow = technicals.dowTheory;
+    const structure = [dow.higherHigh ? "higher high" : null, dow.higherLow ? "higher low" : null, dow.lowerHigh ? "lower high" : null, dow.lowerLow ? "lower low" : null].filter(Boolean).join(" + ");
+    cards.push({
+      label: "Dow theory",
+      title: humanizeSignal(dow.trend),
+      badge: humanizeSignal(dow.confirmation),
+      detail: structure ? `Recent 20-session structure: ${structure}. Trend confirmation uses the 1-week, 1-month, and 3-month windows.` : "The recent swing structure does not yet confirm a directional trend.",
+      tone: dow.trend.includes("UP") ? "blue" : dow.trend.includes("DOWN") ? "amber" : "neutral",
+    });
+  }
+
+  if (technicals?.wyckoff) {
+    const wyckoff = technicals.wyckoff;
+    const readings = [wyckoff.rangePositionPct != null ? `${formatNumber(wyckoff.rangePositionPct)}% through its 60-session range` : null, wyckoff.volumeRatio != null ? `${formatMultiple(wyckoff.volumeRatio)} volume` : null].filter(Boolean).join(" · ");
+    cards.push({
+      label: "Wyckoff logic",
+      title: humanizeSignal(wyckoff.phase),
+      badge: "Heuristic",
+      detail: `${readings ? `${readings}. ` : ""}${wyckoff.note}`,
+      tone: wyckoff.phase.includes("MARKUP") || wyckoff.phase.includes("ACCUMULATION") ? "amber" : wyckoff.phase.includes("MARKDOWN") || wyckoff.phase.includes("DISTRIBUTION") ? "purple" : "neutral",
+    });
+  }
+
+  if (technicals?.elliottWave) {
+    const wave = technicals.elliottWave;
+    cards.push({
+      label: "Elliott wave",
+      title: humanizeSignal(wave.bias),
+      badge: `${humanizeSignal(wave.confidence)} confidence`,
+      detail: wave.note,
+      tone: wave.bias.includes("UP") ? "purple" : wave.bias.includes("DOWN") ? "amber" : "neutral",
+    });
+  }
+
+  if (technicals?.fibonacci && technicals.fibonacci.direction !== "UNAVAILABLE") {
+    const fib = technicals.fibonacci;
+    const extension = fib.extensions["127.2"];
+    const retracement = fib.retracements["61.8"];
+    cards.push({
+      label: "Fibonacci map",
+      title: `${humanizeSignal(fib.direction)} · 60-session swing`,
+      badge: extension != null ? `127.2% · ${formatCurrency(extension, detail.stock.currency)}` : "Conditional levels",
+      detail: `${retracement != null ? `61.8% retracement: ${formatCurrency(retracement, detail.stock.currency)}. ` : ""}${fib.note}`,
+      tone: "gold",
+    });
+  }
+
+  if (technicals?.multiTimeframe) {
+    const timeframe = technicals.multiTimeframe;
+    const returns = Object.entries(timeframe.returns).filter((entry): entry is [string, number] => entry[1] != null).map(([window, value]) => `${window.toUpperCase()} ${formatPercent(value)}`).join(" · ");
+    cards.push({
+      label: "Multiple timeframe",
+      title: `${humanizeSignal(timeframe.alignment)} alignment`,
+      badge: "Daily closes",
+      detail: `${returns || "Not enough return windows."} ${timeframe.note}`,
+      tone: timeframe.alignment === "BULLISH" ? "green" : timeframe.alignment === "BEARISH" ? "amber" : "neutral",
+    });
+  }
+
+  return cards;
+}
+
+function humanizeSignal(value: string) {
+  return value.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+type MetricTone = DrawerMetricTone;
 
 function Metric({ label, value, tone = "neutral", hint }: { label: string; value: string; tone?: MetricTone; hint?: string }) {
-  const toneClass = metricToneClass(tone);
-  return (
-    <div className="min-w-0 rounded-[8px] border border-[#2a2a31] bg-[#121214] px-3 py-2.5 text-left transition-colors">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="h-1.5 w-1.5 flex-none rounded-full" style={{ background: toneClass.accent }} />
-        <div className={`min-w-0 truncate font-mono text-[10px] uppercase ${toneClass.label}`} title={label}>{label}</div>
-      </div>
-      <div className={`mt-1 font-mono text-[14px] font-bold leading-tight ${toneClass.value}`} title={value}>{value}</div>
-      {hint ? <div className={`mt-1 min-w-0 break-words text-[10.5px] font-medium leading-[1.35] ${toneClass.hint}`} title={hint}>{hint}</div> : null}
-    </div>
-  );
+  return <DrawerMetric label={label} value={value} tone={tone} detail={hint} />;
 }
 
 function metricToneClass(tone: MetricTone) {
@@ -1169,7 +1281,7 @@ function volumeHint(value: number | null | undefined) {
 }
 
 function PanelHeader({ title, description }: { title: string; description?: string }) {
-  return <div className="mb-4"><div className="text-sm font-bold text-[#ececee]">{title}</div>{description ? <div className="mt-1 text-xs text-[#8c8c95]">{description}</div> : null}</div>;
+  return <div className="mb-3"><div className="text-[13px] font-bold text-[#ececee]">{title}</div>{description ? <div className="mt-0.5 text-[11px] text-[#8c8c95]">{description}</div> : null}</div>;
 }
 
 function formatEstimatePeriod(period: string) {
@@ -1213,28 +1325,13 @@ function analystScoreTone(score?: number) {
 }
 
 function ConsensusStat({ label, value, tone }: { label: string; value: number; tone: "good" | "neutral" | "bad" }) {
-  const color = tone === "good" ? "text-[#3ecf8e]" : tone === "bad" ? "text-[#f2575c]" : "text-[#f5c451]";
-  return (
-    <div className="rounded-lg border border-[#23232a] bg-[#101114] px-3 py-2">
-      <div className="text-[10px] uppercase tracking-[.08em] text-[#6d6d76]">{label}</div>
-      <div className={`mt-1 font-mono text-base font-semibold ${color}`}>{value}</div>
-    </div>
-  );
+  return <DrawerMetric label={label} value={value} tone={tone === "neutral" ? "warn" : tone} />;
 }
 
 function InsightPill({ label, value, tone }: { label: string; value: string; tone: "good" | "neutral" | "bad" }) {
-  const color = tone === "good" ? "#3ecf8e" : tone === "bad" ? "#f2575c" : "#74a4ff";
-  return (
-    <div className="rounded-xl border border-[#2a2a31] bg-[#121214] px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />
-        <div className="text-[10px] uppercase text-[#8c8c95]">{label}</div>
-      </div>
-      <div className="mt-1 text-sm font-semibold" style={{ color }}>{value}</div>
-    </div>
-  );
+  return <DrawerMetric label={label} value={value} tone={tone} />;
 }
 
 function DetailSkeleton({ symbol }: { symbol: string | null }) {
-  return <div className="flex flex-col gap-4" aria-label={`Loading live detail for ${symbol ?? "stock"}`} aria-busy="true"><div className="rounded-2xl border border-[#285f48] bg-[#173528] px-4 py-3 text-sm font-semibold text-[#3ecf8e]">Loading live price history, fundamentals, and technical signals…</div><div className={panel}><div className="skeleton-block h-56"/><div className="mt-4 grid grid-cols-2 gap-4"><div className="skeleton-block h-32"/><div className="skeleton-block h-32"/></div></div></div>;
+  return <div className="flex flex-col gap-4" aria-label={`Loading live detail for ${symbol ?? "stock"}`} aria-busy="true"><div className="rounded-[var(--aw-radius-card)] border border-[#285f48] bg-[#173528] px-4 py-3 text-sm font-semibold text-[#3ecf8e]">Loading live price history, fundamentals, and technical signals…</div><div className={panel}><div className="skeleton-block h-56"/><div className="mt-4 grid grid-cols-2 gap-4"><div className="skeleton-block h-32"/><div className="skeleton-block h-32"/></div></div></div>;
 }

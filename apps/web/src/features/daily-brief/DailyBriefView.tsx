@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { AgentByline } from "../../components/agents/AgentByline";
+import { AgentCall } from "../../components/agents/AgentCall";
+import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ErrorCard, LoadingPanel, RetryPanel } from "../../components/ui/panels";
 import { PillTabs } from "../../components/ui/PillTabs";
 import { TagPill } from "../../components/ui/Badge";
+import { Ring } from "../../lib/ring";
 import type { TodayPerformanceResponse } from "../../lib/api";
 import { formatCurrency, formatMoneyBaht, formatPercent } from "../../lib/format";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
@@ -28,15 +30,10 @@ export function DailyBriefView({ brief }: { brief: DailyBrief }) {
 
   return (
     <div className="flex flex-col gap-3.5">
-      <section className="rounded-xl border border-[#2a2a31] bg-[#161619] p-5">
+      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-5">
         <div className="text-xs font-semibold uppercase tracking-[.14em] text-[#3ecf8e]">Your holdings today</div>
         <h2 className="mt-1 text-lg font-semibold">{brief.rows.length ? triageHeadline(brief) : "Add holdings to get a daily read"}</h2>
         <p className="mt-1 max-w-[560px] text-sm text-[#8c8c95]">{brief.summary}</p>
-        <div className="mt-3 flex flex-wrap gap-2">
-          <TagPill label={`${brief.counts.hold} chill`} color={TRIAGE_COPY.hold.color} />
-          <TagPill label={`${brief.counts.watch} watch`} color={TRIAGE_COPY.watch.color} />
-          <TagPill label={`${brief.counts.needs_you} sell`} color={TRIAGE_COPY.needs_you.color} />
-        </div>
       </section>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -106,7 +103,7 @@ function BriefQueueRow({
 
   return (
     <div className="flex flex-col gap-2">
-      <article className="grid gap-3 rounded-[10px] border border-[#26262c] bg-[#151518] p-3.5 min-[820px]:grid-cols-[180px_minmax(0,1fr)_172px] min-[820px]:items-center">
+      <article className="grid gap-3 rounded-[10px] border border-[#26262c] bg-[#151518] p-3.5 min-[820px]:grid-cols-[180px_minmax(0,1fr)_200px] min-[820px]:items-center">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
             <span className="font-mono text-[18px] font-bold text-[#ececee]">{row.symbol}</span>
@@ -130,11 +127,18 @@ function BriefQueueRow({
         </div>
         <div className="flex min-w-0 items-center justify-between gap-3 min-[820px]:justify-end">
           {state?.loading || aiScore != null ? (
-            <div className="text-right">
-              <div className="font-mono text-[22px] font-bold leading-none" style={{ color: aiScore != null ? toneColor(aiTone) : "#6f6f78" }}>
-                {state?.loading ? "···" : aiScore}
+            <div className="flex flex-col items-center gap-1">
+              <div className="relative h-12 w-12 flex-none">
+                {state?.loading ? (
+                  <div className="grid h-12 w-12 place-items-center"><LoadingSpinner size={18} className="text-[#6f6f78]" /></div>
+                ) : (
+                  <>
+                    <Ring score={aiScore ?? 0} color={toneColor(aiTone)} size={48} stroke={5} />
+                    <div className="absolute inset-0 grid place-items-center font-mono text-[15px] font-bold" style={{ color: toneColor(aiTone) }}>{aiScore}</div>
+                  </>
+                )}
               </div>
-              <div className="mt-1 text-[9px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">ai score</div>
+              <div className="whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">ai score</div>
             </div>
           ) : null}
           <PremiumAiButton
@@ -149,11 +153,16 @@ function BriefQueueRow({
       </article>
 
       {open ? (
-        <section className="relative">
-          <button type="button" onClick={() => setOpen(false)} className="absolute right-3 top-3 z-10 rounded-[7px] border border-[#2a2a31] bg-[#0e0e10]/90 px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-[#8c8c95] hover:text-[#ececee]">
-            Close
-          </button>
-          {state?.loading ? <PremiumLoading title={agentLoadingTitle(agentId, "analyst", row.symbol)} subject={row.symbol} agentId={agentId} task="analyst" /> : null}
+        <section className="flex flex-col gap-2">
+          {state?.loading ? (
+            <PremiumLoading title={agentLoadingTitle(agentId, "analyst", row.symbol)} subject={row.symbol} agentId={agentId} task="analyst" onClose={() => setOpen(false)} />
+          ) : (
+            <div className="flex items-center justify-end">
+              <button type="button" onClick={() => setOpen(false)} className="rounded-[var(--aw-radius-chip)] border border-[#2a2a31] bg-[#0e0e10] px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-[#8c8c95] hover:text-[#ececee]">
+                Close
+              </button>
+            </div>
+          )}
           {state?.error ? <ErrorCard message={state.error} /> : null}
           {state?.data ? <TodayPanel data={state.data} /> : null}
         </section>
@@ -173,22 +182,7 @@ function TodayPanel({ data }: { data: TodayPerformanceResponse }) {
   const color = toneColor(data.tone);
   const plan = data.todayVsPlan;
   return (
-    <div className="rounded-[14px] border bg-[#161619] p-5" style={{ borderColor: `${color}55` }}>
-      <AgentByline agent={data.agent} label="Today's read" />
-      <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          <div className="inline-flex rounded-[7px] border px-3 py-1 font-mono text-[11px] font-bold uppercase tracking-[0.06em]" style={{ borderColor: `${color}66`, color }}>
-            {data.signal}
-          </div>
-          <h3 className="mt-2 text-[16px] font-bold leading-snug text-[#ececee]">{data.headline}</h3>
-          <p className="mt-2 text-[13px] leading-[1.6] text-[#cfcfd4]">{data.summary}</p>
-        </div>
-        <div className="flex h-[76px] w-[76px] flex-none flex-col items-center justify-center rounded-[16px] border bg-[#0e0e10]" style={{ borderColor: `${color}66` }}>
-          <div className="font-mono text-[26px] font-extrabold leading-none" style={{ color }}>{data.buyScore}</div>
-          <div className="mt-1 text-[8px] uppercase tracking-[0.08em] text-[#8c8c95]">today setup</div>
-        </div>
-      </div>
-
+    <AgentCall agent={data.agent} label="Today's read" score={data.buyScore} scoreLabel="today setup" signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Today only · generated on request · not financial advice">
       <div className="mt-4 rounded-[11px] border border-[#2a2a31] bg-[#0e0e10] p-3.5">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#8c8c95]">Today vs plan</div>
@@ -240,7 +234,7 @@ function TodayPanel({ data }: { data: TodayPerformanceResponse }) {
         <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">Risk</div>
         <p className="mt-1 text-[12.5px] leading-[1.55] text-[#9b9ba3]">{data.risk}</p>
       </div>
-    </div>
+    </AgentCall>
   );
 }
 
@@ -294,7 +288,7 @@ function Sparkline({ points, tone }: { points: number[]; tone: "good" | "bad" })
   return (
     <svg viewBox="0 0 100 32" preserveAspectRatio="none" className="mt-3 h-8 w-full max-w-[190px] overflow-visible rounded-[7px] border border-[#24242a] bg-[#101012]">
       <path d={`${path} L 100 32 L 0 32 Z`} fill={color} opacity="0.1" />
-      <path d={path} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={path} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }

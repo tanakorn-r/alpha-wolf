@@ -1,6 +1,5 @@
 import { EmptyPanel, LoadingPanel } from "../../components/ui/panels";
-import { AgentSignoff } from "../../components/agents/AgentByline";
-import { AgentRecap } from "../../components/agents/AgentRecap";
+import { AgentCall } from "../../components/agents/AgentCall";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import type { ValuationVerdictResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
@@ -49,7 +48,7 @@ function ValuationState({
   }
 
   return (
-    <section className="overflow-hidden rounded-[10px] border border-[#2a2a31] bg-[#1a1a1e]">
+    <section className="overflow-hidden rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#1a1a1e]">
       <div className="px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-[11px]">
           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-[11px]">
@@ -72,40 +71,32 @@ function ValuationState({
   );
 }
 
-function ValuationVerdict({ verdict, analyzedAt, fetching, onRun, onOpen }: { verdict: ValuationVerdictResponse; analyzedAt: string; fetching: boolean; onRun: () => void; onOpen: () => void }) {
+function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: ValuationVerdictResponse; analyzedAt: string; fetching: boolean; onRun: () => void; onOpen: () => void }) {
   const band = buildStructureBand(verdict);
   const theme = verdictTheme(verdict.verdict, verdict.rightNow.action, band.currentZone);
-  const zone = zoneMeta(band.currentZone);
   return (
     <div className="flex flex-col gap-2.5">
-      <section className="overflow-hidden rounded-[10px] border bg-[#161619]" style={{ borderColor: theme.cardBorder }}>
-        <div className="p-[1.5px]" style={{ background: theme.frame }}>
-        <div className="flex flex-wrap items-center gap-2.5 bg-[#1a1a1e] px-4 py-2.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-[11px]">
-            <span className="font-mono text-[16px] font-extrabold text-[#ececee]">{verdict.symbol}</span>
-            <span className="min-w-0 text-[11px] text-[#8c8c95]">{verdict.name}</span>
-            <span className="rounded-[5px] border px-[10px] py-[3px] text-[10px] font-bold tracking-[0.04em]" style={{ borderColor: zone.border, color: zone.color, background: zone.bg }}>
-              {verdictLabel(verdict.verdict, verdict.rightNow.action, band.currentZone)}
-            </span>
-          </div>
-          <span className="ml-auto flex-none font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">
-            Last sync {formatAnalyzedAt(analyzedAt)}
-          </span>
-          <PremiumAiButton label={fetching ? "Running" : "Refresh"} sublabel="Valuation" disabled={fetching} loading={fetching} onClick={onRun} size="xs" />
+      <AgentCall
+        agent={verdict.agent}
+        label="Daily valuation"
+        score={verdict.rightNow.conviction}
+        scoreLabel="Agent perspective"
+        signal={verdictLabel(verdict.verdict, verdict.rightNow.action, band.currentZone)}
+        headline={`${verdict.symbol} · ${verdict.name}`}
+        summary={verdict.recap ?? verdict.narrative ?? verdict.rightNow.note}
+        accent={theme.accent}
+        meta={`Cached ${formatAnalyzedAt(analyzedAt)} · supplied fundamentals only · not financial advice`}
+        onRerun={onRun}
+      >
+        <div className="mt-4 flex justify-end">
+          <button type="button" onClick={onOpen} className="rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2 text-[11px] font-bold text-[#bcbcc2] hover:border-[#3ecf8e]">Open stock detail</button>
         </div>
-        </div>
-
-        <div className="flex flex-col gap-2.5 p-3.5">
-          <AgentRecap agent={verdict.agent} recap={verdict.recap ?? verdict.narrative} fit={verdict.agentFit} reason={verdict.agentFitReason} quoteOnly className="" />
+        <div className="mt-4 flex flex-col gap-2.5">
           <MetricGrid verdict={verdict} theme={theme} />
           <StructureBand band={band} />
           <Evidence verdict={verdict} />
-          <AgentSignoff agent={verdict.agent} />
         </div>
-      </section>
-      <div className="pb-0.5 text-center font-mono text-[10px] text-[#5a5a62]">
-        AI valuation · cached {formatAnalyzedAt(analyzedAt)} · supplied fundamentals only · not financial advice
-      </div>
+      </AgentCall>
     </div>
   );
 }

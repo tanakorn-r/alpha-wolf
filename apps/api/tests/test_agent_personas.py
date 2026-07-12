@@ -24,12 +24,14 @@ class AgentPersonaTests(unittest.TestCase):
         outlook_titles = [ANALYST_PERSPECTIVES[agent_id]["outlookTitle"] for agent_id in ids]
         section_sets = [ANALYST_PERSPECTIVES[agent_id]["sections"] for agent_id in ids]
         sizing_methods = [ANALYST_PERSPECTIVES[agent_id]["sizing"] for agent_id in ids]
+        analytics = [ANALYST_PERSPECTIVES[agent_id]["analytics"] for agent_id in ids]
 
         self.assertEqual(set(ANALYST_PERSPECTIVES), ids)
         self.assertEqual(len(north_stars), len(set(north_stars)))
         self.assertEqual(len(outlook_titles), len(set(outlook_titles)))
         self.assertEqual(len(section_sets), len(set(section_sets)))
         self.assertEqual(len(sizing_methods), len(set(sizing_methods)))
+        self.assertEqual(len(analytics), len(set(analytics)))
 
     def test_analyst_prompts_change_horizon_and_method(self) -> None:
         vera = compose_instructions("Return longTermView.", "vera", analyst_task=True)
@@ -55,6 +57,11 @@ class AgentPersonaTests(unittest.TestCase):
         self.assertIn("internally generated cash versus debt/equity funding", ben)
         self.assertIn("ALLOCATION LADDER", ben)
         self.assertIn("not automatic AVOID", ben)
+        self.assertIn("comparative advantage", ben)
+        self.assertIn("quote-screen noise", ben)
+        self.assertIn("Dow Theory, Wyckoff phase", rex)
+        self.assertIn("Elliott is low-weight/heuristic", nadia)
+        self.assertIn("Fibonacci extensions", kai)
         self.assertIn("do not average them", prime)
 
     def test_daily_brief_horizons_are_agent_specific(self) -> None:

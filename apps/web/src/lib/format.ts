@@ -26,7 +26,9 @@ export function formatMoneyAs(value: number | undefined, currency: "USD" | "THB"
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
   const converted = value * FX_RATES[currency];
   const sign = converted < 0 ? "-" : "";
-  return `${sign}${CURRENCY_SYMBOL[currency]}${Math.abs(Math.round(converted)).toLocaleString("en-US")}`;
+  // A thin space keeps the ฿ glyph from visually colliding with a leading digit
+  // (some fonts give it a wide right sidebearing that overlaps a following "0").
+  return `${sign}${CURRENCY_SYMBOL[currency]} ${Math.abs(Math.round(converted)).toLocaleString("en-US")}`;
 }
 
 /** value is always in USD base; formats it as the app's default display currency (THB). */

@@ -1,14 +1,10 @@
 import type { ReactNode } from "react";
-import { usePageTranslate } from "../../lib/usePageTranslate";
-import { useWolfStore } from "../../store/useWolfStore";
 import { RiskDisclaimer } from "../ui/RiskDisclaimer";
 import { AppHeader } from "./AppHeader";
 import { AppSidebar } from "./AppSidebar";
 import { MobileNav } from "./MobileNav";
 
 export function AppLayout({ children }: { children: ReactNode }) {
-  const language = useWolfStore((state) => state.language);
-  usePageTranslate(language);
   return (
     <div className="aw-app-shell min-h-screen">
       <div className="aw-shell min-h-screen">

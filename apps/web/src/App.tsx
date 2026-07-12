@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { AppLayout } from "./components/layout/AppLayout";
+import { LoadingSpinner } from "./components/LoadingSpinner";
 import { DeepAnalysisPanel } from "./components/DeepAnalysisPanel";
 import { StockDetailDrawer } from "./features/stock-detail/StockDetailDrawer";
 import { DashboardPage } from "./pages/DashboardPage";
@@ -18,7 +19,9 @@ const VISITED_STORAGE_KEY = "aw_visited_app";
 // Native (Capacitor) users already installed the app to use it — never show marketing there.
 // On web, a brand-new anonymous visitor sees the landing page once; anyone signed in, or who has
 // already been through the app once on this device, goes straight to the Dashboard like before.
-function useShowLanding(): boolean {
+type HomeDestination = "pending" | "landing" | "app";
+
+function useHomeDestination(): HomeDestination {
   const native = Capacitor.isNativePlatform();
   const [visited, setVisited] = useState(() => typeof window !== "undefined" && window.localStorage.getItem(VISITED_STORAGE_KEY) === "1");
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
@@ -35,15 +38,27 @@ function useShowLanding(): boolean {
     }
   }, [native, signedIn, visited]);
 
-  if (native || visited) return false;
-  if (authQuery.isPending) return false;
-  return !signedIn;
+  // Native never needs the auth round-trip to decide. On web, always wait for auth to resolve
+  // before mounting the Dashboard — jumping straight there on a stale "visited" flag (before we
+  // know the session is still valid) is what caused the visible skeleton-then-content blink on
+  // every hard refresh, since Dashboard's own skeleton is a different shape from its real layout.
+  if (native) return "app";
+  if (authQuery.isPending) return "pending";
+  if (visited || signedIn) return "app";
+  return "landing";
 }
 
 function HomeRoute() {
-  const showLanding = useShowLanding();
+  const destination = useHomeDestination();
   const [entered, setEntered] = useState(false);
-  if (showLanding && !entered) {
+  if (destination === "pending") {
+    return (
+      <div className="grid min-h-screen place-items-center bg-[#0e0e10] text-[#3ecf8e]" role="status" aria-label="Loading Alpha Wolf">
+        <LoadingSpinner size={22} />
+      </div>
+    );
+  }
+  if (destination === "landing" && !entered) {
     return (
       <LandingPage
         onEnter={() => {

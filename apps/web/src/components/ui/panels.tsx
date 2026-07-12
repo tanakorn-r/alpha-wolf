@@ -1,6 +1,7 @@
 import { LoadingSpinner } from "../LoadingSpinner";
+import { surfaceClasses } from "./Surface";
 
-const panel = "rounded-[10px] border border-[#2a2a31] bg-[#161619]";
+const panel = surfaceClasses.card;
 
 export function LoadingPanel({ title, body }: { title: string; body?: string }) {
   return (

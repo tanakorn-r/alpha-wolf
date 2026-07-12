@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
-import { AgentByline } from "../../components/agents/AgentByline";
+import { AgentCall } from "../../components/agents/AgentCall";
 import { TagPill } from "../../components/ui/Badge";
 import { EmptyPanel } from "../../components/ui/panels";
 import type { HistoricalMove, UpwardMovesResponse } from "../../lib/api";
@@ -56,26 +56,8 @@ export function Next100Result({ report, timeframe, onRerun, canRerun, analyzedAt
 
   return (
     <div className="flex flex-col gap-3">
-      <div className={`${panel} overflow-hidden`}>
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#24242a] px-4 py-3">
-          <div>
-            <AgentByline agent={report.agent} label="Forecast agent" className="mb-2" />
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="text-[16px] font-bold">Next 10 Forecast · <span className="font-mono text-[#3ecf8e]">{report.symbol}</span></div>
-              <TagPill label={timeframe} color="#c77dff" />
-              <TagPill label={windowLabel[timeframe] ?? "per move"} color="#74a4ff" />
-            </div>
-            <div className="mt-1 text-[12px] text-[#8c8c95]">Past movement first, forecast second. Cached {formatAnalyzedAt(analyzedAt)}.</div>
-          </div>
-          <div className="ml-auto flex flex-none flex-wrap items-center justify-end gap-2">
-            <span className="font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">
-              Last sync {formatAnalyzedAt(analyzedAt)}
-            </span>
-            <PremiumAiButton label="Refresh" sublabel="Next 10" disabled={!canRerun} onClick={onRerun} size="compact" />
-          </div>
-        </div>
-
-        <div className="grid gap-0 min-[820px]:grid-cols-3">
+      <AgentCall agent={report.agent} label="Forecast agent" score={avgConfidence} scoreLabel="scenario confidence" signal={gain >= 0 ? "UPSIDE PATH" : "RISK PATH"} headline={`Next 10 Forecast · ${report.symbol}`} summary={`Past movement first, forecast second. The model maps ${rows.length} future moves from ${formatCurrency(report.currentPrice, currency)} to ${formatCurrency(finalPrice, currency)}.`} accent={forecastColor} meta={`Cached ${formatAnalyzedAt(analyzedAt)} · scenario, not a guaranteed trade`} onRerun={canRerun ? onRerun : undefined}>
+        <div className="mt-5 grid overflow-hidden rounded-[12px] border border-[#24242a] min-[820px]:grid-cols-3">
           <TapeSummaryCard
             label="1. Last 10 days"
             value={`${backtradeReturn >= 0 ? "+" : ""}${backtradeReturn.toFixed(1)}%`}
@@ -95,7 +77,7 @@ export function Next100Result({ report, timeframe, onRerun, canRerun, analyzedAt
             body="Treat this as one technical scenario. The past 10 days explain the setup; the next 10 moves show the model's expected path, not a guaranteed trade."
           />
         </div>
-      </div>
+      </AgentCall>
 
       <div className={`${panel} px-4 pb-3 pt-4`}>
         <div className="mb-3 flex flex-wrap items-start justify-between gap-2.5">

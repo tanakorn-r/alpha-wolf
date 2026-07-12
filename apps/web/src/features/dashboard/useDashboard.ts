@@ -6,10 +6,16 @@ import { priceToUsdBase } from "../../lib/format";
 
 export type Dashboard = ReturnType<typeof useDashboard>;
 
+// Bump when the portfolio review prompt/shape changes so a persisted browser cache
+// can't make a newly fixed Agent appear to repeat an older, generic review.
+const PORTFOLIO_REVIEW_CACHE_VERSION = "v1";
+
 export function useDashboard() {
   const openDetail = useWolfStore((state) => state.openDetail);
   const setPortfolioSummary = useWolfStore((state) => state.setPortfolioSummary);
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
+  const getHuntAiCache = useWolfStore((state) => state.getHuntAiCache);
+  const setHuntAiCache = useWolfStore((state) => state.setHuntAiCache);
   const [actionError, setActionError] = useState("");
   const [analysis, setAnalysis] = useState<PortfolioReviewResponse | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -33,11 +39,24 @@ export function useDashboard() {
   const hasPlan = (portfolio?.dcaOrders.length ?? 0) > 0;
   const hasIncome = (portfolio?.incomeEvents.length ?? 0) > 0;
 
+  const reviewCacheKey = `${accountScope}:${PORTFOLIO_REVIEW_CACHE_VERSION}:portfolio-review:${activeAgentId}`;
+  const reviewCached = getHuntAiCache<PortfolioReviewResponse>(reviewCacheKey);
+  // Re-key on the active Agent: a review for a different Agent (in local state or
+  // the persisted cache) must never render as if it were the current Agent's take.
+  const review =
+    analysis?.agent.id === activeAgentId
+      ? analysis
+      : reviewCached?.data.agent.id === activeAgentId
+        ? reviewCached.data
+        : null;
+
   async function askAi() {
     if (!portfolio?.holdings.length) return;
     setAnalyzing(true);
     try {
-      setAnalysis(await loadPortfolioReview(activeAgentId, true));
+      const result = await loadPortfolioReview(activeAgentId, true);
+      setAnalysis(result);
+      setHuntAiCache(reviewCacheKey, { analyzedAt: new Date().toISOString(), data: result });
     } catch {
       setActionError("AI analysis could not be generated.");
     } finally {
@@ -59,7 +78,7 @@ export function useDashboard() {
     isFetching: portfolioQuery.isFetching,
     actionError,
     activeAgentId,
-    analysis,
+    analysis: review,
     analyzing,
     sellTarget,
     selling,

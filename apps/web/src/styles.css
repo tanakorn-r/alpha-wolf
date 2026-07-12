@@ -57,6 +57,16 @@
      line lengths, aligned header/content) on ultra-wide screens. No effect at
      <=1440px — normal desktops and mobile are unchanged. */
   --aw-content-max: 1400px;
+  --aw-canvas: #0e0e10;
+  --aw-surface: #161619;
+  --aw-surface-active: #1c1c20;
+  --aw-border: #2a2a31;
+  --aw-text: #ececee;
+  --aw-text-muted: #8c8c95;
+  --aw-radius-chip: 8px;
+  --aw-radius-control: 10px;
+  --aw-radius-card: 16px;
+  --aw-radius-frame: 22px;
 }
 
 html,

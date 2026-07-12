@@ -57,7 +57,12 @@
     <link rel="icon" type="image/png" href="/icon-192.png" />
   </head>
   <body>
-    <div id="root">
+    <div id="root"></div>
+    <!-- Seen only by clients that don't execute JavaScript (basic crawlers/scrapers) — a real
+         browser always mounts the React app into #root above and never paints this. It used to
+         live inside #root itself, which meant every visitor saw it flash before React took over
+         on every single page load, on every route. -->
+    <noscript>
       <main style="max-width:1100px;margin:0 auto;padding:72px 24px;color:#ececee;background:#0e0e10;font-family:system-ui,sans-serif">
         <p style="color:#3ecf8e;font:600 12px ui-monospace,monospace">AI AGENT INVESTING · THAI SET + US STOCKS</p>
         <h1 style="max-width:760px;font-size:48px;line-height:1.08;margin:18px 0">An AI Agent desk for your Thai and US stock portfolio</h1>
@@ -69,7 +74,7 @@
         </nav>
         <section style="margin-top:44px"><h2>Five Agents, five decision methods</h2><p style="color:#a0a0a8;line-height:1.7">Ben studies owner earnings and durable business quality. Sam focuses on dividend income and payout safety. Vera applies CFA-level banking, cash-flow, capital-structure, and valuation discipline. Rex reads momentum and volume. Nadia relies on measurable quantitative evidence. Each Agent keeps its own character rather than repeating one generic answer.</p></section>
       </main>
-    </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

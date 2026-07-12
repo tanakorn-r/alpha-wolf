@@ -8,7 +8,6 @@ const N100_QUOTA_STORAGE_KEY = "aw_n100_quota_used";
 const N100_REPORT_CACHE_STORAGE_KEY = "aw_n100_report_cache";
 const HUNT_AI_CACHE_STORAGE_KEY = "aw_hunt_ai_cache";
 const ACTIVE_AGENT_STORAGE_KEY = "aw_active_agent";
-const LANGUAGE_STORAGE_KEY = "aw_language";
 const DEFAULT_AGENT_ID = "vera";
 export const N100_QUOTA_LIMIT = 100;
 
@@ -41,7 +40,6 @@ type WolfState = {
   next10ReportCache: Record<string, Next10ReportCacheEntry>;
   huntAiCache: Record<string, HuntAiCacheEntry>;
   activeAgentId: string;
-  language: "en" | "th";
   setStrategy: (strategy: StrategyKey) => void;
   setSelectedMode: (mode: DetailMode | null) => void;
   setSelectedSymbol: (symbol: string) => void;
@@ -62,7 +60,6 @@ type WolfState = {
   setHuntAiCache: <T>(key: string, entry: HuntAiCacheEntry<T>) => void;
   getHuntAiCache: <T>(key: string) => HuntAiCacheEntry<T> | undefined;
   setActiveAgent: (agentId: string) => void;
-  setLanguage: (language: "en" | "th") => void;
   clearAccountState: () => void;
 };
 
@@ -129,11 +126,6 @@ function persistActiveAgent(agentId: string) {
   if (typeof window !== "undefined") window.localStorage.setItem(ACTIVE_AGENT_STORAGE_KEY, agentId);
 }
 
-function loadLanguage(): "en" | "th" {
-  const raw = typeof window !== "undefined" ? window.localStorage.getItem(LANGUAGE_STORAGE_KEY) : null;
-  return raw === "th" ? "th" : "en";
-}
-
 export const useWolfStore = create<WolfState>((set, get) => ({
   selectedStrategy: "stable_dca",
   selectedMode: null,
@@ -151,7 +143,6 @@ export const useWolfStore = create<WolfState>((set, get) => ({
   next10ReportCache: loadNext10ReportCache(),
   huntAiCache: loadHuntAiCache(),
   activeAgentId: loadActiveAgent(),
-  language: loadLanguage(),
   setStrategy: (selectedStrategy) => set({ selectedStrategy }),
   setSelectedMode: (selectedMode) => set({ selectedMode }),
   setSelectedSymbol: (selectedSymbol) => set({ selectedSymbol }),
@@ -197,10 +188,6 @@ export const useWolfStore = create<WolfState>((set, get) => ({
   setActiveAgent: (activeAgentId) => {
     persistActiveAgent(activeAgentId);
     set({ activeAgentId });
-  },
-  setLanguage: (language) => {
-    if (typeof window !== "undefined") window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language);
-    set({ language });
   },
   clearAccountState: () => {
     persistNext10ReportCache({});

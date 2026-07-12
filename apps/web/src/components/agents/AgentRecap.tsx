@@ -25,7 +25,7 @@ export function AgentRecap({
   const color = agent?.color ?? meta.fallbackColor;
   return (
     <div
-      className={`relative overflow-hidden rounded-[10px] border px-3.5 py-3 shadow-[0_18px_54px_rgba(0,0,0,0.28)] ${className}`}
+      className={`relative overflow-hidden rounded-[var(--aw-radius-control)] border px-3.5 py-3 shadow-[0_18px_54px_rgba(0,0,0,0.28)] ${className}`}
       style={{
         borderColor: `${color}66`,
         background: `radial-gradient(circle at 6% 0%, ${color}2b, transparent 34%), radial-gradient(circle at 92% 15%, ${color}1c, transparent 30%), linear-gradient(135deg, ${color}12, rgba(14,14,16,0.82) 56%, rgba(14,14,16,0.96))`,

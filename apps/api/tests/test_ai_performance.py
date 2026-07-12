@@ -9,7 +9,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from internal.ai.context import _funding_quality_audit, build_analysis_context
+from internal.ai.context import _funding_quality_audit, _structural_advantage_audit, build_analysis_context
 from internal.ai.openai_client import _normalize_today_scenarios, _selected_model
 from internal.market.technicals import build_technicals
 from models import BuyTimingNarrative, StockAnalysis, TodayPerformance
@@ -213,6 +213,12 @@ class AiPerformanceTests(unittest.TestCase):
 
         self.assertIsNotNone(technicals["stochasticK"])
         self.assertIsNotNone(technicals["stochasticD"])
+        self.assertIn("trend", technicals["dowTheory"])
+        self.assertIn("phase", technicals["wyckoff"])
+        self.assertIn("bias", technicals["elliottWave"])
+        self.assertEqual(technicals["fibonacci"]["direction"], "UPSWING")
+        self.assertIn("127.2", technicals["fibonacci"]["extensions"])
+        self.assertIn(technicals["multiTimeframe"]["alignment"], {"BULLISH", "BEARISH", "MIXED"})
 
     def test_owner_earnings_audit_distinguishes_cash_from_debt(self) -> None:
         financials = {
@@ -239,6 +245,28 @@ class AiPerformanceTests(unittest.TestCase):
         audit = _funding_quality_audit(financials, {"totalCash": 25})
 
         self.assertTrue(audit["fundingRead"].startswith("RISK"))
+
+    def test_structural_advantage_never_invents_monopoly(self) -> None:
+        financials = {
+            "incomeStatement": {"latest": {"Net Income": 100}},
+            "cashFlow": {"latest": {"Operating Cash Flow": 160, "Free Cash Flow": 120}},
+            "balanceSheet": {"latest": {"Total Debt": 20}},
+        }
+        business = {
+            "grossMargin": 60,
+            "operatingMargin": 30,
+            "roe": 25,
+            "revenueGrowth": 12,
+            "dividendYield": 2.5,
+            "payoutRatio": 40,
+            "totalCash": 100,
+        }
+
+        audit = _structural_advantage_audit(business, financials)
+
+        self.assertEqual(audit["comparativeAdvantageStatus"], "STRONG_PROXY")
+        self.assertEqual(audit["dividendQuality"]["status"], "SUPPORTED_PROXY")
+        self.assertTrue(audit["monopolyEvidence"].startswith("UNPROVEN"))
 
     def test_tomorrow_probabilities_must_total_one_hundred(self) -> None:
         payload = {

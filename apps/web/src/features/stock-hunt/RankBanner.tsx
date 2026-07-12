@@ -17,7 +17,7 @@ export function RankBanner({ hunt }: { hunt: StockHunt }) {
         </p>
       </div>
       {hunt.top5State === "loading" ? (
-        <div className="flex flex-none items-center gap-2.5 rounded-[10px] border border-[#2a2a31] bg-[#161619] px-4 py-3 text-[13px] text-[#8c8c95]">
+        <div className="flex flex-none items-center gap-2.5 rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] px-4 py-3 text-[13px] text-[#8c8c95]">
           <LoadingSpinner size={14} />
           Ranking live candidates…
         </div>
