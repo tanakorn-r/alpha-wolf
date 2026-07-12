@@ -51,8 +51,8 @@ class GoogleAuthTests(unittest.TestCase):
         with patch("routes.auth._verify_google_token", return_value=claims):
             login_response = Response()
             login = auth.google_login(
-                auth.GoogleCredential(credential="x" * 40),
-                _request({auth.NONCE_COOKIE: str(nonce)}),
+                auth.GoogleCredential(credential="x" * 40, nonce=str(nonce)),
+                _request(),
                 login_response,
             )
 
@@ -71,8 +71,8 @@ class GoogleAuthTests(unittest.TestCase):
         with patch("routes.auth._verify_google_token", return_value=claims):
             with self.assertRaises(HTTPException) as raised:
                 auth.google_login(
-                    auth.GoogleCredential(credential="x" * 40),
-                    _request({auth.NONCE_COOKIE: "expected"}),
+                    auth.GoogleCredential(credential="x" * 40, nonce="expected" * 4),
+                    _request(),
                     Response(),
                 )
 

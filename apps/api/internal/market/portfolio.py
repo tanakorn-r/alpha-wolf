@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -34,7 +35,12 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
     if not holdings:
         return PortfolioDashboard(dcaOrders=orders, markers=[PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders])
 
-    live = [_load_holding_market_data(holding) for holding in holdings]
+    # Each holding's market data is an independent set of cache/yfinance round trips — a
+    # sequential loop pays for every holding back-to-back, which compounds badly on any cache
+    # miss. ThreadPoolExecutor.map runs them concurrently while preserving input order, so the
+    # zip() below still lines up holdings with their data correctly.
+    with ThreadPoolExecutor(max_workers=min(8, len(holdings))) as pool:
+        live = list(pool.map(_load_holding_market_data, holdings))
 
     rows: list[dict[str, object]] = []
     invested = 0.0

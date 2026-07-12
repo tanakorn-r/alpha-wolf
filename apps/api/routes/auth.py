@@ -19,6 +19,7 @@ SESSION_TTL_DAYS = 30
 
 class GoogleCredential(BaseModel):
     credential: str = Field(min_length=20)
+    nonce: str = Field(min_length=20)
 
 
 @router.get("/me")
@@ -53,29 +54,17 @@ def google_bootstrap(request: Request, response: Response) -> dict[str, Any]:
     if not client_id:
         return {"configured": False, "clientId": None, "nonce": None}
     nonce = secrets.token_urlsafe(32)
-    response.set_cookie(
-        NONCE_COOKIE,
-        nonce,
-        max_age=600,
-        httponly=True,
-        secure=_secure_cookie(request),
-        samesite=_cookie_samesite(request),
-        path="/api/auth",
-    )
     return {"configured": True, "clientId": client_id, "nonce": nonce}
 
 
 @router.post("/google")
 def google_login(payload: GoogleCredential, request: Request, response: Response) -> dict[str, Any]:
     client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
-    expected_nonce = request.cookies.get(NONCE_COOKIE)
     if not client_id:
         raise HTTPException(status_code=503, detail="Google sign-in is not configured")
-    if not expected_nonce:
-        raise HTTPException(status_code=400, detail="Google sign-in session expired")
 
     claims = _verify_google_token(payload.credential, client_id)
-    if not secrets.compare_digest(str(claims.get("nonce") or ""), expected_nonce):
+    if not secrets.compare_digest(str(claims.get("nonce") or ""), payload.nonce):
         raise HTTPException(status_code=401, detail="Google sign-in nonce is invalid")
     if not claims.get("email_verified"):
         raise HTTPException(status_code=401, detail="Google email is not verified")

@@ -85,8 +85,12 @@
   background, `#3ecf8e` accent green, `#f2575c` loss red).
 
 **Backend (`apps/api/`)**
-- FastAPI app (`main.py`) + SQLite (`internal/store/`), live market data via
-  `yfinance` (`internal/yahoo/`), AI summaries via OpenAI
+- FastAPI app (`main.py`) + `internal/store/db.py`: local SQLite file in dev,
+  remote Turso/libSQL in production (`TURSO_URL`/`LIBSQL_DATABASE_URL` env var
+  present). The Turso path reuses one process-lifetime connection behind a
+  lock (`connect()`) — never create a second ad hoc connection path; a fresh
+  connection per call was the actual cause of a real ~10s prod latency bug.
+  Live market data via `yfinance` (`internal/yahoo/`), AI summaries via OpenAI
   (`internal/ai/openai_client.py`, gated by `OPENAI_API_KEY` env var).
 - One route file per resource in `routes/`, registered centrally in
   `routes/router.py`. Handlers call into `internal/market/*` for business
@@ -160,12 +164,12 @@
   All tab state lives in `features/hunt-ai/useHuntAi.ts` (grouped return:
   `watchlist/signals/timing/intraday/next100/strategy/analyst`); pure helpers in
   `features/hunt-ai/lib.ts`.
-- Stock detail drawer uses the reference 22/16/10 radius hierarchy, active-Agent Quick Read, equal six-tab navigation, concise Overview (returns/technicals/outlook), and one `DrawerMetric` atom across Overview/Analysis/Calendar/Market; "✦ Deep AI" opens `DeepAnalysisPanel.tsx`.
+- Stock detail drawer uses the reference 22/16/10 radius hierarchy in a compact 1040px frame, active-Agent Quick Read, equal six-tab navigation, reusable `DrawerMetric`, and grounded peer/Dow/Wyckoff/Elliott/Fibonacci/multi-timeframe cards via `AdvancedInsightCard`; "✦ Deep AI" opens `DeepAnalysisPanel.tsx`.
 - Mobile: `apps/web` is wrapped with Capacitor v8 (native projects `apps/web/ios`+`apps/web/android`, config `apps/web/capacitor.config.ts`, appId `com.alphawolf.app`, webDir `dist`). Scripts `cap:sync`/`cap:ios`/`cap:android`/`cap:add:*`. Native build needs `apps/web/.env.production` with absolute `VITE_API_BASE` (no dev proxy on device). Full workflow in `apps/web/MOBILE.md`.
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Fixed a real duplicate-heading regression from earlier this session: when the dead `HuntHero.tsx` was deleted and replaced with a plain "Hunt AI" title+subtitle directly in `HuntAiPage.tsx`, `AppHeader.tsx` (the global layout header, rendered on every route) already independently rendered that exact same title/subtitle for `/hunt-ai` — I hadn't checked it existed. Removed the duplicate block from `HuntAiPage.tsx`; `AppHeader` is the single source for page titles everywhere except `/` (which returns null there and uses its own in-page `SectionHeading` on `DashboardPage`, per the established pattern). tsc clean, verified live via screenshot — single heading now.
+- Found the second real cause of Cloud Run latency after the Turso connection-reuse fix (prior entry) only partially helped: live-tested `GET /api/details/AAPL` directly against prod with `curl` (no auth needed) — first hit 7.2s, next three hits 70-100ms, proving Turso itself is now fast and the remaining cost is a **live yfinance fetch on any cache miss**. Root cause of frequent misses: `internal/yahoo/client.py`'s `MODULES_TTL_SECONDS` was **180** (3 minutes) — far shorter than yfinance's own documented ~15-20min source delay, so it bought nothing but forced a fresh ~7s Yahoo fetch on almost every repeat visit. Bumped to `900` (15min, matches `HISTORY_TTL_SECONDS`) — cuts miss frequency ~5x with only a marginal (not order-of-magnitude) increase in worst-case staleness, since the data was already stale 15-20min at the source regardless of caching. Deliberately did **not** parallelize the 3 sequential per-holding calls (modules/history/dividends in `_load_holding_market_data`) further — they share one `yf.Ticker` object and yfinance's internal thread-safety for concurrent access to the same instance is unverified from here; risk of a real race condition outweighs the win given the TTL fix already addresses most of the repeat-visit cost. `py_compile` clean; not yet redeployed/re-measured.
 
 **Recent Context**
 - **Actual root cause found** for the refresh-time "blink on every page, including /scanner": nothing to do with React Router/`HomeRoute`/the service worker/StrictMode (all ruled out by the user's own test — commenting out `HomeRoute`'s entire landing branch had zero effect, which only makes sense if `HomeRoute` was never involved in the first place). `apps/web/index.html` had a full static SEO/marketing hero section ("An AI Agent desk for your Thai and US stock portfolio", nav links, etc. — added for non-JS AI crawlers) hardcoded directly **inside** `<div id="root">`, visible in plain HTML to every real browser. Since every route serves the same `index.html`, every hard refresh on every page painted this static marketing content first, then React's JS finished loading a moment later and replaced it with the real app — that swap *is* the "different screen flashes then back," unrelated to any app-level code. Fix: `#root` is now empty; the static content moved into a `<noscript>` block after it, so real (JS-enabled) browsers never render or paint it at all, while non-JS crawlers still see it in the raw HTML (unaffected SEO). tsc clean; verified live — server response confirms `#root` starts empty and `<noscript>` is present, screenshot shows the real app rendering correctly. This should be the real fix; the SW/dev-server/StrictMode changes from the false leads earlier this session are harmless and were left in place (StrictMode removal is the only one worth reconsidering restoring later, once this is confirmed fixed).

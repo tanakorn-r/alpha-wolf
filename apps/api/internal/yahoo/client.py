@@ -10,7 +10,7 @@ from internal.store.utils import as_float
 from internal.store.utils import safe_dict
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 
-MODULES_TTL_SECONDS = 180
+MODULES_TTL_SECONDS = 900
 HISTORY_TTL_SECONDS = 900
 LONG_HISTORY_TTL_SECONDS = 3600
 FULL_HISTORY_REFRESH_SECONDS = 604_800

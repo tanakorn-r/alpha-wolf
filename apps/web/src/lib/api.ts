@@ -47,12 +47,12 @@ export async function loadGoogleAuthBootstrap(): Promise<{ configured: boolean; 
   return (await response.json()) as { configured: boolean; clientId?: string | null; nonce?: string | null };
 }
 
-export async function connectGoogleAccount(credential: string): Promise<AuthUser> {
+export async function connectGoogleAccount({ credential, nonce }: { credential: string; nonce: string }): Promise<AuthUser> {
   const response = await fetch(`${API_BASE}/auth/google`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ credential }),
+    body: JSON.stringify({ credential, nonce }),
   });
   if (!response.ok) throw new Error(`Google sign-in failed: ${response.status}`);
   const payload = (await response.json()) as { user: AuthUser };

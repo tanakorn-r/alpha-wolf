@@ -108,7 +108,7 @@ function GoogleSignIn({ onConnected }: { onConnected: (user: AuthUser) => void }
         ux_mode: "popup",
         auto_select: false,
         callback: (response) => {
-          if (response.credential) login.mutate(response.credential);
+          if (response.credential) login.mutate({ credential: response.credential, nonce: config.nonce! });
           else setError("Google did not return an account credential.");
         },
       });
