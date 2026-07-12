@@ -41,9 +41,12 @@ export function formatMoneyDual(value?: number) {
   return { primary: formatMoneyAs(value, "THB"), secondary: formatMoneyAs(value, "USD") };
 }
 
-export function formatCurrency(value?: number, currency = "USD") {
+export function formatCurrency(value?: number, currency?: string | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
+  // A default parameter only covers `undefined` — the API can genuinely send `currency: null`
+  // (e.g. a freshly-uncached symbol whose backend cache-first fallback hasn't populated yet),
+  // which bypasses the default and crashes Intl.NumberFormat with "Invalid currency code".
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
 }
 
 export function formatPercent(value?: number) {

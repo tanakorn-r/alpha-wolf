@@ -18,6 +18,8 @@ import { AdvancedInsightCard, type AdvancedInsightTone } from "./AdvancedInsight
 import { DrawerMetric, type DrawerMetricTone } from "./DrawerMetric";
 
 const panel = "rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-3.5";
+const DETAIL_PENDING_POLL_MS = 3_000;
+const DETAIL_PENDING_TIMEOUT_MS = 60_000;
 
 const returnWindows = ["ytd", "1y", "2y", "3y", "4y"] as const;
 type ResearchTab = "overview" | "consensus" | "financials" | "calendar" | "market" | "news";
@@ -43,13 +45,15 @@ export function StockDetailDrawer() {
   const [addOpen, setAddOpen] = useState(false);
   const [addShares, setAddShares] = useState("");
   const [addPrice, setAddPrice] = useState("");
+  const [pendingTimedOut, setPendingTimedOut] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const detailQuery = useQuery({
     queryKey: ["stock-detail", selectedSymbol, selectedStrategy, selectedMode],
     queryFn: () => loadStockDetail(selectedSymbol, selectedStrategy, selectedMode ?? undefined),
-    enabled: detailOpen && Boolean(selectedSymbol)
+    enabled: detailOpen && Boolean(selectedSymbol),
+    refetchInterval: (query) => query.state.data?.dataPending && !pendingTimedOut ? DETAIL_PENDING_POLL_MS : false,
   });
   const detail = detailQuery.data ?? null;
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
@@ -109,7 +113,22 @@ export function StockDetailDrawer() {
     setTab("overview");
     setMarket(null);
     setAddStatus("");
+    setPendingTimedOut(false);
   }, [detailOpen, selectedSymbol]);
+
+  useEffect(() => {
+    if (!detailOpen || !detail?.dataPending) {
+      setPendingTimedOut(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setPendingTimedOut(true), DETAIL_PENDING_TIMEOUT_MS);
+    return () => window.clearTimeout(timeout);
+  }, [detailOpen, detail?.dataPending, selectedSymbol]);
+
+  function retryPendingDetail() {
+    setPendingTimedOut(false);
+    void detailQuery.refetch();
+  }
 
   useEffect(() => {
     setAnalysis(null);
@@ -205,7 +224,33 @@ export function StockDetailDrawer() {
             {detailQuery.isError ? <div className={`${panel} flex items-center justify-between text-sm text-[#f2575c]`}>Unable to load live stock detail.<button type="button" disabled={detailQuery.isFetching} onClick={() => detailQuery.refetch()} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">{detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button></div> : null}
             {error ? <div className={`${panel} text-sm text-rose-600`}>{error}</div> : null}
             {addStatus ? <div className={`${panel} text-sm ${addHoldingMutation.isError ? "text-[#f2575c]" : "text-[#3ecf8e]"}`}>{addStatus}</div> : null}
-            {detail && !loading ? <>
+            {detail && !loading && detail.dataPending && !pendingTimedOut ? (
+              <div className={`${panel} flex flex-col items-center gap-3 px-6 py-10 text-center`}>
+                <LoadingSpinner size={22} className="text-[#3ecf8e]" />
+                <div className="text-[14px] font-semibold text-[#ececee]">Loading market data for {detail.stock.symbol}</div>
+                <p className="max-w-[420px] text-[12.5px] leading-[1.6] text-[#8c8c95]">The first request is updating the database in the background. This panel checks automatically and will show the stock as soon as the update finishes.</p>
+                <button
+                  type="button"
+                  onClick={retryPendingDetail}
+                  disabled={detailQuery.isFetching}
+                  className="mt-1 flex items-center gap-2 rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#161619] px-4 py-2 text-[12px] font-semibold text-[#ececee] hover:border-[#3ecf8e] disabled:opacity-60"
+                >
+                  {detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}
+                  Refresh
+                </button>
+              </div>
+            ) : null}
+            {detail && !loading && detail.dataPending && pendingTimedOut ? (
+              <div className={`${panel} flex flex-col items-center gap-3 px-6 py-10 text-center`}>
+                <div className="text-[14px] font-semibold text-[#f5c451]">Market data is taking longer than expected</div>
+                <p className="max-w-[420px] text-[12.5px] leading-[1.6] text-[#8c8c95]">The database update did not finish within one minute. You can retry now; the page will not stay in a loading loop.</p>
+                <button type="button" onClick={retryPendingDetail} disabled={detailQuery.isFetching} className="mt-1 flex items-center gap-2 rounded-[var(--aw-radius-control)] border border-[#f5c451]/45 bg-[#f5c451]/10 px-4 py-2 text-[12px] font-semibold text-[#f5c451] disabled:opacity-60">
+                  {detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}
+                  Retry update
+                </button>
+              </div>
+            ) : null}
+            {detail && !loading && !detail.dataPending ? <>
               {analyzing ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
               <QuickReadCard detail={detail} analysis={analysis} agent={activeAgent} />
               <ResearchTabs ref={tabsRef} active={tab} onSelect={selectTab} />
@@ -697,7 +742,8 @@ function DrawerHeader({
           <span className="min-w-0 max-w-full truncate text-xs text-[#8c8c95] min-[720px]:text-sm">{detail?.stock.name ?? "Live data panel"}</span>
           <span className="rounded-[5px] border border-[#2a2a31] px-[7px] py-0.5 text-[10px] text-[#8c8c95]">{detail?.stock.symbol.endsWith(".BK") ? "Thai SET" : "US"}</span>
         </div>
-        {detail ? <div className="mt-[3px] flex items-baseline gap-[9px]"><span className="font-mono text-lg font-semibold">{formatCurrency(detail.stock.price, detail.stock.currency)}</span><span className={`font-mono text-[13px] ${detail.stock.changePct >= 0 ? positive : negative}`}>{formatPercent(detail.stock.changePct)}</span></div> : null}
+        {detail && detail.dataPending ? <div className="mt-[3px] text-[12px] text-[#8c8c95]">Fetching live data…</div> : null}
+        {detail && !detail.dataPending ? <div className="mt-[3px] flex items-baseline gap-[9px]"><span className="font-mono text-lg font-semibold">{formatCurrency(detail.stock.price, detail.stock.currency)}</span><span className={`font-mono text-[13px] ${detail.stock.changePct >= 0 ? positive : negative}`}>{formatPercent(detail.stock.changePct)}</span></div> : null}
       </div>
       <button type="button" onClick={onClose} aria-label="Close detail panel" className="grid h-9 w-9 flex-none place-items-center rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#0e0e10] text-[#8c8c95] transition-colors hover:border-[#5a5a62] hover:text-[#ececee] min-[720px]:order-last">
         <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>

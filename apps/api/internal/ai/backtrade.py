@@ -10,9 +10,8 @@ import pandas as pd
 
 from internal.ai.agents import agent_badge, normalize_agent_id
 from internal.ai.openai_client import OpenAIAnalysisError, decide_backtrade_with_openai
-from internal.store.cache import cache_compute_lock
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
-from internal.yahoo.client import fetch_history, ticker as make_ticker
+from internal.yahoo.client import _refresh_in_background, fetch_history, ticker as make_ticker
 
 
 _JOBS: dict[str, dict[str, Any]] = {}
@@ -362,20 +361,21 @@ def _normalize_decision(decision: dict[str, Any], cash: float, shares: float, ag
 
 
 def _load_financial_timeline(symbol: str) -> list[dict[str, Any]]:
-    """Load a compact statement history once; failures leave an honest unavailable packet."""
+    """Cache-first: always returns whatever's stored immediately (even stale/empty) and
+    refreshes in the background on a miss — never blocks the caller on a live Yahoo call."""
+    normalized = symbol.upper().strip()
     cached = load_yahoo_data(symbol, "financial_timeline")
-    if cached and cached.is_fresh and isinstance(cached.payload, list):
-        return cached.payload
+    has_data = bool(cached and isinstance(cached.payload, list))
 
-    with cache_compute_lock("yahoo_financial_timeline", symbol.upper().strip()):
-        current = load_yahoo_data(symbol, "financial_timeline")
-        if current and current.is_fresh and isinstance(current.payload, list):
-            return current.payload
-        timeline = _fetch_financial_timeline(symbol)
-        if timeline:
-            save_yahoo_data(symbol, "financial_timeline", timeline, ttl_seconds=_FINANCIAL_TIMELINE_TTL_SECONDS)
-            return timeline
-        return current.payload if current and isinstance(current.payload, list) else []
+    if not cached or not cached.is_fresh:
+        def _refresh() -> None:
+            timeline = _fetch_financial_timeline(symbol)
+            if timeline:
+                save_yahoo_data(symbol, "financial_timeline", timeline, ttl_seconds=_FINANCIAL_TIMELINE_TTL_SECONDS)
+
+        _refresh_in_background("yahoo_financial_timeline", normalized, _refresh)
+
+    return cached.payload if has_data else []
 
 
 def _fetch_financial_timeline(symbol: str) -> list[dict[str, Any]]:

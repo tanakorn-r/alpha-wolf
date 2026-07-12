@@ -127,6 +127,10 @@ export type StockNewsItem = {
 };
 
 export type StockDetailResponse = {
+  // True on a fresh cache miss: the backend fetches yfinance data in the background and
+  // returns immediately rather than blocking, so every numeric field below is a zero/empty
+  // placeholder until the next request after the refresh lands — never format these as real.
+  dataPending?: boolean;
   stock: StockRecord;
   history: Array<{
     date: string;

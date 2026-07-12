@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Any
+import threading
+from typing import Any, Callable
 
 import pandas as pd
 import yfinance as yf
 
-from internal.store.cache import cache_compute_lock
+from internal.store.cache import should_attempt_refresh, try_acquire_compute_lock
 from internal.store.utils import as_float
 from internal.store.utils import safe_dict
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
@@ -17,9 +18,43 @@ FULL_HISTORY_REFRESH_SECONDS = 604_800
 NEWS_TTL_SECONDS = 900
 DIVIDENDS_TTL_SECONDS = 21_600
 
+# Floor on how often we'll even ATTEMPT a refresh for the same key, regardless of outcome.
+# Without this, a symbol that keeps failing/timing out against Yahoo would get re-attempted
+# on every single request that finds it stale — the lock only stops concurrent duplicates,
+# not this kind of sequential retry storm against an already-struggling upstream.
+MIN_REFRESH_ATTEMPT_INTERVAL_SECONDS = 60
+
 
 def ticker(symbol: str) -> yf.Ticker:
     return yf.Ticker(symbol)
+
+
+def _refresh_in_background(namespace: str, key: str, task: Callable[[], None]) -> None:
+    """Run `task` (fetch live data + upsert into the cache) on a daemon thread instead of
+    blocking the caller. Every read below is cache-first: it always returns whatever is
+    already stored (even stale or empty) immediately, and only ever touches yfinance from
+    here, off the request path. A non-blocking per-key lock means at most one background
+    refresh per key runs at a time — if one's already in flight, this silently skips
+    scheduling a duplicate rather than piling up redundant Yahoo calls. A separate cooldown
+    (`should_attempt_refresh`) additionally caps how often a *new* attempt can even start,
+    so a symbol that keeps failing doesn't get retried on every request that hits it.
+    """
+    if not should_attempt_refresh(namespace, key, MIN_REFRESH_ATTEMPT_INTERVAL_SECONDS):
+        return
+
+    lock = try_acquire_compute_lock(namespace, key)
+    if lock is None:
+        return
+
+    def _run() -> None:
+        try:
+            task()
+        except Exception:
+            pass
+        finally:
+            lock.release()
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _safe_info(t: yf.Ticker) -> dict[str, Any]:
@@ -179,18 +214,17 @@ def build_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
 def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
     normalized = symbol.upper().strip()
     cached = load_yahoo_data(normalized, "modules")
-    if cached and cached.is_fresh and isinstance(cached.payload, dict):
-        return cached.payload
+    has_data = bool(cached and isinstance(cached.payload, dict))
 
-    with cache_compute_lock("yahoo_modules", normalized):
-        current = load_yahoo_data(normalized, "modules")
-        if current and current.is_fresh and isinstance(current.payload, dict):
-            return current.payload
-        result = build_ticker_modules(t, normalized)
-        if _modules_have_market_data(result, normalized):
-            save_yahoo_data(normalized, "modules", result, ttl_seconds=MODULES_TTL_SECONDS)
-            return result
-        return current.payload if current and isinstance(current.payload, dict) else result
+    if not cached or not cached.is_fresh:
+        def _refresh() -> None:
+            result = build_ticker_modules(t, normalized)
+            if _modules_have_market_data(result, normalized):
+                save_yahoo_data(normalized, "modules", result, ttl_seconds=MODULES_TTL_SECONDS)
+
+        _refresh_in_background("yahoo_modules", normalized, _refresh)
+
+    return cached.payload if has_data else {}
 
 
 def fetch_history(t: yf.Ticker, period: str = "1y", auto_adjust: bool = True) -> pd.DataFrame:
@@ -200,48 +234,37 @@ def fetch_history(t: yf.Ticker, period: str = "1y", auto_adjust: bool = True) ->
     symbol = _ticker_symbol(t)
     dataset = "history" if auto_adjust else "history_raw"
     cached = load_yahoo_data(symbol, dataset, period) if symbol else None
-    if cached and cached.is_fresh:
-        frame = _history_from_payload(cached.payload)
-        if not frame.empty:
-            return frame
+    frame = _history_from_payload(cached.payload) if cached else pd.DataFrame()
 
-    lock_key = f"{symbol}:{period}:{dataset}" if symbol else f"anonymous:{id(t)}:{period}:{dataset}"
-    with cache_compute_lock("yahoo_history", lock_key):
-        current = load_yahoo_data(symbol, dataset, period) if symbol else None
-        if current and current.is_fresh:
-            frame = _history_from_payload(current.payload)
-            if not frame.empty:
-                return frame
-        is_long_history = period.lower() in {"5y", "10y", "max"}
-        full_refresh = load_yahoo_data(symbol, f"{dataset}_full_refresh", period) if symbol and is_long_history else None
-        live_period = "1mo" if current and is_long_history and full_refresh and full_refresh.is_fresh else period
-        try:
-            result = normalize_history_frame(t.history(period=live_period, interval="1d", auto_adjust=auto_adjust))
-        except Exception:
-            result = pd.DataFrame()
-        if not result.empty:
+    if symbol and (not cached or not cached.is_fresh or frame.empty):
+        def _refresh() -> None:
+            # Re-read inside the task (not the value captured above) since some time may
+            # have passed between scheduling and actually running on the background thread.
+            current = load_yahoo_data(symbol, dataset, period)
+            is_long_history = period.lower() in {"5y", "10y", "max"}
+            full_refresh = load_yahoo_data(symbol, f"{dataset}_full_refresh", period) if is_long_history else None
+            live_period = "1mo" if current and is_long_history and full_refresh and full_refresh.is_fresh else period
+            try:
+                result = normalize_history_frame(t.history(period=live_period, interval="1d", auto_adjust=auto_adjust))
+            except Exception:
+                result = pd.DataFrame()
+            if result.empty:
+                return
             if live_period != period and current:
                 result = _merge_history(_history_from_payload(current.payload), result)
-            if symbol:
+            save_yahoo_data(symbol, dataset, _history_to_payload(result), period=period, ttl_seconds=_history_ttl(period))
+            if live_period == period and is_long_history:
                 save_yahoo_data(
                     symbol,
-                    dataset,
-                    _history_to_payload(result),
+                    f"{dataset}_full_refresh",
+                    {"period": period},
                     period=period,
-                    ttl_seconds=_history_ttl(period),
+                    ttl_seconds=FULL_HISTORY_REFRESH_SECONDS,
                 )
-                if live_period == period and is_long_history:
-                    save_yahoo_data(
-                        symbol,
-                        f"{dataset}_full_refresh",
-                        {"period": period},
-                        period=period,
-                        ttl_seconds=FULL_HISTORY_REFRESH_SECONDS,
-                    )
-            return result
-        # Preserve the last successful dataset across Yahoo outages, even after its freshness TTL.
-        stale = _history_from_payload(current.payload) if current else pd.DataFrame()
-        return stale
+
+        _refresh_in_background("yahoo_history", f"{symbol}:{period}:{dataset}", _refresh)
+
+    return frame
 
 
 def normalize_history_frame(history: Any) -> pd.DataFrame:
@@ -266,20 +289,17 @@ def normalize_history_frame(history: Any) -> pd.DataFrame:
 def fetch_news(t: yf.Ticker) -> list[dict[str, Any]]:
     symbol = _ticker_symbol(t)
     cached = load_yahoo_data(symbol, "news") if symbol else None
-    if cached and cached.is_fresh and isinstance(cached.payload, list):
-        return cached.payload
+    has_data = bool(cached and isinstance(cached.payload, list))
 
-    lock_key = symbol or f"anonymous:{id(t)}"
-    with cache_compute_lock("yahoo_news", lock_key):
-        current = load_yahoo_data(symbol, "news") if symbol else None
-        if current and current.is_fresh and isinstance(current.payload, list):
-            return current.payload
-        result = _fetch_news_live(t)
-        if symbol and result:
-            save_yahoo_data(symbol, "news", result, ttl_seconds=NEWS_TTL_SECONDS)
-        if result:
-            return result
-        return current.payload if current and isinstance(current.payload, list) else []
+    if symbol and (not cached or not cached.is_fresh):
+        def _refresh() -> None:
+            result = _fetch_news_live(t)
+            if result:
+                save_yahoo_data(symbol, "news", result, ttl_seconds=NEWS_TTL_SECONDS)
+
+        _refresh_in_background("yahoo_news", symbol, _refresh)
+
+    return cached.payload if has_data else []
 
 
 def _fetch_news_live(t: yf.Ticker) -> list[dict[str, Any]]:
@@ -355,34 +375,21 @@ def _publisher_name(value: Any) -> str | None:
 def fetch_dividends(t: yf.Ticker, period: str = "ytd") -> pd.Series:
     symbol = _ticker_symbol(t)
     cached = load_yahoo_data(symbol, "dividends", period) if symbol else None
-    if cached and cached.is_fresh:
-        series = _dividends_from_payload(cached.payload)
-        if not series.empty:
-            return series
+    series = _dividends_from_payload(cached.payload) if cached else pd.Series(dtype="float64")
 
-    lock_key = f"{symbol}:{period}" if symbol else f"anonymous:{id(t)}:{period}"
-    with cache_compute_lock("yahoo_dividends", lock_key):
-        current = load_yahoo_data(symbol, "dividends", period) if symbol else None
-        if current and current.is_fresh:
-            series = _dividends_from_payload(current.payload)
-            if not series.empty:
-                return series
-        try:
-            dividends = t.get_dividends(period=period)
-            result = dividends if isinstance(dividends, pd.Series) else pd.Series(dtype="float64")
-        except Exception:
-            result = pd.Series(dtype="float64")
-        if not result.empty:
-            if symbol:
-                save_yahoo_data(
-                    symbol,
-                    "dividends",
-                    _dividends_to_payload(result),
-                    period=period,
-                    ttl_seconds=DIVIDENDS_TTL_SECONDS,
-                )
-            return result
-        return _dividends_from_payload(current.payload) if current else result
+    if symbol and (not cached or not cached.is_fresh or series.empty):
+        def _refresh() -> None:
+            try:
+                dividends = t.get_dividends(period=period)
+                result = dividends if isinstance(dividends, pd.Series) else pd.Series(dtype="float64")
+            except Exception:
+                result = pd.Series(dtype="float64")
+            if not result.empty:
+                save_yahoo_data(symbol, "dividends", _dividends_to_payload(result), period=period, ttl_seconds=DIVIDENDS_TTL_SECONDS)
+
+        _refresh_in_background("yahoo_dividends", f"{symbol}:{period}", _refresh)
+
+    return series
 
 
 def _ticker_symbol(t: Any) -> str:

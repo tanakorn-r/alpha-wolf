@@ -18,7 +18,7 @@ from internal.store.cache import cache_compute_lock, cache_get, cache_set
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
 from internal.news.kaohoon import market_news as fetch_kaohoon_news
-from internal.yahoo.client import fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
+from internal.yahoo.client import _modules_have_market_data, fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
 
 DETAIL_CACHE_NAMESPACE = "stock_detail"
 FINANCIALS_CACHE_NAMESPACE = "stock_financials"
@@ -27,6 +27,7 @@ MARKET_COMPARISON_CACHE_NAMESPACE = "stock_market_comparison"
 DOMAIN_CACHE_NAMESPACE = "domain"
 
 DETAIL_TTL_SECONDS = 180
+PENDING_DETAIL_TTL_SECONDS = 2
 DOMAIN_TTL_SECONDS = 1800
 
 
@@ -43,7 +44,11 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None 
             return cached
         result = _build_detail_bundle_uncached(symbol, strategy, selected_mode=selected_mode)
         if result is not None:
-            cache_set(DETAIL_CACHE_NAMESPACE, cache_key, result, DETAIL_TTL_SECONDS)
+            # A placeholder must expire quickly so the next poll can observe rows written by
+            # the background refresh. Caching it for the normal detail TTL traps the UI in the
+            # pending state even after the database has real data.
+            ttl = PENDING_DETAIL_TTL_SECONDS if result.get("dataPending") else DETAIL_TTL_SECONDS
+            cache_set(DETAIL_CACHE_NAMESPACE, cache_key, result, ttl)
         return result
 
 
@@ -127,6 +132,12 @@ def _build_detail_bundle_uncached(
         "strategy": strategy,
         "mode": selected_mode,
         "dividendPattern": dividend_pattern,
+        # True when this symbol has never been fetched from Yahoo yet (or the cache expired
+        # and the background refresh hasn't landed): every numeric field above is a zero/empty
+        # placeholder, not real data. The frontend must show a "still loading" state instead of
+        # formatting these as if they were genuine — a $0.00 price reads as "this stock is
+        # worthless," not "we don't have data yet."
+        "dataPending": not _modules_have_market_data(modules, symbol),
     }
     return result
 

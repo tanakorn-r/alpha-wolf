@@ -120,7 +120,8 @@ def _secure_cookie(request: Request) -> bool:
         return True
     if configured in {"0", "false", "no"}:
         return False
-    return request.url.scheme == "https"
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    return request.url.scheme == "https" or forwarded_proto == "https"
 
 
 def _cookie_samesite(request: Request) -> str:

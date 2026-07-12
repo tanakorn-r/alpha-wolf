@@ -78,11 +78,20 @@ class GoogleAuthTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 401)
 
+    def test_cloud_run_forwarded_https_uses_cross_site_secure_cookie(self) -> None:
+        request = _request(headers={"x-forwarded-proto": "https"})
 
-def _request(cookies: dict[str, str] | None = None) -> Request:
+        with patch.dict("os.environ", {"AUTH_COOKIE_SECURE": "", "AUTH_COOKIE_SAMESITE": ""}):
+            self.assertTrue(auth._secure_cookie(request))
+            self.assertEqual(auth._cookie_samesite(request), "none")
+
+
+def _request(cookies: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Request:
     cookie_header = "; ".join(f"{key}={value}" for key, value in (cookies or {}).items())
-    headers = [(b"cookie", cookie_header.encode())] if cookie_header else []
-    return Request({"type": "http", "method": "GET", "path": "/", "headers": headers, "scheme": "http", "server": ("testserver", 80)})
+    request_headers = [(key.lower().encode(), value.encode()) for key, value in (headers or {}).items()]
+    if cookie_header:
+        request_headers.append((b"cookie", cookie_header.encode()))
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": request_headers, "scheme": "http", "server": ("testserver", 80)})
 
 
 def _cookie_value(headers: list[str], name: str) -> str:
