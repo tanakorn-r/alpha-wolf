@@ -11,15 +11,15 @@ from fastapi.responses import JSONResponse
 from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import normalize_agent_id
 from internal.ai.access import claim_ai_run, release_ai_run, require_ai_account
-from internal.ai.context import build_analysis_context
-from internal.ai.openai_client import OpenAIAnalysisError, analyze_brief_with_openai, analyze_quant_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
+from internal.ai.context import build_analysis_context, build_technical_context, build_today_context
+from internal.ai.openai_client import OpenAIAnalysisError, analyze_brief_with_openai, analyze_quant_with_openai, analyze_technicals_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
 from internal.market.detail import build_detail_bundle, get_ai_financials, get_domain_insights, get_market_comparison
 from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
 from internal.market.universe import build_market_page
 from internal.store.cache import cache_get, cache_set
 from internal.store.portfolio import list_holdings
-from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TodayPerformanceResponse, ValuationVerdictResponse
+from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TechnicalAnalysisResponse, TodayPerformanceResponse, ValuationVerdictResponse
 
 router = APIRouter()
 
@@ -183,7 +183,7 @@ def analyst_report(
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:analyst-report:v3-focused:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"{account_scope}:analyst-report:v5-decisive-action:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
 
     cached_analysis = cache_get("analysis", cache_key)
     if cached_analysis is not None and not force:
@@ -280,7 +280,7 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
-    cache_key = f"{account_scope}:valuation:v16-character-quote:{normalized}:{strategy}:{agent_id}"
+    cache_key = f"{account_scope}:valuation:v17-decisive-action:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached
@@ -334,12 +334,12 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:today:v12-agent-method:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"{account_scope}:today:v14-decisive-action:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached
 
-    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
+    bundle, _, _, _ = _fetch_analysis_data(
         normalized,
         strategy,
         include_financials=False,
@@ -350,14 +350,7 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
     _require_ai_market_data(bundle, normalized)
 
-    context = build_analysis_context(
-        bundle,
-        financials=financials_data,
-        market_comparison=market_data,
-        domain_insights=insights_data,
-        position_context=position_context,
-        agent_id=agent_id,
-    )
+    context = build_today_context(bundle, position_context=position_context)
 
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
@@ -367,6 +360,34 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
+    return result
+
+
+@router.post("/api/analysis/{symbol}/technical", response_model=TechnicalAnalysisResponse)
+def technical_analysis(symbol: str, request: Request, agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
+    require_ai_account(request, premium_required=True)
+    normalized = symbol.upper().strip()
+    agent_id = normalize_agent_id(agent)
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
+    position_context = _position_context(normalized, user_id)
+    cache_key = f"{account_scope}:technical:v4-decisive-action:{normalized}:{agent_id}:{_position_cache_key(position_context)}"
+    cached = cache_get("analysis", cache_key)
+    if cached is not None and not force:
+        return cached
+
+    bundle = build_detail_bundle(normalized, "momentum")
+    if not bundle:
+        raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    _require_ai_market_data(bundle, normalized)
+    context = build_technical_context(bundle, position_context=position_context)
+    usage_user_id, _ = claim_ai_run(request, premium_required=True)
+    try:
+        result = {**analyze_technicals_with_openai(context, agent_id), "symbol": normalized}
+    except OpenAIAnalysisError as exc:
+        release_ai_run(usage_user_id)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    cache_set("analysis", cache_key, result, ANALYST_REPORT_TTL_SECONDS)
     return result
 
 

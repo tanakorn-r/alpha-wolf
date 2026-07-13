@@ -417,13 +417,13 @@ AGENT-SPECIFIC DAILY PLAN RULE:
 - Plan horizon: {lens["horizon"]}.
 - Endurance rule: {lens["endurance"]}
 - Aligned analytics: {analytics}
-- Required analysis title: {lens["analysisTitle"]}.
-- Required analysis sections: {lens["analysisSections"]}.
+- Daily decision lens: {lens["analysisTitle"]}.
+- Evidence priority: {lens["analysisSections"]}.
 
-Set todayVsPlan.planHorizon to this horizon and state the endurance rule in plain language.
-Classify impactLevel as NOISE, TACTICAL, MATERIAL, or THESIS_BREAK relative to THIS horizon.
+Set horizonAlignment.planHorizon to this horizon and apply the endurance rule in its why field.
+Classify horizonAlignment as ALIGNED, WATCH, BROKEN, or NO_PLAN relative to THIS horizon.
 The Agent horizon outranks a generic short-term platform setup. A long-horizon Agent must not call
-the plan BEHIND merely because price missed a moving average or fell for one session. Conversely,
+the plan BROKEN merely because price missed a moving average or fell for one session. Conversely,
 a tactical Agent must not hide a broken stop behind long-term business quality."""
 
 
@@ -466,6 +466,15 @@ but the overall call must be direct whenever valid market data exists.
 Every 1-100 rating is YOUR perspective for the requested decision, not a default platform number.
 Do not convert missing evidence into a neutral 50. Use null when the schema allows it; otherwise
 use the schema's insufficient-data outcome and explain that no honest rating can be produced.
+
+ACTION MUST MATCH THE SCORE AND OWNERSHIP MODE:
+- For a candidate the user does not own: 61-100 means BUY/BUILD/STARTER; 1-39 means WAIT/PASS/AVOID.
+- For an existing holding: 80-100 means ADD/BUILD, 61-79 means HOLD or ADD_SMALL, 21-39 means
+  TRIM/REDUCE, and 1-20 means SELL/EXIT.
+- HOLD is a positive existing-position decision, never a safe synonym for uncertainty. Do not pair
+  HOLD with a 1-39 score. Do not say HOLD in the headline/summary and WAIT elsewhere.
+- When the schema uses different action words, choose the nearest action with the same capital
+  direction. The action, score, headline, recap, and plan must all point the same way.
 
 Make the answer meaningfully different from the other AlphaWolf Agents:
 - Choose signal/headline/summary/bullets from this Agent's decision lens, not generic advice.

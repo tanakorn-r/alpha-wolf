@@ -72,10 +72,10 @@ class AgentPersonaTests(unittest.TestCase):
 
         self.assertIn("Plan horizon: 5 years", ben)
         self.assertIn("one-day move, RSI, MACD, SMA20/50/200 miss", ben)
-        self.assertIn("must not call\nthe plan BEHIND merely because price missed a moving average", ben)
-        self.assertIn("The normal action is HOLD or NO_ACTION", ben)
-        self.assertIn("ADD_SMALL or ADD is rare", ben)
-        self.assertIn("Give SELL and REDUCE serious consideration", ben)
+        self.assertIn("must not call\nthe plan BROKEN merely because price missed a moving average", ben)
+        self.assertIn("Lead with exactly what the user should do today", ben)
+        self.assertIn("ADD is rare", ben)
+        self.assertIn("SELL/REDUCE needs the", ben)
         self.assertIn("Plan horizon: 3 days to 8 weeks", rex)
         self.assertIn("Failed levels can put the plan BEHIND quickly", rex)
         titles = [value["analysisTitle"] for value in DAILY_BRIEF_PERSPECTIVES.values()]
@@ -94,6 +94,13 @@ class AgentPersonaTests(unittest.TestCase):
         self.assertIn("risk-adjusted owner value", vera)
         self.assertIn("liquid catalysts", rex)
         self.assertIn("reinvest retained earnings at high returns", ben)
+
+    def test_decisive_scores_cannot_fall_back_to_hold(self) -> None:
+        prompt = compose_instructions("Return one decision.", "vera")
+
+        self.assertIn("21-39 means\n  TRIM/REDUCE", prompt)
+        self.assertIn("1-20 means SELL/EXIT", prompt)
+        self.assertIn("Do not pair\n  HOLD with a 1-39 score", prompt)
 
     def test_ben_does_not_use_trader_pullback_logic(self) -> None:
         prompt = compose_instructions("Generic task example: wait for a pullback.", "ben")

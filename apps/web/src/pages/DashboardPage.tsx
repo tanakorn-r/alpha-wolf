@@ -1,5 +1,6 @@
 import { ErrorBanner } from "../components/ui/panels";
 import { SectionHeading } from "../components/ui/Surface";
+import { GoogleAccount } from "../components/auth/GoogleAccount";
 import { AiAdvisor } from "../features/dashboard/AiAdvisor";
 import { ChartsRow } from "../features/dashboard/ChartsRow";
 import { DashboardSkeleton } from "../features/dashboard/DashboardSkeleton";
@@ -17,7 +18,10 @@ export function DashboardPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-[980px] flex-col gap-[14px] text-[#ececee]">
-      <SectionHeading title="Strategy Dashboard" body="Everything happening with your money, in one view" />
+      <div className="flex items-start justify-between gap-3">
+        <SectionHeading title="Strategy Dashboard" body="Everything happening with your money, in one view" />
+        <GoogleAccount />
+      </div>
       {dash.isSkeleton ? <DashboardSkeleton /> : (
         <>
           {dash.isError || dash.actionError ? (

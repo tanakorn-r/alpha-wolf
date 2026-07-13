@@ -12,7 +12,7 @@ from urllib3.util.retry import Retry
 
 from internal.ai.agents import agent_badge, compose_instructions
 from internal.store.utils import parse_json_fragment
-from models import AnalystBrief, BacktradeDecision, BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
+from models import AnalystBrief, BacktradeDecision, BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalAnalysis, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
 
 OPENAI_TIMEOUT_SECONDS = 30
 OPENAI_MAX_RETRIES = 1
@@ -93,8 +93,32 @@ def analyze_brief_with_openai(context: dict[str, Any], agent_id: str | None = No
         instructions=compose_instructions(_analyst_brief_instructions(), agent_id, analyst_task=True),
         max_output_tokens=1200,
     )
+    result = _calibrate_analyst_brief(context, result, agent_id)
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def _calibrate_analyst_brief(context: dict[str, Any], result: AnalystBrief, agent_id: str | None) -> AnalystBrief:
+    if result.confidence is None:
+        return result
+    components = ((context.get("quantScorecard") or {}).get("componentScores") or {})
+    technical = _num(components.get("technicalTiming"))
+    swing = _num(components.get("swingEntry"))
+    business = _num(components.get("businessQuality"))
+    relative = _num(components.get("relativeStrength"))
+    platform = _num(components.get("platformSetup"))
+    agent = (agent_id or "vera").strip().lower()
+    evidence_score = {
+        "rex": _weighted((technical, 0.42), (swing, 0.35), (relative, 0.18), (platform, 0.05)),
+        "kai": _weighted((technical, 0.38), (relative, 0.27), (swing, 0.25), (platform, 0.10)),
+        "nadia": _weighted((relative, 0.32), (technical, 0.27), (business, 0.23), (swing, 0.18)),
+        "sam": _weighted((business, 0.62), (platform, 0.20), (relative, 0.10), (technical, 0.08)),
+        "ben": _weighted((business, 0.72), (relative, 0.13), (platform, 0.10), (technical, 0.05)),
+        "alphawolf": _weighted((business, 0.28), (technical, 0.24), (swing, 0.20), (relative, 0.16), (platform, 0.12)),
+        "vera": _weighted((business, 0.58), (platform, 0.20), (relative, 0.12), (technical, 0.10)),
+    }.get(agent, _weighted((business, 0.55), (platform, 0.25), (technical, 0.20)))
+    calibrated = round(0.30 * float(result.confidence) + 0.70 * evidence_score)
+    return result.model_copy(update={"confidence": int(_clamp(calibrated, 1, 100))})
 
 
 def analyze_quant_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
@@ -303,37 +327,25 @@ def analyze_today_with_openai(context: dict[str, Any], agent_id: str | None = No
         schema_model=TodayPerformance,
         schema_name="today_performance",
         instructions=compose_instructions(_today_performance_instructions(), agent_id, daily_brief_task=True),
-        max_output_tokens=2800,
+        max_output_tokens=1100,
         model=model,
         reasoning_effort=_fast_reasoning_effort(),
     )
-    result = _normalize_today_scenarios(result)
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
-def _normalize_today_scenarios(result: TodayPerformance) -> TodayPerformance:
-    expected = ["DOWN", "NEUTRAL", "UP"]
-    by_direction = {scenario.direction: scenario for scenario in result.tomorrow.scenarios}
-    if set(by_direction) != set(expected):
-        raise OpenAIAnalysisError("OpenAI did not return all three tomorrow scenarios")
-
-    scenarios = [by_direction[direction] for direction in expected]
-    values = [max(0, int(scenario.probabilityPct)) for scenario in scenarios]
-    total = sum(values)
-    if total <= 0:
-        raise OpenAIAnalysisError("OpenAI returned no usable tomorrow probabilities")
-    elif total != 100:
-        scaled = [value * 100 / total for value in values]
-        values = [int(value) for value in scaled]
-        remainder = 100 - sum(values)
-        order = sorted(range(3), key=lambda index: scaled[index] - values[index], reverse=True)
-        for index in order[:remainder]:
-            values[index] += 1
-
-    normalized = [scenario.model_copy(update={"probabilityPct": values[index]}) for index, scenario in enumerate(scenarios)]
-    base_case = max(normalized, key=lambda scenario: scenario.probabilityPct).direction
-    tomorrow = result.tomorrow.model_copy(update={"scenarios": normalized, "baseCase": base_case})
-    return result.model_copy(update={"tomorrow": tomorrow})
+def analyze_technicals_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
+    model = _selected_model(fast=True)
+    result = _run_openai_structured_request(
+        context=context,
+        schema_model=TechnicalAnalysis,
+        schema_name="technical_analysis",
+        instructions=compose_instructions(_technical_analysis_instructions(), agent_id),
+        max_output_tokens=1200,
+        model=model,
+        reasoning_effort=_fast_reasoning_effort(),
+    )
+    return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
 def analyze_buy_timing_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
@@ -902,7 +914,8 @@ strictly through the active persona's method, horizon, vocabulary, and risk disc
 substantive decision card, not a sprawling report. Do not generate price charts, target/entry maps,
 allocation tiers, scorecards, or generic perspective sections. Lead with what the user should do now.
 The signal must be a direct action such as BUY, WAIT, HOLD, TRIM, or SELL. Confidence is the Agent's
-decisive fit score: use 1-39 or 61-100, or null when evidence is insufficient. Keep headline to one
+evidence-backed conviction score from 1-100, or null when evidence is insufficient. Use the full
+range and do not default repeatedly to the low-80s. Keep headline to one
 sentence and summary to two or three sentences. Thesis must explain the persona-specific investment
 or trade case in one compact paragraph. actionPlan must state what to do now and how to manage it.
 Return exactly three evidence points ranked by what THIS persona cares about, exactly two concrete
@@ -1104,88 +1117,57 @@ your priorities and the supplied numbers only.
 
 def _today_performance_instructions() -> str:
     return """
-You are Alpha Wolf's Daily Brief scenario desk. Analyze only the supplied live research data.
-Answer three questions: what happened today, did it follow the user's existing plan, and what are
-the conditional DOWN / NEUTRAL / UP paths for the next trading session?
+You are writing one compact, Agent-exclusive Today Plan for an existing holding. This is not a
+second Analyst report and not a next-day forecast. Use only the supplied current price, recent tape,
+position, key structure metrics, and levels.
 
-Do not claim certainty or invent intraday facts, overnight news, future prices, catalysts, volume,
-or a prior plan. Use positionContext when it contains the user's holding strategy, average cost,
-monthly DCA, or position state; this USER_POSITION plan outranks a generic platform setup. Use
-platformVerdict/technicals only as a secondary PLATFORM_SETUP. If neither
-contains a real plan, todayVsPlan.status and planSource must be NO_PLAN; explain the setup you can
-observe without pretending it was previously agreed.
-Use USER_POSITION only when positionContext.isHolding is true and actual stored holding details are
-supplied. A generated candidate-mode question is not a saved user plan; classify it as INFERRED or
-use PLATFORM_SETUP when platformVerdict provides the setup.
+Lead with exactly what the user should do today: HOLD, NO_ACTION, ADD_SMALL, ADD, REDUCE, or SELL.
+Then explain the two or three supplied facts that control that decision. Do not repeat the same idea
+across headline, summary, reasons, and evidence. Keep every prose field to one short sentence.
 
-TODAY VS PLAN:
-- plannedSetup: the actual supplied user/platform plan, or "No saved plan was supplied."
-- actualSession: what today's price move, volume, trend, levels, benchmark and news actually show.
-- planHorizon: the selected Agent's mandated Daily Plan horizon.
-- impactLevel: NOISE, TACTICAL, MATERIAL, or THESIS_BREAK relative to that horizon.
-- enduranceReason: why this Agent should absorb or react to today's move at that horizon.
-- status: ON_PLAN, AHEAD, BEHIND, PLAN_INVALIDATED, or NO_PLAN.
-- verdict and why: state whether today confirmed, exceeded, lagged, or broke the plan and cite numbers.
-- BEHIND and PLAN_INVALIDATED require evidence relevant to the Agent's horizon. For Ben or Sam,
-  a daily decline or moving-average miss alone is NOISE/TACTICAL and normally remains ON_PLAN.
+Future alignment matters only as a guardrail:
+- horizonAlignment says whether today's price and structure remain ALIGNED, need WATCH, are BROKEN,
+  or have NO_PLAN under this Agent's mandated horizon.
+- structureRead names the single price/structure relationship that matters to this Agent. A tactical
+  Agent may use support, resistance, trend, volume, or momentum. A long-horizon Agent must use the
+  supplied valuation, earnings, funding, income, or business-quality proxy and treat ordinary daily
+  movement as noise unless it reaches a real thesis gate.
+- continueGate is the exact observable condition for staying with or adding to the plan.
+- exitGate is the exact observable condition for reducing or leaving it.
+- nextCheck is the one thing to check next, not a list and not a prediction.
 
-TOMORROW SCENARIO MAP:
-- Return exactly three scenarios in this order: DOWN, NEUTRAL, UP.
-- probabilityPct values must total exactly 100. Use evidence-calibrated conditional judgment, not
-  statistical claims unless supplied data supports them. Avoid fake precision; increments of 5 are preferred.
-- baseCase must be the scenario with the highest probability.
-- For every scenario explain likelyReasons (what might cause it), confirmation (what observable
-  price/volume/indicator/market behavior would confirm it), whatItMeans, and the user's action.
-- Reasons must be conditional: e.g. market/sector weakness, rejection at resistance, failed support,
-  normal consolidation, volume confirmation, catalyst follow-through—only when supplied evidence
-  makes that driver plausible. Never invent an overnight event.
-- overnightWatch lists the real supplied news, market, sector, calendar, or technical items that
-could shift probabilities before/at the next session. Say unavailable when necessary.
+ADD is rare and needs a supplied price/valuation gate plus intact structure. SELL/REDUCE needs the
+selected Agent's actual invalidation rule. Never invent levels, catalysts, intraday behavior, or a
+saved plan. When a necessary metric is missing, say so briefly. The score is this Agent's decisive
+1-39 or 61-100 fit for today's action. Make the evidence hierarchy and action genuinely specific to
+the selected persona; another Agent should reasonably produce a different plan from the same facts.
+""".strip()
 
-AGENT-OWNED ANALYSIS:
-- analysisTitle must use the selected Agent's required analysis title.
-- analysisSections must contain exactly the three required Agent-specific investigations, in the
-  required order. Each needs a specific title, decisive verdict, 1-4 supplied evidence points,
-  and the action this Agent takes because of it.
-- These sections are the primary user-facing analysis. Do not disguise the shared tomorrow
-  scenario map as the Agent's unique method. A long-horizon owner section must not become a chart
-  forecast; a trader section must not become an owner memo; a quant section must name rules and
-  thresholds rather than tell a story.
 
-HOLDING ACTION DOCTRINE:
-- Daily Brief manages an existing holding. The normal action is HOLD or NO_ACTION.
-- Do not recommend adding merely because price fell today, touched support, missed an MA, or looks
-  mildly oversold. Users do not add every day.
-- ADD_SMALL or ADD is rare. It requires a real valuation/floor discount supported by supplied
-  evidence AND an intact business/funding thesis. Prefer at least two independent confirmations,
-  such as price below a defensible fair/book/normal valuation anchor, unusually wide margin of
-  safety, strong free-cash-flow funding, or a pre-existing DCA/add plan reaching its exact gate.
-- If those confirmations are unavailable, addGate must say what evidence is still required and
-  holdingAction remains HOLD/NO_ACTION.
-- Give SELL and REDUCE serious consideration for held positions. Use them when the Agent's actual
-  thesis breaker occurs: funding/cash-flow deterioration, dividend danger, moat/earnings damage,
-  overvaluation with deteriorating outlook, concentration/risk breach, or a hard stop/rule failure
-  for tactical Agents. Do not sell a long-term holding for ordinary daily noise.
-- holdingAction is HOLD, NO_ACTION, ADD_SMALL, ADD, REDUCE, or SELL. Explain it in
-  holdingActionReason. addGate states the rare condition required to add; sellGate states the
-  concrete condition requiring reduction/exit. Each scenario action must respect these gates.
+def _technical_analysis_instructions() -> str:
+    return """
+Create one visual-chart companion read from only the supplied technicals and price history. Return
+all five frameworks exactly once and in this order: DOW, WYCKOFF, ELLIOTT, FIBONACCI,
+MULTI_TIMEFRAME. Do not invent an exact Elliott wave number, Wyckoff operator intent, pivots, or
+levels. Preserve the supplied heuristic uncertainty.
 
-OTHER FIELDS:
-- signal: TODAY CONFIRMED PLAN, TODAY BROKE PLAN, AHEAD OF PLAN, BEHIND PLAN, or NO SAVED PLAN.
-- tone: good, warn, or bad.
-- buyScore: YOUR Agent's decisive 1-39 or 61-100 rating of today's setup, separate from tomorrow probabilities.
-- headline/summary: concise today-versus-plan conclusion and tomorrow base case.
-- whatMattersTonight: the single most important supplied factor that could change the base case.
-- risk: why the scenario probabilities may be wrong or what data is missing.
-- recap: plain action language for a beginner.
-- agentFit/agentFitReason: whether today's setup fits YOUR method and why.
+Make the result exclusive to the selected Agent. Mark each framework PRIMARY, CONFIRMATION, or
+LOW_WEIGHT according to what this Agent would truly use. Tactical Agents may lead with trend,
+volume, levels, and timeframe agreement. Business/income Agents should keep chart systems at low
+weight and use the supplied structure metrics only to explain whether technical timing supports or
+conflicts with their owner/income plan. structureContext must discuss comparative-advantage,
+business-quality, or dividend evidence only when supplied; never claim monopoly evidence.
 
-Read the same session through the selected Agent. Rex should weight swing/tape confirmation, Nadia
-should weight RSI/MACD/stochastic/moving-average and factor rules, Kai should weight volume/heat and
-fast invalidation, Ben should treat one session as noise unless it changes business/funding quality,
-Sam should ask whether the income plan changed, Vera should ask whether the plan's valuation/risk
-assumptions changed, and AlphaWolf should name the controlling bottleneck. Probabilities and actions
-may differ by Agent, but every number must remain grounded in the same supplied evidence.
+For every framework also return stance: GOOD when its current supplied read supports this Agent's
+plan, BAD when it argues against or invalidates the plan, and MIXED when it is inconclusive. Weight
+and stance are separate: a LOW_WEIGHT framework can be GOOD, and a PRIMARY framework can be BAD.
+
+Give one action, exactly two concrete invalidations, and concise non-repeating prose. The chart is
+the primary explanation; the AI text should interpret it rather than recreate a full Analyst report.
+Confidence is the Agent's decisive 1-39 or 61-100 fit score for this technical setup.
+For an existing holding, a 21-39 technical fit requires TRIM and 1-20 requires SELL; HOLD is only
+valid at 61-79 and BUY at 80-100. For a non-owned candidate, use BUY at 61-100 and WAIT at 1-39.
+The headline, summary, action, and invalidations must agree with that capital decision.
 """.strip()
 
 

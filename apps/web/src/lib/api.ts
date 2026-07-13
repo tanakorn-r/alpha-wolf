@@ -477,42 +477,46 @@ export type TodayPerformanceResponse = {
   buyScore: number;
   headline: string;
   summary: string;
-  todayVsPlan: {
-    status: "ON_PLAN" | "AHEAD" | "BEHIND" | "PLAN_INVALIDATED" | "NO_PLAN";
-    planSource: "USER_POSITION" | "PLATFORM_SETUP" | "INFERRED" | "NO_PLAN";
-    planHorizon: string;
-    impactLevel: "NOISE" | "TACTICAL" | "MATERIAL" | "THESIS_BREAK";
-    enduranceReason: string;
-    plannedSetup: string;
-    actualSession: string;
-    verdict: string;
-    why: string;
-  };
-  tomorrow: {
-    baseCase: "DOWN" | "NEUTRAL" | "UP";
-    probabilityBasis: string;
-    scenarios: Array<{
-      direction: "DOWN" | "NEUTRAL" | "UP";
-      probabilityPct: number;
-      headline: string;
-      likelyReasons: string[];
-      confirmation: string;
-      whatItMeans: string;
-      action: string;
-    }>;
-    overnightWatch: string[];
-  };
-  analysisTitle: string;
-  analysisSections: Array<{ title: string; verdict: string; evidence: string[]; action: string }>;
   holdingAction: "HOLD" | "NO_ACTION" | "ADD_SMALL" | "ADD" | "REDUCE" | "SELL";
   holdingActionReason: string;
-  addGate: string;
-  sellGate: string;
-  whatMattersTonight: string;
+  todayRead: string;
+  horizonAlignment: {
+    status: "ALIGNED" | "WATCH" | "BROKEN" | "NO_PLAN";
+    planHorizon: string;
+    structureRead: string;
+    why: string;
+  };
+  evidence: string[];
+  continueGate: string;
+  exitGate: string;
+  nextCheck: string;
   risk: string;
   recap: string;
   agentFit: "aligned" | "neutral" | "against";
   agentFitReason: string;
+  source?: "openai";
+  model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
+};
+
+export type TechnicalAnalysisResponse = {
+  symbol: string;
+  signal: "BUY" | "HOLD" | "WAIT" | "TRIM" | "SELL";
+  tone: "good" | "warn" | "bad";
+  confidence: number;
+  headline: string;
+  summary: string;
+  structureContext: string;
+  frameworks: Array<{
+    framework: "DOW" | "WYCKOFF" | "ELLIOTT" | "FIBONACCI" | "MULTI_TIMEFRAME";
+    weight: "PRIMARY" | "CONFIRMATION" | "LOW_WEIGHT";
+    stance: "GOOD" | "MIXED" | "BAD";
+    verdict: string;
+    evidence: string;
+  }>;
+  action: string;
+  invalidations: [string, string];
   source?: "openai";
   model?: string;
   agent?: AgentBadge | null;
@@ -1191,6 +1195,25 @@ export async function loadTodayPerformance(symbol: string, strategy?: string, ag
   }
 
   return (await response.json()) as TodayPerformanceResponse;
+}
+
+export async function loadTechnicalAnalysis(symbol: string, agent?: string, force = false): Promise<TechnicalAnalysisResponse> {
+  const params = new URLSearchParams();
+  if (agent) params.set("agent", agent);
+  if (force) params.set("force", "true");
+  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/technical?${params}`, {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!response.ok) {
+    let detail = `Failed to load Technical Analysis: ${response.status}`;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) detail = payload.detail;
+    } catch { /* keep status fallback */ }
+    throw new Error(detail);
+  }
+  return (await response.json()) as TechnicalAnalysisResponse;
 }
 
 export async function loadStrategyPlaybook(params: { strategy: string; region?: "all" | "us" | "th"; limit?: number; candidateLimit?: number; agent?: string; force?: boolean }): Promise<StrategyPlaybookResponse> {

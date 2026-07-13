@@ -151,12 +151,14 @@
   `/hunt-ai?tab=brief`): shared watchlist (holdings + `deepExtras`) + tabs —
   **Daily Signals** (V6 recommendation cards: reasons, target entry, AI score),
   **Daily Brief** (`DailyBriefTab.tsx` → `features/daily-brief/*`: portfolio
-  action queue grouped needs-you/watch/hold, real per-row **Analyze** via
-  `summarizeStock` → `AiVerdictCard`, real portfolio-wide **Ask the desk** via
+  action queue grouped needs-you/watch/hold, compact per-row **Today Plan** via
+  a slim price/tape/position/structure context (batch rows return only the fields rendered, with 56 closes and one news item) → one persona-exclusive action,
+  horizon alignment, 2-3 controlling facts, and continue/exit gates; real portfolio-wide **Ask the desk** via
   `loadPortfolioReview` → shared `components/PortfolioReviewCard.tsx` — no
   hardcoded per-agent text, every "AI" read is a genuine agent-backed call),
   **Buy Timing** (selected-stock timing page backed by `/buy-timing`: plain answer row, 12-month **buy/trim-by-month** map (`monthlyMap`: blended seasonality + dividend-cycle score per calendar month, green=buy/red=trim), real dividend-cycle dips, recovery, edge, seasonality + optional AI narrative),
   **Live Intraday** (delayed ~15-20min quote/chart + on-demand AI signal),
+  **Technical Analysis** (Pro, on-demand Agent read plus a six-month annotated price chart: grounded Dow pivots, Wyckoff heuristic window, Elliott bias, Fibonacci levels, multi-timeframe badges, persona-weighted framework evidence, and structure/dividend context only when aligned),
   **Next 10 ↑** (quota-metered `upward-moves` forecast, cached per
   ticker/timeframe, only 1D/1W real), **Strategy** (5 mode cards + optional
   brief → playbook), **Analyst** (search any ticker → score card + price chart + 6-panel
@@ -169,7 +171,7 @@
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Rebalanced the compact Analyst after it became too shallow: still one AI call and one card with no charts/maps/scorecards/extra Yahoo packs, but the dedicated persona schema now includes a substantive thesis, direct action plan, exactly three persona-ranked evidence points, two risks, and one precise call-changing trigger (1200-token cap). Cache versions were bumped so old thin responses cannot persist.
+- Fixed the shared AI HOLD bias by binding every decisive score to capital direction and ownership mode: held positions scoring 21-39 must TRIM and 1-20 SELL (HOLD is positive, 61-79 only), while candidates map positive scores to buy/build and negative scores to wait/pass; Hunt AI, Analyst, Valuation, Today, Technical and Buy Timing caches were version-bumped.
 
 **Recent Context**
 - Fixed a live crash (`Uncaught RangeError: Invalid currency code : null` in `StockDetailDrawer`'s `DrawerHeader`, `formatCurrency`). Root cause: `formatCurrency(value, currency = "USD")`'s default parameter only covers `undefined`, not an explicit `null` — and `detail.stock.currency` can genuinely be `null` now that the backend's cache-first fallback (prior entries) returns empty fields immediately for a freshly-uncached symbol instead of blocking until real data arrives. Fixed `formatCurrency` (`apps/web/src/lib/format.ts`) to coalesce `currency || "USD"` so `null` and `undefined` both fall back correctly. Checked the file for the same gap elsewhere: `formatMoneyAs` requires a non-optional `"USD" | "THB"` literal union, so TypeScript already catches a stray `null` there at compile time — `formatCurrency` was the only vulnerable one. tsc clean.

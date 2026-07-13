@@ -11,6 +11,7 @@ import {
   loadPortfolio,
   loadPortfolioWatchlist,
   loadStockDetail,
+  loadTechnicalAnalysis,
   loadStrategyPlaybook,
   loadUpwardMoves,
   loadValuationVerdict,
@@ -20,6 +21,7 @@ import {
   type StockAnalysisResponse,
   type StockDetailResponse,
   type StrategyPlaybookResponse,
+  type TechnicalAnalysisResponse,
   type ValuationVerdictResponse,
 } from "../../lib/api";
 import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -39,7 +41,7 @@ type AgentStamped = {
 
 // Bump when persona reasoning changes so persisted browser reports cannot make a newly fixed
 // Agent appear to repeat an older, generic answer.
-const AGENT_REASONING_CACHE_VERSION = "persona-v21-focused-analyst";
+const AGENT_REASONING_CACHE_VERSION = "persona-v23-score-action-consistency";
 
 function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentId: string) {
   return data?.agent?.id === agentId;
@@ -62,6 +64,8 @@ export function useHuntAi() {
   const [analystAnalysis, setAnalystAnalysis] = useState<AnalystBriefResponse | null>(null);
   const [analystLoading, setAnalystLoading] = useState(false);
   const [analystStage, setAnalystStage] = useState<"market_data" | "analysis">("market_data");
+  const [technicalAnalysis, setTechnicalAnalysis] = useState<TechnicalAnalysisResponse | null>(null);
+  const [technicalAiLoading, setTechnicalAiLoading] = useState(false);
   const [intradayAnalysis, setIntradayAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [intradayAiLoading, setIntradayAiLoading] = useState(false);
   const [n100Timeframe, setN100Timeframe] = useState<N100Timeframe>("1D");
@@ -125,6 +129,7 @@ export function useHuntAi() {
     setAnalystAnalysis(null);
     setAnalystDetail(null);
     setIntradayAnalysis(null);
+    setTechnicalAnalysis(null);
     setValuationRunKey(0);
     setValuationSyncTicker("");
     setTimingRunKey(0);
@@ -197,12 +202,19 @@ export function useHuntAi() {
     staleTime: 300_000,
     refetchInterval: 300_000,
   });
+  const technicalDetailQuery = useQuery({
+    queryKey: ["hunt-technical-detail", activeTicker],
+    queryFn: () => loadStockDetail(activeTicker, "momentum"),
+    enabled: tab === "technical" && Boolean(activeTicker),
+    staleTime: 300_000,
+  });
 
   useEffect(() => setIntradayAnalysis(null), [activeTicker, activeAgentId]);
   useEffect(() => {
     setAnalystTicker("");
     setAnalystDetail(null);
     setAnalystAnalysis(null);
+    setTechnicalAnalysis(null);
     setAiError("");
   }, [activeTicker]);
   const analystCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:analyst:${activeTicker}:${activeAgentId}`;
@@ -218,6 +230,11 @@ export function useHuntAi() {
   const intradayAnalysisReport = matchesAgent(intradayAnalysis, activeAgentId)
     ? { analyzedAt: new Date().toISOString(), data: intradayAnalysis }
     : matchesAgent(intradayAnalysisCached?.data, activeAgentId) ? intradayAnalysisCached : undefined;
+  const technicalCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:technical-v2-symbol:${activeTicker}:${activeAgentId}`;
+  const technicalCached = getHuntAiCache<TechnicalAnalysisResponse>(technicalCacheKey);
+  const technicalReport = technicalAnalysis?.symbol === activeTicker && matchesAgent(technicalAnalysis, activeAgentId)
+    ? technicalAnalysis
+    : technicalCached?.data.symbol === activeTicker && matchesAgent(technicalCached.data, activeAgentId) ? technicalCached.data : null;
 
   const n100CacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:${activeTicker}:${n100Timeframe}:${activeAgentId}`;
   const n100Cached = useWolfStore((s) => s.getNext10ReportCache(n100CacheKey));
@@ -252,7 +269,7 @@ export function useHuntAi() {
     setN100RunKey((value) => value + 1);
   }
 
-  const premiumTabs = new Set<HuntTab>(["brief", "timing", "replay", "analyst"]);
+  const premiumTabs = new Set<HuntTab>(["brief", "timing", "technical", "replay", "analyst"]);
   function setTab(next: HuntTab) {
     setAiError("");
     setTabState(next);
@@ -345,6 +362,31 @@ export function useHuntAi() {
             },
           }]
         : [],
+    },
+
+    technical: {
+      ticker: activeTicker,
+      detail: technicalDetailQuery.data ?? null,
+      pending: technicalDetailQuery.isPending,
+      failed: technicalDetailQuery.isError,
+      analysis: technicalReport,
+      aiLoading: technicalAiLoading,
+      retry: () => void technicalDetailQuery.refetch(),
+      async run() {
+        if (!activeTicker) return;
+        setTechnicalAiLoading(true);
+        setAiError("");
+        try {
+          const result = await loadTechnicalAnalysis(activeTicker, activeAgentId, Boolean(technicalReport));
+          setTechnicalAnalysis(result);
+          setHuntAiCache(technicalCacheKey, { analyzedAt: new Date().toISOString(), data: result });
+          void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
+        } catch (error) {
+          setAiError(error instanceof Error ? error.message : "Technical Analysis could not generate a chart read.");
+        } finally {
+          setTechnicalAiLoading(false);
+        }
+      },
     },
 
     intraday: {

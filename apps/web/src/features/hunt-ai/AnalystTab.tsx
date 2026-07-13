@@ -50,7 +50,7 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
           agent={analysis.agent}
           label="Analyst decision"
           score={analysis.confidence}
-          scoreLabel="Agent fit"
+          scoreLabel="Decision conviction"
           signal={analysis.signal}
           headline={analysis.headline}
           summary={<span className="whitespace-pre-line">{analysis.recap || analysis.summary}</span>}

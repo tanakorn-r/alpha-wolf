@@ -10,7 +10,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.ai.context import _funding_quality_audit, _structural_advantage_audit, build_analysis_context
-from internal.ai.openai_client import _normalize_today_scenarios, _selected_model
+from internal.ai.openai_client import _selected_model
 from internal.market.technicals import build_technicals
 from models import BuyTimingNarrative, StockAnalysis, TodayPerformance
 from pydantic import ValidationError
@@ -268,56 +268,36 @@ class AiPerformanceTests(unittest.TestCase):
         self.assertEqual(audit["dividendQuality"]["status"], "SUPPORTED_PROXY")
         self.assertTrue(audit["monopolyEvidence"].startswith("UNPROVEN"))
 
-    def test_tomorrow_probabilities_must_total_one_hundred(self) -> None:
+    def test_today_plan_contract_is_compact(self) -> None:
         payload = {
             "signal": "TODAY CONFIRMED PLAN",
             "tone": "good",
             "buyScore": 72,
             "headline": "Today held the plan.",
-            "summary": "The base case is neutral consolidation.",
-            "todayVsPlan": {
-                "status": "ON_PLAN",
-                "planSource": "USER_POSITION",
-                "planHorizon": "5 years",
-                "impactLevel": "NOISE",
-                "enduranceReason": "One session does not change owner earnings.",
-                "plannedSetup": "Hold above support.",
-                "actualSession": "Price held above support.",
-                "verdict": "Plan intact.",
-                "why": "The supplied close remained above support.",
-            },
-            "tomorrow": {
-                "baseCase": "NEUTRAL",
-                "probabilityBasis": "Conditional Agent judgment from supplied tape.",
-                "scenarios": [
-                    {"direction": "DOWN", "probabilityPct": 25, "headline": "Support fails", "likelyReasons": ["Market weakness"], "confirmation": "Close below support", "whatItMeans": "Plan weakens", "action": "Reduce risk"},
-                    {"direction": "NEUTRAL", "probabilityPct": 45, "headline": "Range holds", "likelyReasons": ["No catalyst"], "confirmation": "Price stays in range", "whatItMeans": "Plan unchanged", "action": "Hold"},
-                    {"direction": "UP", "probabilityPct": 30, "headline": "Resistance breaks", "likelyReasons": ["Volume confirmation"], "confirmation": "Close above resistance", "whatItMeans": "Plan advances", "action": "Build"},
-                ],
-                "overnightWatch": ["Market direction"],
-            },
-            "analysisTitle": "Ben's owner update",
-            "analysisSections": [
-                {"title": "Business", "verdict": "Unchanged", "evidence": ["No thesis breaker"], "action": "Hold"},
-                {"title": "Owner earnings", "verdict": "Unchanged", "evidence": ["No funding change"], "action": "No action"},
-                {"title": "Five-year thesis", "verdict": "Intact", "evidence": ["Daily move is noise"], "action": "Keep holding"},
-            ],
+            "summary": "Hold because the owner thesis remains intact.",
             "holdingAction": "HOLD",
             "holdingActionReason": "No thesis breaker occurred today.",
-            "addGate": "Add only at a genuine valuation discount with intact cash-flow funding.",
-            "sellGate": "Sell if the funding or business thesis breaks.",
-            "whatMattersTonight": "Market direction.",
+            "todayRead": "One session does not change owner earnings.",
+            "horizonAlignment": {
+                "status": "ALIGNED",
+                "planHorizon": "5 years",
+                "structureRead": "The supplied business structure remains intact.",
+                "why": "No supplied structural metric broke the plan.",
+            },
+            "evidence": ["No thesis breaker", "Price remains within the supplied plan"],
+            "continueGate": "Continue while owner earnings remain intact.",
+            "exitGate": "Exit if the funding or business thesis breaks.",
+            "nextCheck": "Check the next reported cash-flow update.",
             "risk": "No overnight data is known.",
             "recap": "Hold the plan.",
             "agentFit": "aligned",
             "agentFitReason": "The setup fits my rule.",
         }
 
-        self.assertEqual(TodayPerformance.model_validate(payload).tomorrow.baseCase, "NEUTRAL")
-        payload["tomorrow"]["scenarios"][0]["probabilityPct"] = 20
-        normalized = _normalize_today_scenarios(TodayPerformance.model_validate(payload))
-        self.assertEqual(sum(item.probabilityPct for item in normalized.tomorrow.scenarios), 100)
-        self.assertEqual(normalized.tomorrow.baseCase, "NEUTRAL")
+        result = TodayPerformance.model_validate(payload)
+        self.assertEqual(result.holdingAction, "HOLD")
+        self.assertEqual(result.horizonAlignment.status, "ALIGNED")
+        self.assertLessEqual(len(result.evidence), 3)
 
 
 if __name__ == "__main__":

@@ -325,7 +325,7 @@ class AnalystBrief(BaseModel):
     signal: str
     headline: str
     tone: Literal["good", "warn", "bad"]
-    confidence: DecisiveScore | None = None
+    confidence: int | None = Field(default=None, ge=1, le=100)
     summary: str
     thesis: str
     actionPlan: str
@@ -514,34 +514,13 @@ class TodayPlanAssessment(BaseModel):
     why: str
 
 
-class TomorrowScenario(BaseModel):
+class TodayHorizonAlignment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    direction: Literal["DOWN", "NEUTRAL", "UP"]
-    probabilityPct: int = Field(ge=0, le=100)
-    headline: str
-    likelyReasons: list[str] = Field(min_length=1, max_length=4)
-    confirmation: str
-    whatItMeans: str
-    action: str
-
-
-class TomorrowScenarioMap(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    baseCase: Literal["DOWN", "NEUTRAL", "UP"]
-    probabilityBasis: str
-    scenarios: list[TomorrowScenario] = Field(min_length=3, max_length=3)
-    overnightWatch: list[str] = Field(min_length=1, max_length=4)
-
-
-class AgentDailySection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    title: str
-    verdict: str
-    evidence: list[str] = Field(min_length=1, max_length=4)
-    action: str
+    status: Literal["ALIGNED", "WATCH", "BROKEN", "NO_PLAN"]
+    planHorizon: str
+    structureRead: str
+    why: str
 
 
 class TodayPerformance(BaseModel):
@@ -552,15 +531,14 @@ class TodayPerformance(BaseModel):
     buyScore: DecisiveScore
     headline: str
     summary: str
-    todayVsPlan: TodayPlanAssessment
-    tomorrow: TomorrowScenarioMap
-    analysisTitle: str
-    analysisSections: list[AgentDailySection] = Field(min_length=3, max_length=3)
     holdingAction: Literal["HOLD", "NO_ACTION", "ADD_SMALL", "ADD", "REDUCE", "SELL"]
     holdingActionReason: str
-    addGate: str
-    sellGate: str
-    whatMattersTonight: str
+    todayRead: str
+    horizonAlignment: TodayHorizonAlignment
+    evidence: list[str] = Field(min_length=2, max_length=3)
+    continueGate: str
+    exitGate: str
+    nextCheck: str
     risk: str
     recap: str
     agentFit: Literal["aligned", "neutral", "against"]
@@ -568,6 +546,38 @@ class TodayPerformance(BaseModel):
 
 
 class TodayPerformanceResponse(TodayPerformance):
+    source: Literal["openai"]
+    model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
+
+
+class TechnicalFrameworkRead(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    framework: Literal["DOW", "WYCKOFF", "ELLIOTT", "FIBONACCI", "MULTI_TIMEFRAME"]
+    weight: Literal["PRIMARY", "CONFIRMATION", "LOW_WEIGHT"]
+    stance: Literal["GOOD", "MIXED", "BAD"]
+    verdict: str
+    evidence: str
+
+
+class TechnicalAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    signal: Literal["BUY", "HOLD", "WAIT", "TRIM", "SELL"]
+    tone: Literal["good", "warn", "bad"]
+    confidence: DecisiveScore
+    headline: str
+    summary: str
+    structureContext: str
+    frameworks: list[TechnicalFrameworkRead] = Field(min_length=5, max_length=5)
+    action: str
+    invalidations: list[str] = Field(min_length=2, max_length=2)
+
+
+class TechnicalAnalysisResponse(TechnicalAnalysis):
+    symbol: str
     source: Literal["openai"]
     model: str
     agent: AgentBadge | None = None

@@ -10,7 +10,7 @@ import { NavIcon, type NavIconKind } from "./NavIcon";
 const items: Array<{ to: string; label: string; kind: NavIconKind }> = [
   { to: "/", label: "Dashboard", kind: "dashboard" },
   { to: "/scanner", label: "Stock Hunt", kind: "search" },
-  { to: "/calendar", label: "Dividend Hunt", kind: "discover" }
+  // { to: "/calendar", label: "Dividend Hunt", kind: "discover" }
 ];
 
 export function AppSidebar() {

@@ -8,11 +8,12 @@ import { DailyBriefTab } from "../features/hunt-ai/DailyBriefTab";
 import { HuntTabsBar } from "../features/hunt-ai/HuntTabsBar";
 import { ProPromoBanner } from "../features/hunt-ai/ProPromoBanner";
 import { SignalsTab } from "../features/hunt-ai/SignalsTab";
+import { TechnicalAnalysisTab } from "../features/hunt-ai/TechnicalAnalysisTab";
 import { WatchlistBar } from "../features/hunt-ai/WatchlistBar";
 import type { HuntTab } from "../features/hunt-ai/lib";
 import { useHuntAi } from "../features/hunt-ai/useHuntAi";
 
-const validTabs = new Set<HuntTab>(["signals", "brief", "timing", "replay", "analyst"]);
+const validTabs = new Set<HuntTab>(["signals", "brief", "timing", "technical", "replay", "analyst"]);
 
 export function HuntAiPage() {
   const hunt = useHuntAi();
@@ -31,6 +32,7 @@ export function HuntAiPage() {
       {hunt.tab === "signals" ? <SignalsTab hunt={hunt} /> : null}
       {hunt.tab === "brief" ? <DailyBriefTab hunt={hunt} /> : null}
       {hunt.tab === "timing" ? hunt.premium ? <BuyTimingTab hunt={hunt} /> : <LockedTrialCard title="Buy Timing" onUnlock={hunt.unlockPremium} /> : null}
+      {hunt.tab === "technical" ? hunt.premium ? <TechnicalAnalysisTab hunt={hunt} /> : <LockedTrialCard title="Technical Analysis" onUnlock={hunt.unlockPremium} /> : null}
       {hunt.tab === "replay" ? hunt.premium ? <BacktradeTab hunt={hunt} /> : <LockedTrialCard title="AI Replay" onUnlock={hunt.unlockPremium} /> : null}
       {hunt.aiError ? <ErrorCard message={hunt.aiError} /> : null}
       {hunt.tab === "analyst" ? <AnalystTab hunt={hunt} /> : null}

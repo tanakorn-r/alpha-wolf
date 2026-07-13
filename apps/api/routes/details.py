@@ -54,8 +54,26 @@ def details_batch(payload: dict[str, Any] = Body(default_factory=dict)) -> dict[
                 print(f"Warning: batch detail failed for {symbol}: {exc}")
                 value = None
             if value is not None:
-                results[symbol] = value
+                results[symbol] = _compact_daily_detail(value)
     return {"items": results}
+
+
+def _compact_daily_detail(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Daily Brief needs a decision row, not the full six-tab stock-detail payload."""
+    business = bundle.get("business") or {}
+    technicals = bundle.get("technicals") or {}
+    return {
+        "stock": bundle.get("stock") or {},
+        "verdict": bundle.get("verdict") or {},
+        "technicals": {"sma50": technicals.get("sma50")},
+        "business": {
+            "dividendYield": business.get("dividendYield"),
+            "targetMeanPrice": business.get("targetMeanPrice"),
+        },
+        "history": (bundle.get("history") or [])[-56:],
+        "news": (bundle.get("news") or [])[:1],
+        "dataPending": bool(bundle.get("dataPending")),
+    }
 
 
 @router.get("/api/details/{symbol}")
@@ -118,7 +136,7 @@ def details_buy_timing(
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
-    ai_cache_key = f"{account_scope}:ai-buy-timing:v28-live-current-month:{normalized}:{strategy}:{agent_id}"
+    ai_cache_key = f"{account_scope}:ai-buy-timing:v29-decisive-action:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", ai_cache_key)
     if cached is not None and not force:
         return cached

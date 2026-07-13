@@ -180,60 +180,39 @@ function toneColor(tone?: BriefTone | string) {
 
 function TodayPanel({ data }: { data: TodayPerformanceResponse }) {
   const color = toneColor(data.tone);
-  const plan = data.todayVsPlan;
+  const alignment = data.horizonAlignment;
   return (
-    <AgentCall agent={data.agent} label="Today's read" score={data.buyScore} scoreLabel="today setup" signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Today only · generated on request · not financial advice">
-      <div className="mt-4 rounded-[11px] border border-[#2a2a31] bg-[#0e0e10] p-3.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#8c8c95]">Today vs plan</div>
-          <div className="flex gap-1.5">
-            <span className="rounded-[5px] border border-[#2a2a31] px-2 py-1 font-mono text-[9px] text-[#8c8c95]">{plan.planSource}</span>
-            <span className="rounded-[5px] border border-[#2a2a31] px-2 py-1 font-mono text-[9px] text-[#8c8c95]">{plan.impactLevel}</span>
-            <span className="rounded-[5px] border px-2 py-1 font-mono text-[9px] font-bold" style={{ color, borderColor: `${color}55`, background: `${color}0d` }}>{plan.status}</span>
-          </div>
-        </div>
-        <div className="mt-3 grid gap-2.5 min-[720px]:grid-cols-2">
-          <TodayField label="What we planned" body={plan.plannedSetup} />
-          <TodayField label="What happened today" body={plan.actualSession} />
-        </div>
-        <div className="mt-2.5 rounded-[8px] border border-[#252529] bg-white/[0.02] px-3 py-2.5">
-          <div className="text-[12px] font-bold" style={{ color }}>{plan.verdict}</div>
-          <div className="mt-1 text-[11px] leading-[1.5] text-[#9b9ba3]">{plan.why}</div>
-          <div className="mt-2 border-t border-[#252529] pt-2 text-[10px] leading-[1.5] text-[#777780]"><span className="font-bold text-[#8c8c95]">Horizon · {plan.planHorizon}:</span> {plan.enduranceReason}</div>
-        </div>
-      </div>
-
-      <div className="mt-3 grid gap-2.5 min-[820px]:grid-cols-3">
+    <AgentCall agent={data.agent} label="Today's plan" score={data.buyScore} scoreLabel="plan fit" signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Today only · generated on request · not financial advice">
+      <div className="mt-4 grid gap-2.5 min-[760px]:grid-cols-[0.8fr_1.2fr]">
         <div className="rounded-[10px] border bg-[#0e0e10] p-3.5" style={{ borderColor: `${holdingActionColor(data.holdingAction)}55` }}>
-          <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Holding action today</div>
+          <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Do this today</div>
           <div className="mt-1.5 font-mono text-[17px] font-extrabold" style={{ color: holdingActionColor(data.holdingAction) }}>{data.holdingAction}</div>
           <div className="mt-2 text-[11px] leading-[1.5] text-[#bcbcc2]">{data.holdingActionReason}</div>
         </div>
-        <TodayField label="Rare add gate" body={data.addGate} />
-        <TodayField label="Reduce / sell gate" body={data.sellGate} />
-      </div>
-
-      <div className="mt-4">
-        <div className="flex flex-wrap items-end justify-between gap-2">
-          <div>
-            <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#8c8c95]">Agent analysis</div>
-            <div className="mt-1 text-[13px] font-semibold text-[#ececee]">{data.analysisTitle}</div>
+        <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">Future alignment · {alignment.planHorizon}</div>
+            <span className="rounded-[5px] border px-2 py-1 font-mono text-[9px] font-bold" style={{ color, borderColor: `${color}55`, background: `${color}0d` }}>{alignment.status}</span>
           </div>
-          <div className="max-w-[520px] text-right text-[10px] leading-[1.45] text-[#6f6f78]">{data.todayVsPlan.planHorizon}</div>
-        </div>
-        <div className="mt-3 grid gap-2.5 min-[900px]:grid-cols-3">
-          {data.analysisSections.map((section) => <AgentAnalysisCard key={section.title} section={section} color={color} />)}
+          <div className="mt-2 text-[12.5px] font-bold text-[#ececee]">{alignment.structureRead}</div>
+          <div className="mt-1 text-[11px] leading-[1.5] text-[#9b9ba3]">{alignment.why}</div>
         </div>
       </div>
 
-      <div className="mt-3 grid gap-2.5 min-[720px]:grid-cols-2">
-        <TodayField label="What matters tonight" body={data.whatMattersTonight} />
-        <TodayField label="Overnight watch" body={data.tomorrow.overnightWatch.join(" · ")} />
+      <div className="mt-3 rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3.5">
+        <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">Why this Agent chose it</div>
+        <p className="mt-1 text-[12px] leading-[1.5] text-[#bcbcc2]">{data.todayRead}</p>
+        <ul className="mt-2 grid gap-1 text-[11px] leading-[1.45] text-[#9b9ba3] min-[760px]:grid-cols-3">
+          {data.evidence.map((item, index) => <li key={index}>• {item}</li>)}
+        </ul>
       </div>
-      <div className="mt-2.5 rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3.5">
-        <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">Risk</div>
-        <p className="mt-1 text-[12.5px] leading-[1.55] text-[#9b9ba3]">{data.risk}</p>
+
+      <div className="mt-3 grid gap-2.5 min-[760px]:grid-cols-3">
+        <TodayField label="Continue / add if" body={data.continueGate} />
+        <TodayField label="Reduce / exit if" body={data.exitGate} />
+        <TodayField label="Check next" body={data.nextCheck} />
       </div>
+      <p className="mt-2.5 text-[10.5px] leading-[1.45] text-[#6f6f78]">Risk: {data.risk}</p>
     </AgentCall>
   );
 }
@@ -242,26 +221,6 @@ function holdingActionColor(action: TodayPerformanceResponse["holdingAction"]) {
   if (action === "ADD" || action === "ADD_SMALL") return "#3ecf8e";
   if (action === "REDUCE" || action === "SELL") return "#ff5f68";
   return "#f5c451";
-}
-
-function AgentAnalysisCard({ section, color }: { section: TodayPerformanceResponse["analysisSections"][number]; color: string }) {
-  return (
-    <div className="rounded-[11px] border bg-[#0e0e10] p-3.5" style={{ borderColor: `${color}45` }}>
-      <div className="text-[10px] font-extrabold uppercase tracking-[0.07em]" style={{ color }}>{section.title}</div>
-      <div className="mt-2 text-[12.5px] font-bold leading-[1.4] text-[#ececee]">{section.verdict}</div>
-      <div className="mt-2">
-        <div className="text-[8.5px] font-bold uppercase tracking-[0.08em] text-[#6f6f78]">Evidence used</div>
-        <ul className="mt-1.5 space-y-1 text-[10.5px] leading-[1.45] text-[#9b9ba3]">
-          {section.evidence.map((item, index) => <li key={index}>• {item}</li>)}
-        </ul>
-      </div>
-      <ScenarioLine label="My action" body={section.action} color={color} />
-    </div>
-  );
-}
-
-function ScenarioLine({ label, body, color }: { label: string; body: string; color: string }) {
-  return <div className="mt-2 border-t border-[#24242a] pt-2"><div className="text-[8.5px] font-bold uppercase tracking-[0.06em]" style={{ color }}>{label}</div><div className="mt-1 text-[10.5px] leading-[1.45] text-[#bcbcc2]">{body}</div></div>;
 }
 
 function TodayField({ label, body }: { label: string; body: string }) {

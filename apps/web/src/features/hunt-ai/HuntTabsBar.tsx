@@ -5,6 +5,7 @@ const tabs: Array<{ key: HuntTab; label: string; premium?: boolean; tag?: string
   { key: "signals", label: "Signals" },
   { key: "brief", label: "Daily Brief", premium: true, tag: "PRO", tone: "pro" },
   { key: "timing", label: "Buy Timing", premium: true, tag: "PRO", tone: "pro" },
+  { key: "technical", label: "Technical Analysis", premium: true, tag: "PRO", tone: "pro" },
   { key: "replay", label: "AI Replay", premium: true, tag: "LAB", tone: "ultra" },
   { key: "analyst", label: "Analyst", premium: true, tag: "PRO", tone: "pro" },
 ];
@@ -44,6 +45,7 @@ function TabGlyph({ tab }: { tab: HuntTab }) {
   if (tab === "signals") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 11l3-4 3 3 4-6 2 3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   if (tab === "brief") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M3 3.5h10M3 7h7M3 10.5h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="M12 7h1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
   if (tab === "timing") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.4" /><path d="M8 4.7V8l2.4 1.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  if (tab === "technical") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 12.5 5.2 9l2.2 1.8L11 5.3l3 1.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M2 3.5h12" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2 2" /></svg>;
   if (tab === "replay") return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M5.2 4H2.8v-2.4M3 4a5.8 5.8 0 1 1-1 5.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /><path d="M6.5 6v4l3-2-3-2Z" fill="currentColor" /></svg>;
   return <svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="1.5" y="2.5" width="13" height="11" rx="1.6" stroke="currentColor" strokeWidth="1.4" /><path d="M4 6h8M4 9h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
 }

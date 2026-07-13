@@ -48,6 +48,42 @@ def build_analysis_context(
     return json_safe(context)
 
 
+def build_today_context(bundle: dict[str, Any], *, position_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Keep Daily Brief focused on the current decision, not a second full Analyst report."""
+    stock = bundle.get("stock") or {}
+    business = bundle.get("business") or {}
+    technicals = bundle.get("technicals") or {}
+    performance = bundle.get("performance") or {}
+    verdict = bundle.get("verdict") or {}
+    return json_safe({
+        "stock": _pick(stock, "symbol", "name", "price", "change", "changePct", "currency", "volume"),
+        "selectedStrategy": bundle.get("strategy"),
+        "positionContext": position_context or {"isHolding": False},
+        "today": {
+            "technicals": _pick(technicals, "signal", "rsi14", "macd", "macdSignal", "sma20", "sma50", "sma200", "support", "resistance", "momentum", "volumeRatio", "volatility"),
+            "returns": performance.get("returns") or {},
+            "platformSetup": _pick(verdict, "action", "score", "headline", "entryPrice", "targetPrice", "stopLoss"),
+            "recentNews": (bundle.get("news") or [])[:3],
+            "recentCloses": _compact_price_history(bundle.get("history") or [])[-20:],
+        },
+        "structure": _pick(business, "peRatio", "forwardPE", "priceToBook", "targetMeanPrice", "revenueGrowth", "earningsGrowth", "profitMargin", "roe", "debtToEquity", "dividendYield", "payoutRatio"),
+        "instruction": "Use structure only to decide whether today's move changes this Agent's horizon. Do not write a full company analysis.",
+    })
+
+
+def build_technical_context(bundle: dict[str, Any], *, position_context: dict[str, Any] | None = None) -> dict[str, Any]:
+    stock = bundle.get("stock") or {}
+    business = bundle.get("business") or {}
+    technicals = bundle.get("technicals") or {}
+    return json_safe({
+        "stock": _pick(stock, "symbol", "name", "price", "changePct", "currency", "volume"),
+        "positionContext": position_context or {"isHolding": False},
+        "technicals": _pick(technicals, "signal", "rsi14", "macd", "macdSignal", "sma20", "sma50", "sma200", "support", "resistance", "volumeRatio", "dowTheory", "wyckoff", "elliottWave", "fibonacci", "multiTimeframe"),
+        "structure": _pick(business, "peRatio", "forwardPE", "priceToBook", "targetMeanPrice", "revenueGrowth", "earningsGrowth", "profitMargin", "roe", "debtToEquity", "dividendYield", "payoutRatio"),
+        "recentPriceHistory": _compact_price_history(bundle.get("history") or [])[-72:],
+    })
+
+
 def _compact_financial_research(value: dict[str, Any]) -> dict[str, Any]:
     compact: dict[str, Any] = {}
     for key, item in value.items():
