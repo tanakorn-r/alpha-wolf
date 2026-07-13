@@ -10,6 +10,7 @@ import pandas as pd
 
 from internal.ai.agents import agent_badge, normalize_agent_id
 from internal.ai.openai_client import OpenAIAnalysisError, decide_backtrade_with_openai
+from internal.store.backtrade_jobs import load_backtrade_job, save_backtrade_job
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 from internal.yahoo.client import _refresh_in_background, fetch_history, ticker as make_ticker
 
@@ -50,6 +51,7 @@ def create_backtrade_job(account_scope: str, payload: dict[str, Any]) -> dict[st
             "result": None,
             "error": None,
         }
+        save_backtrade_job(_JOBS[job_id])
     _EXECUTOR.submit(_run_job, job_id, symbol, agent_id, years, contribution, mode)
     return _public_job(_JOBS[job_id])
 
@@ -57,6 +59,13 @@ def create_backtrade_job(account_scope: str, payload: dict[str, Any]) -> dict[st
 def get_backtrade_job(account_scope: str, job_id: str) -> dict[str, Any] | None:
     with _LOCK:
         job = _JOBS.get(job_id)
+        if not job:
+            job = load_backtrade_job(job_id, account_scope)
+            if job and job.get("status") in {"queued", "running"}:
+                job.update(status="failed", stage="Interrupted", error="The server restarted before this replay completed. Run it again.", progress=100)
+                save_backtrade_job(job)
+            if job:
+                _JOBS[job_id] = job
         if not job or job["accountScope"] != account_scope:
             return None
         return _public_job(job)
@@ -99,8 +108,11 @@ def _run_job(job_id: str, symbol: str, agent_id: str, years: int, contribution: 
         _update(job_id, stage="Replaying point-in-time decisions", progress=5)
         result = _simulate(job_id, frame, event_indices, start_index, contribution, agent_id, mode, financial_timeline)
         _update(job_id, status="complete", stage="Complete", progress=100, result=result)
+        save_backtrade_job(_JOBS[job_id])
     except Exception as exc:
         _update(job_id, status="failed", stage="Failed", error=str(exc), progress=100)
+        if job_id in _JOBS:
+            save_backtrade_job(_JOBS[job_id])
 
 
 def _event_indices(frame: pd.DataFrame, start: int, mode: str) -> list[int]:

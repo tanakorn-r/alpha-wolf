@@ -221,6 +221,15 @@ def analyst_report(
         result = analyze_brief_with_openai(context, agent_id)
     except OpenAIAnalysisError as exc:
         release_ai_run(usage_user_id)
+        if cached_analysis is not None:
+            # A failed explicit refresh must never erase a previously saved report. Return the
+            # durable DB result with current stored market detail and let the UI keep working.
+            return {
+                "status": "ready",
+                "detail": bundle,
+                "analysis": cached_analysis,
+                "refreshWarning": str(exc),
+            }
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     finally:
         print(f"Analyst OpenAI timing {normalized}: {time.monotonic() - openai_started_at:.3f}s")

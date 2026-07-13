@@ -22,7 +22,7 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 
 def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_refresh: bool = False) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
-    cache_key = f"v9-live-current-month:{normalized}:{strategy}"
+    cache_key = f"v10-money-weighted-backtest:{normalized}:{strategy}"
     cached = cache_get(BUY_TIMING_CACHE_NAMESPACE, cache_key)
     if cached is not None and not force_refresh:
         return cached
@@ -191,7 +191,12 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_re
 
 def apply_ai_narrative(result: dict[str, Any], narrative: dict[str, Any]) -> dict[str, Any]:
     narrative_agent = narrative.get("agent") if isinstance(narrative.get("agent"), dict) else {}
-    monthly_plan = _valid_agent_monthly_plan(result.get("monthlyMap"), narrative.get("monthlyPlan"), narrative_agent.get("id"), result.get("businessStructure"))
+    monthly_plan = _valid_agent_monthly_plan(
+        result.get("monthlyMap"),
+        narrative.get("monthlyPlan"),
+        narrative_agent.get("id"),
+        result.get("businessStructure"),
+    )
     action = narrative.get("action") or result["action"]
     agent_fit = narrative.get("agentFit")
     if action != "BUY" and agent_fit == "aligned":
@@ -221,7 +226,12 @@ def apply_ai_narrative(result: dict[str, Any], narrative: dict[str, Any]) -> dic
     }
 
 
-def _valid_agent_monthly_plan(calculated: Any, proposed: Any, agent_id: str | None = None, business_structure: Any = None) -> list[dict[str, Any]] | None:
+def _valid_agent_monthly_plan(
+    calculated: Any,
+    proposed: Any,
+    agent_id: str | None = None,
+    business_structure: Any = None,
+) -> list[dict[str, Any]] | None:
     if not isinstance(calculated, list) or not isinstance(proposed, list):
         return None
     evidence = {item.get("month"): item for item in calculated if isinstance(item, dict) and item.get("month") in MONTHS}
@@ -252,8 +262,8 @@ def _valid_agent_monthly_plan(calculated: Any, proposed: Any, agent_id: str | No
             "reason": decision.get("reason"),
         })
 
-    # Preserve the Agent's decision. Do not silently turn HOLD into ADD_SMALL to satisfy a generic
-    # DCA quota: Ben, Sam, Vera, Rex, Kai, Nadia, and AlphaWolf have different evidence gates.
+    # Preserve the selected Agent's decision. Monthly-budget semantics are universal, while the
+    # action and size must remain the result of that Agent's own evidence gates and character.
     return plan
 
 
@@ -384,15 +394,15 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
         action = decision.get("action")
         fallback_pct = 100 if action in {"BUY", "ADD_SMALL"} else 0
         buy_pct = max(0.0, min(100.0, float(decision.get("buyBudgetPct", fallback_pct) or 0)))
-        # The available pool includes this month's contribution, cash preserved by earlier
-        # HOLD calls, and proceeds from trims. A later BUY must be able to redeploy that
-        # accumulated reserve or the timing strategy is unfairly modeled as permanent cash drag.
-        buy_amount = strategy_cash * buy_pct / 100.0
+        # Sizing belongs to this month's delegated DCA envelope, not the whole accumulated cash
+        # reserve. Prior HOLD cash, trim proceeds, and dividends stay available as reserve but a
+        # later "50%" instruction must never sweep half of all of it at once.
+        buy_amount = min(strategy_cash, monthly_contribution * buy_pct / 100.0)
         if buy_amount > 0:
             strategy_shares += buy_amount / price
             strategy_cash -= buy_amount
             invested_months += 1
-        no_div_buy_amount = strategy_no_div_cash * buy_pct / 100.0
+        no_div_buy_amount = min(strategy_no_div_cash, monthly_contribution * buy_pct / 100.0)
         if no_div_buy_amount > 0:
             strategy_no_div_shares += no_div_buy_amount / price
             strategy_no_div_cash -= no_div_buy_amount
@@ -430,6 +440,18 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
     benchmark_return = (benchmark_value / contributed - 1.0) * 100.0
     strategy_no_div_return = (strategy_no_div_value / contributed - 1.0) * 100.0
     benchmark_no_div_return = (benchmark_no_div_value / contributed - 1.0) * 100.0
+    contribution_flows = [
+        (date.fromisoformat(str(item["date"])), -monthly_contribution)
+        for item in ledger
+    ]
+    final_date = date.fromisoformat(str(ledger[-1]["date"]))
+    strategy_xirr = _xirr([*contribution_flows, (final_date, account_value)])
+    benchmark_xirr = _xirr([*contribution_flows, (final_date, benchmark_value)])
+    exposure_normalized_return = (
+        strategy_return / (average_stock_exposure / 100.0)
+        if average_stock_exposure > 0 else None
+    )
+    matched_exposure_benchmark_return = benchmark_return * average_stock_exposure / 100.0
     return {
         "years": round(observed_months / 12.0, 1),
         "observedMonths": observed_months,
@@ -437,6 +459,10 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
         "skippedMonths": observed_months - invested_months,
         "strategyReturnPct": round(strategy_return, 2),
         "alwaysBuyReturnPct": round(benchmark_return, 2),
+        "strategyMoneyWeightedReturnPct": round(strategy_xirr * 100.0, 2) if strategy_xirr is not None else None,
+        "alwaysBuyMoneyWeightedReturnPct": round(benchmark_xirr * 100.0, 2) if benchmark_xirr is not None else None,
+        "exposureNormalizedReturnPct": round(exposure_normalized_return, 2) if exposure_normalized_return is not None else None,
+        "matchedExposureBenchmarkReturnPct": round(matched_exposure_benchmark_return, 2),
         "strategyReturnWithoutDividendsPct": round(strategy_no_div_return, 2),
         "alwaysBuyReturnWithoutDividendsPct": round(benchmark_no_div_return, 2),
         "strategyDividendReturnBoostPct": round(strategy_return - strategy_no_div_return, 2),
@@ -455,9 +481,40 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
         "profitLoss": round(account_value - contributed, 2),
         "alwaysBuyEndingValue": round(benchmark_value, 2),
         "ledger": ledger,
-        "method": "Starts at 0 and adds 100 each historical month. Buys deploy the stated percentage of all available DCA cash, including prior unspent budget, trim proceeds, and received dividends; trims sell the stated share percentage. The Agent accumulates dividends as cash for later plan buys, while normal DCA reinvests dividends at that month-end close. Held shares revalue at actual unadjusted month-end closes.",
+        "method": "Starts at 0 and delegates 100 each historical month. Each buy deploys the stated percentage of that month's 100 budget only; unused monthly budget, trim proceeds, and received dividends remain cash reserve and are never swept by a later month's percentage. Trims sell the stated share percentage. Normal DCA invests its full monthly contribution and reinvests dividends at that month-end close. Held shares revalue at actual unadjusted month-end closes.",
         "inSample": True,
     }
+
+
+def _xirr(flows: list[tuple[date, float]]) -> float | None:
+    """Annual money-weighted return for irregular dated deposits and one ending value."""
+    if len(flows) < 2 or not any(value < 0 for _, value in flows) or not any(value > 0 for _, value in flows):
+        return None
+    start = min(flow_date for flow_date, _ in flows)
+
+    def npv(rate: float) -> float:
+        return sum(value / ((1.0 + rate) ** ((flow_date - start).days / 365.0)) for flow_date, value in flows)
+
+    low = -0.9999
+    high = 1.0
+    low_value = npv(low)
+    high_value = npv(high)
+    while low_value * high_value > 0 and high < 1_000:
+        high *= 2.0
+        high_value = npv(high)
+    if low_value * high_value > 0:
+        return None
+    for _ in range(120):
+        middle = (low + high) / 2.0
+        middle_value = npv(middle)
+        if abs(middle_value) < 1e-8:
+            return middle
+        if low_value * middle_value <= 0:
+            high = middle
+        else:
+            low = middle
+            low_value = middle_value
+    return (low + high) / 2.0
 
 
 def _monthly_map(seasonality: list[dict[str, Any]], current_year_returns: dict[str, float], events: list[dict[str, Any]], cycle_days: int | None, next_ex: date | None, today: date) -> list[dict[str, Any]]:

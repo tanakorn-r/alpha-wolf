@@ -156,7 +156,7 @@
   horizon alignment, 2-3 controlling facts, and continue/exit gates; real portfolio-wide **Ask the desk** via
   `loadPortfolioReview` → shared `components/PortfolioReviewCard.tsx` — no
   hardcoded per-agent text, every "AI" read is a genuine agent-backed call),
-  **Buy Timing** (selected-stock timing page backed by `/buy-timing`: plain answer row, 12-month **buy/trim-by-month** map (`monthlyMap`: blended seasonality + dividend-cycle score per calendar month, green=buy/red=trim), real dividend-cycle dips, recovery, edge, seasonality + optional AI narrative),
+  **Buy Timing** (selected-stock timing page backed by `/buy-timing`: plain answer row, 12-month **buy/trim-by-month** map (`monthlyMap`: blended seasonality + dividend-cycle score per calendar month, green=buy/red=trim), where `buyBudgetPct` applies only to that month's delegated DCA contribution while action/sizing remain the selected Agent's own persona decision; real dividend-cycle dips, recovery, edge, seasonality + optional AI narrative),
   **Live Intraday** (delayed ~15-20min quote/chart + on-demand AI signal),
   **Technical Analysis** (Pro, on-demand Agent read plus a six-month annotated price chart: grounded Dow pivots, Wyckoff heuristic window, Elliott bias, Fibonacci levels, multi-timeframe badges, persona-weighted framework evidence, and structure/dividend context only when aligned),
   **Next 10 ↑** (quota-metered `upward-moves` forecast, cached per
@@ -171,7 +171,7 @@
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Fixed the shared AI HOLD bias by binding every decisive score to capital direction and ownership mode: held positions scoring 21-39 must TRIM and 1-20 SELL (HOLD is positive, 61-79 only), while candidates map positive scores to buy/build and negative scores to wait/pass; Hunt AI, Analyst, Valuation, Today, Technical and Buy Timing caches were version-bumped.
+- Removed Buy Timing's user-visible "under-deployed after reconsideration" failure and the second plan-generation call entirely: aligned best-month sizing and Ben/Sam trim limits are normalized deterministically after the single Agent response, while a neutral Agent may still reject a cheap stock; only the shared malformed-JSON retry remains, with an ordinary UI error if it fails. Timing caches were bumped; compact XIRR/exposure metrics remain.
 
 **Recent Context**
 - Fixed a live crash (`Uncaught RangeError: Invalid currency code : null` in `StockDetailDrawer`'s `DrawerHeader`, `formatCurrency`). Root cause: `formatCurrency(value, currency = "USD")`'s default parameter only covers `undefined`, not an explicit `null` — and `detail.stock.currency` can genuinely be `null` now that the backend's cache-first fallback (prior entries) returns empty fields immediately for a freshly-uncached symbol instead of blocking until real data arrives. Fixed `formatCurrency` (`apps/web/src/lib/format.ts`) to coalesce `currency || "USD"` so `null` and `undefined` both fall back correctly. Checked the file for the same gap elsewhere: `formatMoneyAs` requires a non-optional `"USD" | "THB"` literal union, so TypeScript already catches a stray `null` there at compile time — `formatCurrency` was the only vulnerable one. tsc clean.

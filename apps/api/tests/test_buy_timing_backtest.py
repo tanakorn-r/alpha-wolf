@@ -68,6 +68,66 @@ def test_agent_monthly_plan_does_not_force_hold_months_into_dca_buys() -> None:
         assert all(item["action"] == "HOLD" and item["buyBudgetPct"] == 0 for item in plan)
 
 
+def test_monthly_plan_does_not_force_actions_for_any_persona() -> None:
+    calculated = [{"month": month, "action": "HOLD", "returnPct": 1.0} for month in MONTHS]
+    proposed = [{"month": month, "action": "HOLD", "buyBudgetPct": 0, "trimPositionPct": 0, "reason": "My persona gate failed"} for month in MONTHS]
+
+    for agent_id in ("ben", "sam", "vera", "rex", "kai", "nadia", "alphawolf"):
+        plan = _valid_agent_monthly_plan(calculated, proposed, agent_id, {"status": "INTACT"})
+        assert plan is not None
+        assert all(item["action"] == "HOLD" and item["buyBudgetPct"] == 0 for item in plan)
+
+
+def test_backtest_buy_percentage_applies_only_to_current_month_contribution() -> None:
+    history = [
+        {"date": f"2025-{index + 1:02d}-28", "month": MONTHS[index], "close": 100.0}
+        for index in range(12)
+    ] + [{"date": "2026-01-28", "month": "Jan", "close": 100.0}]
+    plan = [
+        {"month": month, "action": "BUY" if month == "Feb" else "HOLD", "buyBudgetPct": 50 if month == "Feb" else 0}
+        for month in MONTHS
+    ]
+
+    result = _backtest_monthly_plan(history, plan)
+
+    assert result is not None
+    february = result["ledger"][1]
+    assert february["stockValue"] == 50.0
+    assert february["cash"] == 150.0
+    assert "that month's 100 budget only" in result["method"]
+
+
+def test_backtest_money_weighting_tracks_accumulated_shares_through_a_drop() -> None:
+    history = [
+        {"date": f"2025-{index + 1:02d}-28", "month": MONTHS[index], "close": 100.0}
+        for index in range(12)
+    ] + [{"date": "2026-01-28", "month": "Jan", "close": 95.0}]
+    plan = [{"month": month, "action": "BUY", "buyBudgetPct": 100} for month in MONTHS]
+
+    result = _backtest_monthly_plan(history, plan)
+
+    assert result is not None
+    # Twelve accumulated 100-unit purchases lose 5% (=60) before month 13's new contribution.
+    assert result["profitLoss"] == -60.0
+    assert result["endingValue"] == 1_240.0
+    assert result["strategyMoneyWeightedReturnPct"] < 0
+
+
+def test_backtest_exposes_small_fair_comparison_metrics() -> None:
+    history = [
+        {"date": f"2025-{index + 1:02d}-28", "month": MONTHS[index], "close": 100.0}
+        for index in range(12)
+    ] + [{"date": "2026-01-28", "month": "Jan", "close": 100.0}]
+    plan = [{"month": month, "action": "BUY", "buyBudgetPct": 50} for month in MONTHS]
+
+    result = _backtest_monthly_plan(history, plan)
+
+    assert result is not None
+    assert abs(result["strategyMoneyWeightedReturnPct"]) < 0.01
+    assert abs(result["exposureNormalizedReturnPct"]) < 0.01
+    assert abs(result["matchedExposureBenchmarkReturnPct"]) < 0.01
+
+
 def test_agent_monthly_plan_preserves_character_trim_sizing() -> None:
     calculated = [{"month": month, "action": "HOLD", "returnPct": 0.0} for month in MONTHS]
     proposed = [

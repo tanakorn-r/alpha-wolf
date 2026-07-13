@@ -10,7 +10,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.ai.context import _funding_quality_audit, _structural_advantage_audit, build_analysis_context
-from internal.ai.openai_client import _selected_model
+from internal.ai.openai_client import _align_today_action, _selected_model
 from internal.market.technicals import build_technicals
 from models import BuyTimingNarrative, StockAnalysis, TodayPerformance
 from pydantic import ValidationError
@@ -298,6 +298,13 @@ class AiPerformanceTests(unittest.TestCase):
         self.assertEqual(result.holdingAction, "HOLD")
         self.assertEqual(result.horizonAlignment.status, "ALIGNED")
         self.assertLessEqual(len(result.evidence), 3)
+
+        reduced = _align_today_action(
+            {"positionContext": {"isHolding": True}},
+            result.model_copy(update={"buyScore": 34}),
+        )
+        self.assertEqual(reduced.holdingAction, "REDUCE")
+        self.assertEqual(reduced.signal, "REDUCE")
 
 
 if __name__ == "__main__":

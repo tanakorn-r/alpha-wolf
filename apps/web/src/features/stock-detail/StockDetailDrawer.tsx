@@ -30,6 +30,8 @@ export function StockDetailDrawer() {
   const selectedStrategy = useWolfStore((state) => state.selectedStrategy);
   const selectedMode = useWolfStore((state) => state.selectedMode);
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
+  const getHuntAiCache = useWolfStore((state) => state.getHuntAiCache);
+  const setHuntAiCache = useWolfStore((state) => state.setHuntAiCache);
   const detailOpen = useWolfStore((state) => state.detailOpen);
   const closeDetail = useWolfStore((state) => state.closeDetail);
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
@@ -61,6 +63,8 @@ export function StockDetailDrawer() {
   const loading = detailQuery.isPending && detailOpen;
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
+  const analysisCacheKey = `${accountScope}:persona-v23-score-action-consistency:stock-detail:${selectedSymbol}:${selectedStrategy}:${selectedMode ?? "default"}:${activeAgentId}`;
+  const quantCacheKey = `${accountScope}:persona-v23-score-action-consistency:stock-quant:${selectedSymbol}:${selectedStrategy}:${selectedMode ?? "default"}:${activeAgentId}`;
   const planQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: detailOpen && Boolean(authQuery.data?.id) });
   const portfolioHolding = planQuery.data?.holdings.find((item) => item.symbol === selectedSymbol);
   const addHoldingMutation = useMutation({
@@ -107,14 +111,16 @@ export function StockDetailDrawer() {
     if (!detailOpen || !selectedSymbol) return;
     drawerRef.current?.scrollTo({ top: 0 });
     setError("");
-    setAnalysis(null);
-    setHuntAdvice(null);
+    const savedAnalysis = getHuntAiCache<StockAnalysisResponse>(analysisCacheKey)?.data;
+    const savedQuant = getHuntAiCache<QuantPerspectiveResponse>(quantCacheKey)?.data;
+    setAnalysis(savedAnalysis?.agent?.id === activeAgentId ? savedAnalysis : null);
+    setHuntAdvice(savedQuant?.agent?.id === activeAgentId ? savedQuant : null);
     setResearch(null);
     setTab("overview");
     setMarket(null);
     setAddStatus("");
     setPendingTimedOut(false);
-  }, [detailOpen, selectedSymbol]);
+  }, [detailOpen, selectedSymbol, activeAgentId, analysisCacheKey, quantCacheKey, getHuntAiCache]);
 
   useEffect(() => {
     if (!detailOpen || !detail?.dataPending) {
@@ -131,11 +137,6 @@ export function StockDetailDrawer() {
   }
 
   useEffect(() => {
-    setAnalysis(null);
-    setHuntAdvice(null);
-  }, [activeAgentId]);
-
-  useEffect(() => {
     if (!detailOpen) return;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -149,7 +150,9 @@ export function StockDetailDrawer() {
     setError("");
     setAnalyzing(true);
     try {
-      setAnalysis(await summarizeStock(selectedSymbol, selectedStrategy, activeAgentId, true));
+      const result = await summarizeStock(selectedSymbol, selectedStrategy, activeAgentId, true);
+      setAnalysis(result);
+      setHuntAiCache(analysisCacheKey, { analyzedAt: new Date().toISOString(), data: result });
     } catch {
       setError("AI analysis is unavailable. Check the API configuration.");
     } finally {
@@ -162,7 +165,9 @@ export function StockDetailDrawer() {
     setError("");
     setHuntLoading(true);
     try {
-      setHuntAdvice(await loadQuantPerspective(selectedSymbol, selectedStrategy, selectedMode ?? undefined, activeAgentId));
+      const result = await loadQuantPerspective(selectedSymbol, selectedStrategy, selectedMode ?? undefined, activeAgentId);
+      setHuntAdvice(result);
+      setHuntAiCache(quantCacheKey, { analyzedAt: new Date().toISOString(), data: result });
     } catch {
       setError("Alpha Hunt is unavailable. Check the API configuration.");
     } finally {

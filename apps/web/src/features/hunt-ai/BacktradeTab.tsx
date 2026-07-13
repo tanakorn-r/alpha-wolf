@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ErrorCard } from "../../components/ui/panels";
@@ -9,7 +9,7 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
   const symbol = hunt.watchlist.activeTicker;
   const [years, setYears] = useState(5);
   const [contribution, setContribution] = useState(100);
-  const [jobId, setJobId] = useState("");
+  const [jobId, setJobId] = useState(hunt.replay.savedJobId);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const jobQuery = useQuery({
@@ -21,6 +21,8 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
   });
   const job = jobQuery.data;
 
+  useEffect(() => setJobId(hunt.replay.savedJobId), [hunt.replay.savedJobId, symbol, hunt.activeAgentId]);
+
   async function run() {
     if (!symbol || starting) return;
     setStarting(true);
@@ -28,6 +30,7 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
     try {
       const created = await startBacktrade({ symbol, agent: hunt.activeAgentId, years, monthlyContribution: contribution, mode: "monthly" });
       setJobId(created.id);
+      hunt.replay.persistJob(created.id);
     } catch (value) {
       setError(value instanceof Error ? value.message : "Could not start AI Replay.");
     } finally {

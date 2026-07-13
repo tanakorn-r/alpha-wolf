@@ -198,6 +198,28 @@ def migrate() -> None:
         )
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS ai_response_cache (
+                namespace TEXT NOT NULL,
+                cache_key TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                expires_at REAL NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(namespace, cache_key)
+            )
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS backtrade_jobs (
+                id TEXT PRIMARY KEY,
+                account_scope TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 google_sub TEXT NOT NULL UNIQUE,

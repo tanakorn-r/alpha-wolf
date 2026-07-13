@@ -6,7 +6,7 @@ const tabs: Array<{ key: HuntTab; label: string; premium?: boolean; tag?: string
   { key: "brief", label: "Daily Brief", premium: true, tag: "PRO", tone: "pro" },
   { key: "timing", label: "Buy Timing", premium: true, tag: "PRO", tone: "pro" },
   { key: "technical", label: "Technical Analysis", premium: true, tag: "PRO", tone: "pro" },
-  { key: "replay", label: "AI Replay", premium: true, tag: "LAB", tone: "ultra" },
+  // { key: "replay", label: "AI Replay", premium: true, tag: "LAB", tone: "ultra" },
   { key: "analyst", label: "Analyst", premium: true, tag: "PRO", tone: "pro" },
 ];
 

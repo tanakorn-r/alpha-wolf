@@ -63,7 +63,7 @@ export function FooPage() {
 | `models.py` | Pydantic response models (mirror `lib/api.ts` types) |
 | `internal/market/` | Business logic: detail.py, deep.py (rule-based deep read), buy_timing.py (dividend-cycle timing), patterns.py (upward-moves), discovery, portfolio, scoring, technicals, universe, calendar |
 | `internal/ai/` | openai_client.py, heuristics.py, context.py |
-| `internal/store/` | SQLite/db, cache, portfolio persistence |
+| `internal/store/` | SQLite/Turso persistence: portfolio, durable AI response cache, replay jobs, Yahoo/cache tables |
 | `internal/yahoo/client.py` | yfinance wrapper (per-ticker quotes, history, news) |
 | `internal/news/kaohoon.py` | Kaohoon International SET feed (WordPress REST); `market_news()` cached, merged into `.BK` detail news by `detail.py::merge_thai_market_news` |
 

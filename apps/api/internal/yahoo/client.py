@@ -13,9 +13,10 @@ from internal.store.utils import as_float
 from internal.store.utils import safe_dict
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 
-MODULES_TTL_SECONDS = 60
-HISTORY_TTL_SECONDS = 900
-LONG_HISTORY_TTL_SECONDS = 3600
+QUOTE_TTL_SECONDS = 60
+MODULES_TTL_SECONDS = 90 * 86_400
+HISTORY_TTL_SECONDS = 86_400
+LONG_HISTORY_TTL_SECONDS = 86_400
 FULL_HISTORY_REFRESH_SECONDS = 604_800
 NEWS_TTL_SECONDS = 900
 DIVIDENDS_TTL_SECONDS = 86_400
@@ -215,20 +216,71 @@ def build_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
     }
 
 
+def build_quote_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
+    """Small one-minute quote payload, separate from quarterly company modules."""
+    fast = _safe_fast_info(t)
+    last_price = fast.get("last_price")
+    previous_close = fast.get("regular_market_previous_close") or fast.get("previous_close")
+    price = {
+        key: value for key, value in {
+            "symbol": symbol,
+            "regularMarketPrice": last_price,
+            "currentPrice": last_price,
+            "regularMarketPreviousClose": previous_close,
+            "regularMarketVolume": fast.get("last_volume"),
+            "marketCap": fast.get("market_cap"),
+        }.items() if value is not None
+    }
+    summary = {
+        key: value for key, value in {
+            "currentPrice": last_price,
+            "regularMarketPrice": last_price,
+            "regularMarketPreviousClose": previous_close,
+            "regularMarketVolume": fast.get("last_volume"),
+            "marketCap": fast.get("market_cap"),
+            "fiftyTwoWeekHigh": fast.get("year_high"),
+            "fiftyTwoWeekLow": fast.get("year_low"),
+        }.items() if value is not None
+    }
+    return {symbol: {"price": price, "summaryDetail": summary}}
+
+
+def _merge_module_payloads(company: dict[str, Any], quote: dict[str, Any], symbol: str) -> dict[str, Any]:
+    company_modules = safe_dict(company.get(symbol))
+    quote_modules = safe_dict(quote.get(symbol))
+    merged = dict(company_modules)
+    for section, values in quote_modules.items():
+        if isinstance(values, dict):
+            merged[section] = {**safe_dict(merged.get(section)), **values}
+        elif values is not None:
+            merged[section] = values
+    return {symbol: merged} if merged else {}
+
+
 def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
     normalized = symbol.upper().strip()
-    cached = load_yahoo_data(normalized, "modules")
-    has_data = bool(cached and isinstance(cached.payload, dict))
+    company_cached = load_yahoo_data(normalized, "modules")
+    quote_cached = load_yahoo_data(normalized, "quote")
 
-    if not cached or not cached.is_fresh:
-        def _refresh() -> None:
+    if not company_cached or not company_cached.is_fresh:
+        def _refresh_company() -> None:
             result = build_ticker_modules(t, normalized)
             if _modules_have_market_data(result, normalized):
                 save_yahoo_data(normalized, "modules", result, ttl_seconds=MODULES_TTL_SECONDS)
 
-        _refresh_in_background("yahoo_modules", normalized, _refresh)
+        _refresh_in_background("yahoo_modules", normalized, _refresh_company)
 
-    return cached.payload if has_data else {}
+    if not quote_cached or not quote_cached.is_fresh:
+        def _refresh_quote() -> None:
+            result = build_quote_modules(t, normalized)
+            if _modules_have_quote(result, normalized):
+                save_yahoo_data(normalized, "quote", result, ttl_seconds=QUOTE_TTL_SECONDS)
+
+        _refresh_in_background("yahoo_quote", normalized, _refresh_quote)
+
+    company = company_cached.payload if company_cached and isinstance(company_cached.payload, dict) else {}
+    quote = quote_cached.payload if quote_cached and isinstance(quote_cached.payload, dict) else {}
+    return _merge_module_payloads(company, quote, normalized)
 
 
 def fetch_history(t: yf.Ticker, period: str = "1y", auto_adjust: bool = True) -> pd.DataFrame:
@@ -416,6 +468,15 @@ def _modules_have_market_data(value: dict[str, Any], symbol: str) -> bool:
             quote.get("quoteType"),
             quote.get("exchange"),
         )
+    )
+
+
+def _modules_have_quote(value: dict[str, Any], symbol: str) -> bool:
+    modules = value.get(symbol) if isinstance(value, dict) else None
+    price = modules.get("price") if isinstance(modules, dict) else None
+    return isinstance(price, dict) and any(
+        price.get(key) is not None
+        for key in ("currentPrice", "regularMarketPrice", "regularMarketPreviousClose")
     )
 
 

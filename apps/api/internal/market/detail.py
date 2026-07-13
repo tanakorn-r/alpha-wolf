@@ -29,6 +29,7 @@ DOMAIN_CACHE_NAMESPACE = "domain"
 DETAIL_TTL_SECONDS = 60
 PENDING_DETAIL_TTL_SECONDS = 2
 DOMAIN_TTL_SECONDS = 86_400
+FUNDAMENTALS_TTL_SECONDS = 90 * 86_400
 
 
 def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None = None) -> dict[str, Any] | None:
@@ -239,14 +240,14 @@ def get_ai_financials(symbol: str) -> dict[str, Any] | None:
         return cached
     persistent = load_yahoo_data(normalized, "financials", "ai")
     if persistent and persistent.is_fresh and isinstance(persistent.payload, dict):
-        cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, persistent.payload, DOMAIN_TTL_SECONDS)
+        cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, persistent.payload, FUNDAMENTALS_TTL_SECONDS)
         return persistent.payload
 
     def _refresh() -> None:
         result = build_ai_financial_snapshot(make_ticker(normalized))
         if _has_research_data(result):
-            save_yahoo_data(normalized, "financials", result, period="ai", ttl_seconds=86_400)
-            cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
+            save_yahoo_data(normalized, "financials", result, period="ai", ttl_seconds=FUNDAMENTALS_TTL_SECONDS)
+            cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, result, FUNDAMENTALS_TTL_SECONDS)
 
     _refresh_in_background("yahoo_ai_financials", normalized, _refresh)
     return persistent.payload if persistent and isinstance(persistent.payload, dict) else {}

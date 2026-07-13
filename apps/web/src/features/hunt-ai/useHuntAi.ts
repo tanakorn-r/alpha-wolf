@@ -39,6 +39,9 @@ type AgentStamped = {
   agent?: { id?: string | null } | null;
 };
 
+type PersistedStrategy = { mode: StratMode; prompt: string; analysis: StrategyPlaybookResponse };
+type PersistedReplay = { jobId: string };
+
 // Bump when persona reasoning changes so persisted browser reports cannot make a newly fixed
 // Agent appear to repeat an older, generic answer.
 const AGENT_REASONING_CACHE_VERSION = "persona-v23-score-action-consistency";
@@ -88,6 +91,8 @@ export function useHuntAi() {
   const authenticated = Boolean(authQuery.data?.id);
   const premium = Boolean(authQuery.data?.proActive);
   const n100QuotaUsed = authQuery.data?.aiUsage?.used ?? 0;
+  const strategyCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:strategy:last:${activeAgentId}`;
+  const strategyCached = getHuntAiCache<PersistedStrategy>(strategyCacheKey);
   const redeemPremiumMutation = useMutation({
     mutationFn: redeemPremiumPromo,
     onSuccess: (user) => {
@@ -112,6 +117,8 @@ export function useHuntAi() {
   const watchingSymbols = watchlistQuery.data ?? [];
   const symbols = Array.from(new Set([...holdingSymbols, ...watchingSymbols]));
   const activeTicker = selectedTicker || symbols[0] || "";
+  const replayCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:replay:${activeTicker}:${activeAgentId}`;
+  const replayCached = getHuntAiCache<PersistedReplay>(replayCacheKey);
   const debouncedAddQuery = useDebouncedValue(addQuery.trim(), DISCOVERY_DEBOUNCE_MS);
 
   useEffect(() => {
@@ -137,6 +144,15 @@ export function useHuntAi() {
     setN100RunKey(0);
     setN100SyncKey("");
   }, [activeAgentId]);
+
+  useEffect(() => {
+    const saved = strategyCached?.data;
+    if (saved && matchesAgent(saved.analysis, activeAgentId)) {
+      setStratMode(saved.mode);
+      setStratPrompt(saved.prompt);
+      setStratAnalysis(saved.analysis);
+    }
+  }, [activeAgentId, accountScope]);
 
   const addQueryResult = useQuery({
     queryKey: ["hunt-add-search", debouncedAddQuery],
@@ -173,16 +189,17 @@ export function useHuntAi() {
   }, [setHuntAiCache, valuationAnalyzedAt, valuationCacheKey, valuationDone, valuationQuery.data]);
 
   const timingQuery = useQuery({
-    queryKey: ["hunt-buy-timing", "live-current-month-v10", AGENT_REASONING_CACHE_VERSION, activeTicker, activeAgentId, timingRunKey],
+    queryKey: ["hunt-buy-timing", "live-current-month-v18", AGENT_REASONING_CACHE_VERSION, activeTicker, activeAgentId, timingRunKey],
     queryFn: () => loadBuyTiming(activeTicker, activeAgentId, true),
     staleTime: 900_000,
     retry: 0,
     enabled: tab === "timing" && Boolean(activeTicker) && timingRunKey > 0 && timingRunTarget === `${activeTicker}:${activeAgentId}`,
   });
-  const timingCacheKey = `${accountScope}:live-current-month-v10:${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
+  const timingCacheKey = `${accountScope}:live-current-month-v18:${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
   const timingCached = getHuntAiCache<BuyTimingResponse>(timingCacheKey);
   const timingResultMatches = timingQuery.data?.symbol === activeTicker && matchesAgent(timingQuery.data, activeAgentId);
-  const timingDone = timingRunTarget === `${activeTicker}:${activeAgentId}` && timingQuery.isSuccess && timingResultMatches;
+  const timingRequestActive = timingRunKey > 0 && timingRunTarget === `${activeTicker}:${activeAgentId}`;
+  const timingDone = timingRequestActive && timingQuery.isSuccess && timingResultMatches;
   const timingAnalyzedAt = timingQuery.dataUpdatedAt ? new Date(timingQuery.dataUpdatedAt).toISOString() : new Date().toISOString();
   const timingReport = timingDone && timingQuery.data
     ? { analyzedAt: timingAnalyzedAt, data: timingQuery.data }
@@ -347,10 +364,14 @@ export function useHuntAi() {
       rows: activeTicker
         ? [{
             symbol: activeTicker,
-            pending: !timingReport?.data && timingRunKey > 0 && timingRunTarget === `${activeTicker}:${activeAgentId}` && timingQuery.isPending,
+            // A deliberate rerun replaces the result surface with AgentThinking. Keeping the
+            // persisted card visible made Refresh appear inert, especially when the new request
+            // later failed and silently fell back to that same card.
+            pending: timingRequestActive && timingQuery.isFetching,
             fetching: timingQuery.isFetching,
-            failed: (Boolean(timingQuery.isError) || Boolean(timingQuery.isSuccess && timingQuery.data && !timingResultMatches)) && !timingReport?.data,
-            timing: (timingReport?.data ?? null) as BuyTimingResponse | null,
+            failed: timingRequestActive && !timingQuery.isFetching && (Boolean(timingQuery.isError) || Boolean(timingQuery.isSuccess && timingQuery.data && !timingResultMatches)),
+            error: timingQuery.error instanceof Error ? timingQuery.error.message : "",
+            timing: (timingRequestActive && (timingQuery.isFetching || timingQuery.isError) ? null : timingReport?.data ?? null) as BuyTimingResponse | null,
             analyzedAt: timingReport?.analyzedAt ?? "",
             run() {
               setTimingRunTarget(`${activeTicker}:${activeAgentId}`);
@@ -445,13 +466,22 @@ export function useHuntAi() {
         try {
           const card = STRAT_CARDS.find((c) => c.key === mode);
           const strategy = stratPrompt.trim() || (card ? `${card.label}: ${card.subtitle}` : mode);
-          setStratAnalysis(await loadStrategyPlaybook({ strategy, region: "all", limit: 5, candidateLimit: 40, agent: activeAgentId, force: true }));
+          const result = await loadStrategyPlaybook({ strategy, region: "all", limit: 5, candidateLimit: 40, agent: activeAgentId, force: true });
+          setStratAnalysis(result);
+          setHuntAiCache(strategyCacheKey, { analyzedAt: new Date().toISOString(), data: { mode, prompt: stratPrompt, analysis: result } });
           void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
         } catch {
           setAiError("Strategy AI could not rank the stock universe for this strategy.");
         } finally {
           setStratLoading(false);
         }
+      },
+    },
+
+    replay: {
+      savedJobId: replayCached?.data.jobId ?? "",
+      persistJob(jobId: string) {
+        setHuntAiCache(replayCacheKey, { analyzedAt: new Date().toISOString(), data: { jobId } });
       },
     },
 

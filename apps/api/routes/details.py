@@ -16,7 +16,7 @@ from internal.market.buy_timing import apply_ai_narrative, build_buy_timing
 from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials, get_market_comparison
 from internal.market.patterns import signed_moves_from_points
 from internal.market.scoring import StrategyKey
-from internal.store.cache import cache_get, cache_set
+from internal.store.cache import cache_compute_lock, cache_get, cache_set
 from models import MarketComparison, TechnicalMovesPredictionResponse
 
 router = APIRouter()
@@ -136,36 +136,50 @@ def details_buy_timing(
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
-    ai_cache_key = f"{account_scope}:ai-buy-timing:v29-decisive-action:{normalized}:{strategy}:{agent_id}"
+    ai_cache_key = f"{account_scope}:ai-buy-timing:v37-contract-normalized:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", ai_cache_key)
     if cached is not None and not force:
         return cached
 
-    result = build_buy_timing(normalized, strategy, force_refresh=force)
-    if not result:
-        raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
-    if result.get("dataPending"):
-        return JSONResponse(status_code=202, content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3})
-    try:
-        has_price = float(result.get("price") or 0) > 0
-    except (TypeError, ValueError):
-        has_price = False
-    if not has_price:
-        # Keep the calculated fallback, but do not spend an AI call or attach a
-        # perspective score when there is no valid current market price.
-        return {**result, "agent": agent_badge(agent_id)}
+    # One request per account/symbol/persona performs the derived snapshot and AI call. A duplicate
+    # forced request that was already waiting on the same lock returns the result produced ahead of
+    # it instead of spending another quota unit and repeating OpenAI work.
+    with cache_compute_lock("buy_timing_ai", ai_cache_key):
+        latest = cache_get("analysis", ai_cache_key)
+        if latest is not None and (not force or latest != cached):
+            return latest
 
-    usage_user_id, _ = claim_ai_run(request, premium_required=True)
-    try:
-        narrative = analyze_buy_timing_with_openai({"buyTiming": result}, agent_id)
-        response = {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
-    except (OpenAIAnalysisError, KeyError, TypeError, ValueError):
-        release_ai_run(usage_user_id)
-        fallback = {**result, "agent": agent_badge(agent_id)}
-        cache_set("analysis", ai_cache_key, fallback, UPWARD_MOVES_TTL_SECONDS)
-        return fallback
-    cache_set("analysis", ai_cache_key, response, UPWARD_MOVES_TTL_SECONDS)
-    return response
+        # force=true means regenerate the Agent reasoning, not bypass all persisted Yahoo/derived
+        # market data. The snapshot has its own 15-minute freshness contract.
+        result = build_buy_timing(normalized, strategy)
+        if not result:
+            raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+        if result.get("dataPending"):
+            return JSONResponse(status_code=202, content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3})
+        try:
+            has_price = float(result.get("price") or 0) > 0
+        except (TypeError, ValueError):
+            has_price = False
+        if not has_price:
+            raise HTTPException(
+                status_code=503,
+                detail="Current price is not ready yet. Please retry the Agent plan.",
+            )
+
+        usage_user_id, _ = claim_ai_run(request, premium_required=True)
+        try:
+            narrative = analyze_buy_timing_with_openai({"buyTiming": result}, agent_id)
+            response = {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
+        except (OpenAIAnalysisError, KeyError, TypeError, ValueError) as exc:
+            release_ai_run(usage_user_id)
+            print(f"Warning: Buy Timing Agent plan failed for {normalized}/{agent_id}: {exc}")
+            # Mechanical seasonality is useful evidence, but it is not a successful persona plan.
+            raise HTTPException(
+                status_code=503,
+                detail="The Agent response was incomplete. Please retry Buy Timing.",
+            ) from exc
+        cache_set("analysis", ai_cache_key, response, UPWARD_MOVES_TTL_SECONDS)
+        return response
 
 
 @router.get("/api/details/{symbol}/upward-moves", response_model=TechnicalMovesPredictionResponse)

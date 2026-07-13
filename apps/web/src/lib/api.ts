@@ -989,7 +989,7 @@ export type BuyTimingResponse = {
   monthlyMap?: Array<{ month: string; score: number; action: "BUY" | "TRIM" | "HOLD"; returnPct: number; currentYearReturnPct?: number | null; isExMonth: boolean; isCurrent: boolean; note: string }>;
   agentMonthlyPlan?: Array<{ month: string; score: number; action: "BUY" | "ADD_SMALL" | "HOLD" | "TRIM" | "SELL"; buyBudgetPct: number; trimPositionPct: number; calculatedAction: "BUY" | "TRIM" | "HOLD"; returnPct: number; currentYearReturnPct?: number | null; isExMonth: boolean; isCurrent: boolean; note: string; reason: string }> | null;
   monthlyHistory?: Array<{ date: string; month: string; close: number }>;
-  backtest?: { years: number; observedMonths: number; investedMonths: number; skippedMonths: number; monthlyContribution: number; totalContributed: number; endingValue: number; endingCash: number; endingStockValue: number; profitLoss: number; alwaysBuyEndingValue: number; strategyReturnPct: number; alwaysBuyReturnPct: number; strategyReturnWithoutDividendsPct: number; alwaysBuyReturnWithoutDividendsPct: number; strategyDividendReturnBoostPct: number; alwaysBuyDividendReturnBoostPct: number; edgePct: number; strategyMaxDrawdownPct: number; alwaysBuyMaxDrawdownPct: number; averageStockExposurePct: number; agentDividendsReceived: number; alwaysBuyDividendsReinvested: number; method: string; inSample: boolean; ledger: Array<{ date: string; month: string; action: string; buyBudgetPct: number; trimPositionPct: number; dividendIncome: number; contributed: number; cash: number; stockValue: number; accountValue: number; profitLoss: number }> } | null;
+  backtest?: { years: number; observedMonths: number; investedMonths: number; skippedMonths: number; monthlyContribution: number; totalContributed: number; endingValue: number; endingCash: number; endingStockValue: number; profitLoss: number; alwaysBuyEndingValue: number; strategyReturnPct: number; alwaysBuyReturnPct: number; strategyMoneyWeightedReturnPct?: number | null; alwaysBuyMoneyWeightedReturnPct?: number | null; exposureNormalizedReturnPct?: number | null; matchedExposureBenchmarkReturnPct?: number | null; strategyReturnWithoutDividendsPct: number; alwaysBuyReturnWithoutDividendsPct: number; strategyDividendReturnBoostPct: number; alwaysBuyDividendReturnBoostPct: number; edgePct: number; strategyMaxDrawdownPct: number; alwaysBuyMaxDrawdownPct: number; averageStockExposurePct: number; agentDividendsReceived: number; alwaysBuyDividendsReinvested: number; method: string; inSample: boolean; ledger: Array<{ date: string; month: string; action: string; buyBudgetPct: number; trimPositionPct: number; dividendIncome: number; contributed: number; cash: number; stockValue: number; accountValue: number; profitLoss: number }> } | null;
   events: Array<{ exDate: string; amount?: number | null; dipPct: number; recoverySessions?: number | null }>;
   technicalContext?: {
     signal?: string | null;
@@ -1039,7 +1039,10 @@ export async function loadBuyTiming(symbol: string, agent?: string, force = fals
       await new Promise((resolve) => window.setTimeout(resolve, Math.max(1, pending.retryAfterSeconds ?? 3) * 1_000));
       continue;
     }
-    if (!response.ok) throw new Error(`Failed to load buy timing: ${response.status}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { detail?: string } | null;
+      throw new Error(payload?.detail || `Failed to load buy timing: ${response.status}`);
+    }
     return (await response.json()) as BuyTimingResponse;
   }
   throw new Error("Buy Timing market data did not become ready within one minute.");

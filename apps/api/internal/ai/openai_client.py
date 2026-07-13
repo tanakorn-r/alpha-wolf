@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -11,6 +12,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from internal.ai.agents import agent_badge, compose_instructions
+from internal.store.cache import cache_compute_lock, cache_get, cache_set
 from internal.store.utils import parse_json_fragment
 from models import AnalystBrief, BacktradeDecision, BuyTimingNarrative, PortfolioReview, QuantPerspective, StockAnalysis, StrategyPlaybook, TechnicalAnalysis, TechnicalMovesPrediction, TodayPerformance, ValuationVerdict
 
@@ -41,6 +43,7 @@ _SESSION.mount(
     ),
 )
 EXPECTED_SCORE_LABELS = ["Value", "Financial health", "Dividend safety", "Growth", "Timing"]
+MONTH_NAMES = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"}
 
 
 class OpenAIAnalysisError(RuntimeError):
@@ -91,7 +94,7 @@ def analyze_brief_with_openai(context: dict[str, Any], agent_id: str | None = No
         schema_model=AnalystBrief,
         schema_name="analyst_brief",
         instructions=compose_instructions(_analyst_brief_instructions(), agent_id, analyst_task=True),
-        max_output_tokens=1200,
+        max_output_tokens=2000,
     )
     result = _calibrate_analyst_brief(context, result, agent_id)
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
@@ -331,7 +334,30 @@ def analyze_today_with_openai(context: dict[str, Any], agent_id: str | None = No
         model=model,
         reasoning_effort=_fast_reasoning_effort(),
     )
+    result = _align_today_action(context, result)
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def _align_today_action(context: dict[str, Any], result: TodayPerformance) -> TodayPerformance:
+    """Prevent the model's safe HOLD fallback from contradicting its own decisive score."""
+    if not bool((context.get("positionContext") or {}).get("isHolding")):
+        return result
+    score = int(result.buyScore)
+    passive = result.holdingAction in {"HOLD", "NO_ACTION"}
+    replacement = "SELL" if passive and score <= 20 else "REDUCE" if passive and score <= 39 else "ADD_SMALL" if passive and score >= 80 else None
+    if replacement is None:
+        return result
+    direction = "exit" if replacement == "SELL" else "reduce exposure" if replacement == "REDUCE" else "add selectively"
+    reason = f"A {score}/100 Agent fit requires the user to {direction}; passive HOLD would contradict the score."
+    return result.model_copy(update={
+        "signal": replacement,
+        "tone": "bad" if replacement in {"SELL", "REDUCE"} else "good",
+        "headline": f"{replacement.replace('_', ' ')} — act on the {score}/100 setup instead of defaulting to hold.",
+        "summary": reason,
+        "holdingAction": replacement,
+        "holdingActionReason": reason,
+        "recap": reason,
+    })
 
 
 def analyze_technicals_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
@@ -350,16 +376,145 @@ def analyze_technicals_with_openai(context: dict[str, Any], agent_id: str | None
 
 def analyze_buy_timing_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     model = _selected_model(fast=True)
-    result = _run_openai_structured_request(
-        context=context,
-        schema_model=BuyTimingNarrative,
-        schema_name="buy_timing_narrative",
-        instructions=compose_instructions(_buy_timing_instructions(), agent_id),
-        max_output_tokens=1800,
-        model=model,
-        reasoning_effort=_fast_reasoning_effort(),
-    )
+    instructions = compose_instructions(_buy_timing_instructions(), agent_id)
+
+    def _run(request_context: dict[str, Any]) -> BuyTimingNarrative:
+        return _run_openai_structured_request(
+            context=request_context,
+            schema_model=BuyTimingNarrative,
+            schema_name="buy_timing_narrative",
+            instructions=instructions,
+            max_output_tokens=1800,
+            model=model,
+            reasoning_effort=_fast_reasoning_effort(),
+        )
+
+    result = _normalize_buy_timing_contract(context, _run(context), agent_id)
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
+
+
+def _buy_timing_needs_reconsideration(
+    context: dict[str, Any], result: BuyTimingNarrative, agent_id: str | None = None
+) -> bool:
+    return _buy_timing_plan_issue(context, result, agent_id) is not None
+
+
+def _normalize_buy_timing_contract(
+    context: dict[str, Any], result: BuyTimingNarrative, agent_id: str | None = None
+) -> BuyTimingNarrative:
+    """Enforce mechanical sizing/trim contracts without spending another Agent call."""
+    timing = context.get("buyTiming") if isinstance(context.get("buyTiming"), dict) else {}
+    structure = timing.get("businessStructure") if isinstance(timing.get("businessStructure"), dict) else {}
+    agent = (agent_id or "").strip().lower()
+    plan = list(result.monthlyPlan)
+
+    if agent in {"ben", "sam"} and structure.get("status") != "AT_RISK":
+        trim_indexes = [
+            index for index, item in enumerate(plan)
+            if item.action in {"TRIM", "SELL"} and item.trimPositionPct > 0
+        ]
+        keep_index = max(trim_indexes, key=lambda index: plan[index].trimPositionPct) if trim_indexes else None
+        for index in trim_indexes:
+            item = plan[index]
+            if index == keep_index:
+                plan[index] = item.model_copy(update={
+                    "action": "TRIM",
+                    "buyBudgetPct": 0,
+                    "trimPositionPct": min(15, max(5, item.trimPositionPct)),
+                })
+            else:
+                plan[index] = item.model_copy(update={
+                    "action": "HOLD",
+                    "buyBudgetPct": 0,
+                    "trimPositionPct": 0,
+                    "reason": "Ordinary seasonality does not justify another trim while the thesis remains intact.",
+                })
+
+    if result.agentFit == "aligned" and result.action != "AVOID":
+        evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
+        ranked = sorted(
+            (item for item in evidence if isinstance(item, dict) and item.get("month") in MONTH_NAMES),
+            key=lambda item: _num(item.get("score")) or 0,
+            reverse=True,
+        )
+        top_months = [str(item.get("month")) for item in ranked[:3]]
+        candidate_indexes = [
+            index for index, item in enumerate(plan)
+            if item.month in top_months and item.action in {"BUY", "ADD_SMALL"}
+        ]
+        if candidate_indexes:
+            best_index = max(candidate_indexes, key=lambda index: plan[index].buyBudgetPct)
+        elif top_months:
+            best_index = next(index for index, item in enumerate(plan) if item.month == top_months[0])
+        else:
+            funded_indexes = [
+                index for index, item in enumerate(plan)
+                if item.action in {"BUY", "ADD_SMALL"} and item.buyBudgetPct > 0
+            ]
+            best_index = max(funded_indexes, key=lambda index: plan[index].buyBudgetPct) if funded_indexes else 0
+        best = plan[best_index]
+        plan[best_index] = best.model_copy(update={
+            "action": "BUY",
+            "buyBudgetPct": 100,
+            "trimPositionPct": 0,
+            "reason": f"Highest-conviction month where this Agent's alignment and supplied timing evidence agree: {best.reason}",
+        })
+
+    return result.model_copy(update={"monthlyPlan": plan})
+
+
+def _buy_timing_plan_issue(
+    context: dict[str, Any], result: BuyTimingNarrative, agent_id: str | None = None
+) -> str | None:
+    if result.action == "AVOID" and result.perspectiveScore <= 30:
+        return None
+    funded = [
+        item for item in result.monthlyPlan
+        if item.action in {"BUY", "ADD_SMALL"} and item.buyBudgetPct > 0
+    ]
+    agent = (agent_id or "").strip().lower()
+    timing = context.get("buyTiming") if isinstance(context.get("buyTiming"), dict) else {}
+    structure = timing.get("businessStructure") if isinstance(timing.get("businessStructure"), dict) else {}
+    trims = [
+        item for item in result.monthlyPlan
+        if item.action in {"TRIM", "SELL"} and item.trimPositionPct > 0
+    ]
+    if agent in {"ben", "sam"} and structure.get("status") != "AT_RISK":
+        oversized = any(item.action == "SELL" or item.trimPositionPct > 15 for item in trims)
+        if len(trims) > 1 or oversized:
+            return (
+                f"Your aligned {agent} plan trims {len(trims)} times with sizes up to "
+                f"{max((item.trimPositionPct for item in trims), default=0)}%. Ben/Sam should keep "
+                "owned shares through ordinary seasonality; allow at most one 5-15% defensive trim "
+                "unless supplied business/income evidence is AT_RISK."
+            )
+
+    if result.agentFit == "aligned" and result.action != "AVOID":
+        if not funded:
+            return "An aligned Agent plan must identify and fund its best opportunity month."
+        max_budget = max(item.buyBudgetPct for item in funded)
+        if max_budget < 100:
+            return (
+                "Your Agent says the stock is aligned but never identifies a highest-conviction "
+                "month. Rank the twelve months and allocate 100% of that month's delegated budget "
+                "to the best opportunity; smaller buys may surround it."
+            )
+        evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
+        ranked = sorted(
+            (item for item in evidence if isinstance(item, dict) and item.get("month") in MONTH_NAMES),
+            key=lambda item: _num(item.get("score")) or 0,
+            reverse=True,
+        )
+        top_evidence_months = {str(item.get("month")) for item in ranked[:3]}
+        largest_months = {item.month for item in funded if item.buyBudgetPct == max_budget}
+        if top_evidence_months and not largest_months.intersection(top_evidence_months):
+            return (
+                f"Your largest allocation is outside the strongest supplied opportunity months "
+                f"({', '.join(item.get('month') for item in ranked[:3])}). Re-rank through your "
+                "persona and place the largest allocation where its method and supplied timing "
+                "evidence agree."
+            )
+    return None
 
 
 def decide_backtrade_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
@@ -436,6 +591,52 @@ def _run_openai_structured_request(
     model: str | None = None,
     reasoning_effort: str | None = None,
 ) -> Any:
+    selected_model = model or _selected_model()
+    fingerprint = hashlib.sha256(json.dumps(
+        {
+            "context": context,
+            "schema": schema_name,
+            "instructions": instructions,
+            "tools": tools,
+            "model": selected_model,
+            "reasoning": reasoning_effort,
+        },
+        sort_keys=True,
+        default=str,
+        separators=(",", ":"),
+    ).encode()).hexdigest()
+    cached = cache_get("openai_request", fingerprint)
+    if cached is not None:
+        return schema_model.model_validate(cached)
+    with cache_compute_lock("openai_request", fingerprint):
+        cached = cache_get("openai_request", fingerprint)
+        if cached is not None:
+            return schema_model.model_validate(cached)
+        result = _run_openai_structured_request_uncached(
+            context=context,
+            schema_model=schema_model,
+            schema_name=schema_name,
+            instructions=instructions,
+            max_output_tokens=max_output_tokens,
+            tools=tools,
+            model=selected_model,
+            reasoning_effort=reasoning_effort,
+        )
+        cache_set("openai_request", fingerprint, result.model_dump(), 30)
+        return result
+
+
+def _run_openai_structured_request_uncached(
+    *,
+    context: dict[str, Any],
+    schema_model: type[Any],
+    schema_name: str,
+    instructions: str,
+    max_output_tokens: int,
+    tools: list[dict[str, Any]] | None = None,
+    model: str | None = None,
+    reasoning_effort: str | None = None,
+) -> Any:
     api_key = os.getenv("OPENAI_API_KEY", "").strip()
     if not api_key:
         raise OpenAIAnalysisError("OPENAI_API_KEY is not configured")
@@ -460,37 +661,47 @@ def _run_openai_structured_request(
     if reasoning_effort:
         payload["reasoning"] = {"effort": reasoning_effort}
 
-    try:
-        response = _SESSION.post(
-            "https://api.openai.com/v1/responses",
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=OPENAI_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        raw = response.json()
-    except requests.HTTPError as exc:
-        status = exc.response.status_code if exc.response is not None else "unknown"
-        raise OpenAIAnalysisError(f"OpenAI returned HTTP {status}") from exc
-    except requests.Timeout as exc:
-        raise OpenAIAnalysisError("OpenAI analysis request timed out") from exc
-    except requests.RequestException as exc:
-        raise OpenAIAnalysisError(f"OpenAI analysis request failed: {exc}") from exc
-    except ValueError as exc:
-        raise OpenAIAnalysisError("OpenAI returned an unreadable response") from exc
+    for attempt in range(2):
+        try:
+            response = _SESSION.post(
+                "https://api.openai.com/v1/responses",
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=OPENAI_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            raw = response.json()
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else "unknown"
+            raise OpenAIAnalysisError(f"OpenAI returned HTTP {status}") from exc
+        except requests.Timeout as exc:
+            raise OpenAIAnalysisError("OpenAI analysis request timed out") from exc
+        except requests.RequestException as exc:
+            raise OpenAIAnalysisError(f"OpenAI analysis request failed: {exc}") from exc
+        except ValueError as exc:
+            raise OpenAIAnalysisError("OpenAI returned an unreadable response") from exc
 
-    text = extract_openai_text(raw)
-    parsed = parse_json_fragment(text or "")
-    if not parsed:
-        raise OpenAIAnalysisError("OpenAI returned no structured analysis")
+        text = extract_openai_text(raw)
+        parsed = parse_json_fragment(text or "")
+        if parsed:
+            try:
+                return schema_model.model_validate(parsed)
+            except ValidationError:
+                pass
+        if attempt == 0:
+            # HTTP retries do not cover a successful response whose generation ended before a
+            # schema payload was emitted. Retry once with an explicit reminder and a little more
+            # output room; this protects every structured AI feature, not only Analyst.
+            payload = {
+                **payload,
+                "instructions": f"{instructions}\nReturn one complete JSON object matching the supplied schema. Do not omit the structured result.",
+                "max_output_tokens": max(2000, round(max_output_tokens * 1.5)),
+            }
 
-    try:
-        return schema_model.model_validate(parsed)
-    except ValidationError as exc:
-        raise OpenAIAnalysisError("OpenAI returned an invalid analysis shape") from exc
+    raise OpenAIAnalysisError("OpenAI returned no valid structured analysis after one retry")
 
 
 def _selected_model(*, fast: bool = False) -> str:
@@ -548,17 +759,18 @@ Historical monthly returns are backward-looking averages, never guaranteed futur
 say or imply the user will surely be richer in a later month. Do not mechanically invert returns
 (a positive month is not automatically TRIM and a negative month is not automatically BUY).
 Every month must include explicit sizing:
-- buyBudgetPct is 0-100% of the AVAILABLE DCA CASH POOL deployed that month. The pool receives one
-  normal monthly contribution each month and carries forward unused budget and prior trim proceeds.
-  It is not a percentage of the whole portfolio. BUY/ADD_SMALL require a positive value; use
-  partial installments such as 25/50/75 when conviction is incomplete. All other actions use 0.
+- buyBudgetPct is 0-100% of THIS MONTH'S DELEGATED DCA CONTRIBUTION. It is never a percentage of
+  the whole portfolio or the accumulated cash reserve. Unused monthly money, dividends, and trim
+  proceeds may remain cash, but a later month's 50% still means only half of that later month's
+  contribution. BUY/ADD_SMALL require a positive value; use partial installments such as 25/50/75
+  when conviction is incomplete. All other actions use 0.
 - trimPositionPct is 0-100% of the CURRENT POSITION reduced that month. TRIM/SELL require a
   positive value; all other actions use 0. SELL normally means 100, while TRIM must state a
   genuinely partial amount such as 10/25/50.
 - HOLD means keep existing shares, deploy no new money, and preserve the available DCA cash for a
   later month. There is no separate SKIP action. If normal DCA should continue, use BUY or
   ADD_SMALL with the appropriate buyBudgetPct instead of HOLD.
-- This is a DCA timing plan, but there is no universal purchase quota. Fund only the months that
+- This is a DCA timing plan, but there is no universal purchase quota across Agents. Fund the months that
   pass YOUR Agent method. Use 25% sizing when conviction is incomplete but your core evidence gate
   still passes; use HOLD when that gate fails. Do not buy merely to deploy cash or fill the calendar.
 - A historical +1% to +3% average month is mild strength, not proof of overvaluation. When the
@@ -569,6 +781,28 @@ Every month must include explicit sizing:
   and businessStructure is not AT_RISK, ownership/value/income/balanced Agents should normally use
   ADD_SMALL or BUY rather than HOLD. Missing perfect confirmation should reduce the first installment
   to 10-25%, not erase a genuine discount. HOLD in that setup requires a named hard blocker.
+- Decide participation through the selected Agent's own mind. Ben should normally keep planned DCA
+  working when owner economics remain intact; Sam should size around funded income durability; Vera
+  needs a valuation margin of safety; Rex and Kai need their trend/acceleration evidence; Nadia needs
+  measurable edge; AlphaWolf resolves the competing evidence. Do not impose one Agent's allocation
+  cadence on another, and do not force any action after the model has applied that persona's rules.
+  A possibly stronger following month may support buying now, but seasonality is evidence rather than
+  a promised future gain.
+- A twelve-month plan with zero BUY/ADD_SMALL allocations is a full rejection, not ordinary patience.
+  It is valid only when your top-level action is AVOID, perspectiveScore is 30 or lower, and you name
+  the exact persona-specific disqualifier. When price is in the lower 35% of its five-year range,
+  at least 10% below its five-year average, or at/below the supplied entry band, and businessStructure
+  is neither AT_RISK nor UNPROVEN, reconsider a zero-deployment plan and fund at least one properly
+  sized month unless your own method can prove a genuine rejection.
+- First decide agentFit. If agentFit is aligned, explicitly rank all twelve months using the supplied
+  monthlyMap score/note, post-ex behavior, price range, structure, and YOUR persona. The single best
+  opportunity month must be BUY at 100% of that month's delegated contribution; state why it beats
+  the other months. Secondary opportunities use 25/50/75. This is ranking, not a promise of profit.
+- For aligned Ben and Sam plans, ordinary DCA should keep working: use at least 50% in most months
+  while owner economics or funded income remains intact, then overweight the best months at 100%.
+  HOLD requires a named valuation, payout, funding, or business-quality blocker—not merely that a
+  different month looks slightly better. Vera/AlphaWolf/Nadia may be more selective according to
+  their margins of safety or measured edge. Rex and Kai remain tactical and need not fill the calendar.
 - "Cheap" is not automatically free money. Rex and Kai still require their own signal, acceleration,
   volume, or trend confirmation; Nadia still requires measurable edge. But each must explicitly
   consider the discount as favorable risk/reward and state the exact failed trigger if choosing HOLD.
@@ -579,6 +813,13 @@ Every month must include explicit sizing:
   A trim requires YOUR thesis/risk/valuation/technical exit rule. In particular, Ben and Sam must
   not trim routine DCA holdings for seasonal weakness; a lower historical-return month can be an
   accumulation month when business or income quality remains intact.
+- For Ben and Sam, ordinary alignment means stay invested. A strong historical month, a small
+  +1% to +5% rise, or an approaching ex-dividend date may change new-cash deployment from BUY to
+  HOLD but must not sell existing shares. When business/income structure is not AT_RISK, allow at
+  most one small 5-15% defensive trim in the whole annual plan, and only for a named valuation,
+  concentration, funding, payout, or owner-economics warning. Taking a little profit to reduce a
+  real concentration risk can justify 5-10%; repeated calendar trims cannot. Larger trims require
+  supplied thesis deterioration; SELL requires a genuine break.
 - Risk reduction is a real part of the plan, not an afterthought. When YOUR supplied invalidation
   evidence is present, use TRIM with a meaningful partial size instead of defaulting to HOLD. Use
   SELL only when the controlling thesis is broken strongly enough to exit the full position. Never
@@ -598,7 +839,7 @@ Every month must include explicit sizing:
   his stop/trend break. Kai trims when acceleration or crowd/volume confirmation fades and exits a
   failed breakout quickly. Nadia trims when measured edge weakens or a risk limit is breached.
   AlphaWolf trims only after resolving the supplied corners and identifying the controlling risk.
-  Size the trim according to severity: ordinarily 10-25% for early deterioration, 25-50% for a
+  Size the trim according to severity: ordinarily 5-15% for early deterioration, 25-50% for a
   strong warning, and SELL/100% only for genuine thesis invalidation.
 - Make the twelve months a coherent position path, including the month immediately after every BUY.
   Do not treat each calendar cell as an isolated recommendation. A long-horizon Agent should not buy

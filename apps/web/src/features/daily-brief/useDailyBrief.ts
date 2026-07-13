@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   loadAuthUser,
@@ -72,6 +72,8 @@ export type RowAnalysisState = { loading: boolean; data: TodayPerformanceRespons
 
 export function useDailyBrief() {
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
+  const getHuntAiCache = useWolfStore((state) => state.getHuntAiCache);
+  const setHuntAiCache = useWolfStore((state) => state.setHuntAiCache);
   const [filter, setFilter] = useState<BriefFilter>("all");
   const [rowAnalysis, setRowAnalysis] = useState<Record<string, RowAnalysisState>>({});
   const auth = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
@@ -91,6 +93,8 @@ export function useDailyBrief() {
     staleTime: 180_000,
     enabled: holdings.length > 0,
   });
+
+  useEffect(() => setRowAnalysis({}), [activeAgentId, accountScope]);
 
   const model = useMemo(() => {
     const holdingSymbols = new Set(holdings.map((holding) => holding.symbol));
@@ -130,17 +134,26 @@ export function useDailyBrief() {
     };
   }, [calendar.data?.events, calendar.isError, details.data, details.isFetching, details.isLoading, filter, holdings, portfolio.data?.dcaOrders, portfolio.data?.summary]);
 
+  const persistedRowAnalysis = Object.fromEntries(model.rows.flatMap((row) => {
+    const cached = getHuntAiCache<TodayPerformanceResponse>(dailyBriefCacheKey(accountScope, row.symbol, row.strategy, activeAgentId));
+    return cached?.data.agent?.id === activeAgentId ? [[row.symbol, { loading: false, data: cached.data, error: "" } satisfies RowAnalysisState]] : [];
+  }));
+  const displayedRowAnalysis = { ...persistedRowAnalysis, ...rowAnalysis };
+
   return {
     loading: auth.isPending || (Boolean(auth.data?.id) && portfolio.isPending),
     failed: portfolio.isError,
     filter,
     setFilter,
     activeAgentId,
-    rowAnalysis,
+    rowAnalysis: displayedRowAnalysis,
     async analyzeRow(row: HoldingBriefRow) {
-      setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: true, data: current[row.symbol]?.data ?? null, error: "" } }));
+      setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: true, data: displayedRowAnalysis[row.symbol]?.data ?? null, error: "" } }));
       try {
+        // A deliberate Analyze/Refresh remains a forced rerun. Persistence only restores the
+        // previous result when the user returns; it never turns Refresh into a stale cache read.
         const data = await loadTodayPerformance(row.symbol, row.strategy, activeAgentId, true);
+        setHuntAiCache(dailyBriefCacheKey(accountScope, row.symbol, row.strategy, activeAgentId), { analyzedAt: new Date().toISOString(), data });
         setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, data, error: "" } }));
       } catch (error) {
         setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, data: current[row.symbol]?.data ?? null, error: error instanceof Error ? error.message : "AI analysis is unavailable." } }));
@@ -153,6 +166,10 @@ export function useDailyBrief() {
     },
     ...model,
   };
+}
+
+function dailyBriefCacheKey(accountScope: string, symbol: string, strategy: string, agentId: string) {
+  return `${accountScope}:persona-v23-score-action-consistency:daily-brief:${symbol}:${strategy}:${agentId}`;
 }
 
 function buildHoldingRow({

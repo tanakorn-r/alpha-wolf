@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -11,6 +12,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from internal.market import detail
+from internal.yahoo import client as yahoo_client
 from routes import analysis
 
 
@@ -19,6 +21,24 @@ def _request() -> Request:
 
 
 class AnalystCacheFirstTests(unittest.TestCase):
+    def test_quote_and_company_snapshots_merge_without_refresh_when_fresh(self) -> None:
+        company = {"AAPL": {"price": {"currentPrice": 90}, "summaryProfile": {"sector": "Technology"}}}
+        quote = {"AAPL": {"price": {"currentPrice": 100}, "summaryDetail": {"currentPrice": 100}}}
+
+        def load(_symbol: str, data_type: str):
+            payload = quote if data_type == "quote" else company
+            return SimpleNamespace(payload=payload, is_fresh=True)
+
+        with (
+            patch.object(yahoo_client, "load_yahoo_data", side_effect=load),
+            patch.object(yahoo_client, "_refresh_in_background") as refresh,
+        ):
+            result = yahoo_client.load_ticker_modules(SimpleNamespace(), "AAPL")
+
+        self.assertEqual(result["AAPL"]["price"]["currentPrice"], 100)
+        self.assertEqual(result["AAPL"]["summaryProfile"]["sector"], "Technology")
+        refresh.assert_not_called()
+
     def test_agent_specific_inputs_skip_unrelated_research_packs(self) -> None:
         self.assertEqual(analysis._analyst_input_flags("rex"), (False, True, False))
         self.assertEqual(analysis._analyst_input_flags("sam"), (True, False, False))
@@ -66,6 +86,28 @@ class AnalystCacheFirstTests(unittest.TestCase):
         self.assertIsInstance(response, JSONResponse)
         self.assertEqual(response.status_code, 202)
         openai.assert_not_called()
+
+    def test_failed_refresh_returns_last_saved_analyst_report(self) -> None:
+        bundle = {"stock": {"symbol": "AAPL", "price": 100}, "history": [{"close": 100}] * 10}
+        saved = {"signal": "HOLD", "confidence": 52, "headline": "Saved report"}
+        with (
+            patch.object(analysis, "require_ai_account"),
+            patch.object(analysis, "user_id_from_request", return_value=1),
+            patch.object(analysis, "account_cache_scope", return_value="user:1"),
+            patch.object(analysis, "_position_context", return_value={}),
+            patch.object(analysis, "_position_cache_key", return_value="none"),
+            patch.object(analysis, "cache_get", return_value=saved),
+            patch.object(analysis, "_fetch_analysis_data", return_value=(bundle, {}, {}, {})),
+            patch.object(analysis, "build_analysis_context", return_value={}),
+            patch.object(analysis, "claim_ai_run", return_value=(1, None)),
+            patch.object(analysis, "release_ai_run") as release,
+            patch.object(analysis, "analyze_brief_with_openai", side_effect=analysis.OpenAIAnalysisError("bad structured output")),
+        ):
+            response = analysis.analyst_report("AAPL", _request(), {"strategy": "capitalized"}, "vera", True)
+
+        self.assertEqual(response["analysis"], saved)
+        self.assertEqual(response["refreshWarning"], "bad structured output")
+        release.assert_called_once_with(1)
 
 
 if __name__ == "__main__":
