@@ -13,7 +13,7 @@ export type AuthUser = {
   premiumExpiresAt?: string | null;
   proActive?: boolean;
   plan?: "free" | "pro";
-  aiUsage?: { period: string; used: number; limit: number; baseLimit?: number; bonus?: number; remaining: number };
+  aiUsage?: { used: number; tokens: number; remaining: number };
 };
 
 export async function loadAuthUser(): Promise<AuthUser | null> {

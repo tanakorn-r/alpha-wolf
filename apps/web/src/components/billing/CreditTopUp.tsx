@@ -9,7 +9,7 @@ const PACKS = [
   { credits: 200 as const, price: "$14.99", note: "Heavy testing and re-runs" },
 ];
 
-export function CreditTopUpButton({ label = "Add AI credits", className = "" }: { label?: string; className?: string }) {
+export function CreditTopUpButton({ label = "Refill AI tokens", className = "" }: { label?: string; className?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -42,17 +42,17 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
       const checkoutUrl = await createAiCreditCheckout(selected, returnPath);
       window.location.assign(checkoutUrl);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not add AI credits");
+      setError(reason instanceof Error ? reason.message : "Could not refill AI tokens");
     } finally {
       setBuying(false);
     }
   };
 
   return (
-    <Modal title="Add AI credits" onClose={onClose}>
+    <Modal title="Refill AI tokens" onClose={onClose}>
       <>
           <div className="rounded-[var(--aw-radius-control)] border border-[#f5c451]/25 bg-[#f5c451]/[0.06] px-3 py-2.5 text-[10.5px] leading-[1.5] text-[#d5c28c]">
-            <b className="text-[#f5c451]">Stripe test checkout.</b> You will continue to Stripe&apos;s hosted sandbox. Use a Stripe test card; purchased runs increase your monthly allowance but do not unlock Pro-only tabs.
+            <b className="text-[#f5c451]">Stripe test checkout.</b> You will continue to Stripe&apos;s hosted sandbox. Use a Stripe test card; purchased tokens stay on your account until used, but do not unlock Pro-only tabs.
           </div>
           <div className="mt-3 grid gap-2">
             {PACKS.map((item) => (
@@ -66,7 +66,7 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
                   {selected === item.credits ? <span className="h-2 w-2 rounded-full bg-[#3ecf8e]" /> : null}
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2 text-[13px] font-bold text-[#ececee]">{item.credits} AI runs {item.popular ? <span className="rounded-[4px] bg-[#c77dff]/15 px-1.5 py-0.5 text-[8px] text-[#c77dff]">POPULAR</span> : null}</span>
+                  <span className="flex items-center gap-2 text-[13px] font-bold text-[#ececee]">{item.credits} AI tokens {item.popular ? <span className="rounded-[4px] bg-[#c77dff]/15 px-1.5 py-0.5 text-[8px] text-[#c77dff]">POPULAR</span> : null}</span>
                   <span className="mt-0.5 block text-[10px] text-[#777780]">{item.note}</span>
                 </span>
                 <span className="font-mono text-[13px] font-bold text-[#ececee]">{item.price}</span>
@@ -97,13 +97,13 @@ export function CreditPurchaseReturn({ onConfirmed }: { onConfirmed?: () => void
       window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
     };
     if (status === "cancelled") {
-      setNotice({ kind: "cancelled", title: "Checkout cancelled", body: "No payment was taken. Your AI runs are unchanged." });
+      setNotice({ kind: "cancelled", title: "Checkout cancelled", body: "No payment was taken. Your AI token balance is unchanged." });
       clearPurchaseParams();
       return;
     }
     if (status !== "success" || !sessionId) return;
     let cancelled = false;
-    setNotice({ kind: "loading", title: "Confirming payment", body: "Stripe approved the checkout. We’re adding your AI runs now…" });
+    setNotice({ kind: "loading", title: "Confirming payment", body: "Stripe approved the checkout. We’re refilling your AI tokens now…" });
     void confirmAiCreditCheckout(sessionId)
       .then(async ({ user, purchasedCredits }) => {
         if (cancelled) return;
@@ -112,7 +112,7 @@ export function CreditPurchaseReturn({ onConfirmed }: { onConfirmed?: () => void
         setNotice({
           kind: "success",
           title: "Payment successful",
-          body: `${purchasedCredits} AI runs were added. You now have ${user.aiUsage?.remaining ?? 0} available this month.`,
+          body: `${purchasedCredits} AI tokens were added. You now have ${user.aiUsage?.tokens ?? 0} purchased tokens and ${user.aiUsage?.remaining ?? 0} total runs available.`,
         });
         onConfirmed?.();
         window.dispatchEvent(new Event("aw:credits-added"));

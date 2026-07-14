@@ -60,7 +60,7 @@ export function Next100Tab({ hunt }: { hunt: HuntAi }) {
             <div className="mx-auto max-w-[460px] text-[12.5px] leading-[1.6] text-[#8c8c95]">AI scans momentum, recent history and technical context, then maps the next 10 moves for this ticker/timeframe.</div>
           </div>
           <PremiumAiButton
-            label={n100.quotaLeft <= 0 ? "Monthly credits used up" : "Forecast Next 10 ↑"}
+            label={n100.quotaLeft <= 0 ? "AI tokens used up" : "Forecast Next 10 ↑"}
             sublabel="Premium · cached forecast"
             disabled={n100.quotaLeft <= 0}
             onClick={n100.run}
@@ -88,7 +88,7 @@ function QuotaPill({ used, limit }: { used: number; limit: number }) {
   return (
     <div className="ml-auto flex items-center gap-2 rounded-[8px] border border-[#2a2a31] bg-[#161619] px-3 py-1.5 text-[11px] text-[#8c8c95]">
       <span className="font-mono font-semibold" style={{ color: pct > 80 ? "#f2575c" : "#3ecf8e" }}>{used}</span>
-      <span>/ {limit} monthly AI runs</span>
+      <span>/ {limit} tokens acquired</span>
       <div className="h-1 w-[54px] overflow-hidden rounded-full bg-[#0e0e10]">
         <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct > 80 ? "#f2575c" : "#3ecf8e" }} />
       </div>

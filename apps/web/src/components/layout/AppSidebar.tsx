@@ -89,19 +89,17 @@ export function AppSidebar() {
 }
 
 function AiUsageMeter({ user }: { user: NonNullable<Awaited<ReturnType<typeof loadAuthUser>>> }) {
-  const usage = user.aiUsage ?? { used: 0, limit: user.proActive ? 100 : 3, remaining: user.proActive ? 100 : 3 };
-  const limit = Math.max(1, usage.limit);
+  const usage = user.aiUsage ?? { used: 0, tokens: user.proActive ? 100 : 3, remaining: user.proActive ? 100 : 3 };
+  const limit = Math.max(1, usage.used + usage.tokens);
   const remaining = Math.max(0, Math.min(limit, usage.remaining));
   const remainingPct = Math.round((remaining / limit) * 100);
-  const expiry = user.premiumExpiresAt ? new Date(user.premiumExpiresAt) : null;
-  const expiryLabel = expiry && !Number.isNaN(expiry.getTime()) ? expiry.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : null;
 
   return (
     <div className="overflow-hidden rounded-[11px] border border-[#303039] bg-[#141417] px-3 py-3 shadow-[0_10px_28px_rgba(0,0,0,0.18)]">
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="text-[9px] font-black uppercase tracking-[0.13em] text-[#3ecf8e]">{user.proActive ? "Pro trial" : "Free plan"}</div>
-          <div className="mt-1 text-[12px] font-semibold text-[#ececee]"><span className="font-mono text-[15px]">{remaining}</span> <span className="text-[#8c8c95]">AI runs left</span></div>
+          <div className="mt-1 text-[12px] font-semibold text-[#ececee]"><span className="font-mono text-[15px]">{remaining}</span> <span className="text-[#8c8c95]">AI tokens left</span></div>
         </div>
         <div className="rounded-[6px] border border-[#34343d] bg-[#1c1c20] px-1.5 py-1 font-mono text-[9px] text-[#a6a6af]">{remaining}/{limit}</div>
       </div>
@@ -110,11 +108,11 @@ function AiUsageMeter({ user }: { user: NonNullable<Awaited<ReturnType<typeof lo
         <div className="absolute inset-0 bg-[linear-gradient(110deg,transparent_25%,rgba(255,255,255,0.24)_45%,transparent_65%)] bg-[length:200%_100%] animate-[pulse_2.4s_ease-in-out_infinite]" />
       </div>
       <div className="mt-2 flex items-center justify-between text-[9px] text-[#696972]">
-        <span>{usage.used} used this month</span>
-        {user.proActive && expiryLabel ? <span>Ends {expiryLabel}</span> : <span>{remainingPct}% left</span>}
+        <span>{usage.used} tokens used</span>
+        <span>Tokens never expire</span>
       </div>
       <CreditTopUpButton className="mt-2.5 w-full" />
-      {"bonus" in usage && usage.bonus ? <div className="mt-1.5 text-center text-[8.5px] text-[#696972]">Includes {usage.bonus} purchased credits</div> : null}
+      {"tokens" in usage && usage.tokens ? <div className="mt-1.5 text-center text-[8.5px] text-[#696972]">{usage.tokens} token balance · no expiry</div> : null}
     </div>
   );
 }

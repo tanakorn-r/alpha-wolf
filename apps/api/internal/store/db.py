@@ -278,18 +278,32 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
         db.execute("ALTER TABLE users ADD COLUMN premium_expires_at TEXT")
     db.execute(
         """
-        CREATE TABLE IF NOT EXISTS ai_usage_monthly (
-            user_id INTEGER NOT NULL,
-            period TEXT NOT NULL,
-            used INTEGER NOT NULL DEFAULT 0,
-            bonus INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY(user_id, period)
+        CREATE TABLE IF NOT EXISTS ai_credit_balances (
+            user_id INTEGER PRIMARY KEY,
+            balance INTEGER NOT NULL DEFAULT 0,
+            used_total INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL
         )
         """
     )
-    if "bonus" not in _table_columns(db, "ai_usage_monthly"):
-        db.execute("ALTER TABLE ai_usage_monthly ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
+    if "used_total" not in _table_columns(db, "ai_credit_balances"):
+        db.execute("ALTER TABLE ai_credit_balances ADD COLUMN used_total INTEGER NOT NULL DEFAULT 0")
+    # Older releases attached paid credits to one calendar month's usage row. Move
+    # every legacy bonus into the durable balance exactly once, then remove the
+    # calendar-month ledger entirely so it can never reset or be used again.
+    legacy_usage_columns = _table_columns(db, "ai_usage_monthly")
+    if legacy_usage_columns:
+        legacy_bonus_rows = db.execute(
+            "SELECT user_id, SUM(bonus) FROM ai_usage_monthly WHERE bonus > 0 GROUP BY user_id"
+        ).fetchall() if "bonus" in legacy_usage_columns else []
+        for row in legacy_bonus_rows:
+            db.execute(
+                """INSERT INTO ai_credit_balances(user_id, balance, used_total, updated_at) VALUES(?, ?, 0, CURRENT_TIMESTAMP)
+                   ON CONFLICT(user_id) DO UPDATE SET balance = ai_credit_balances.balance + excluded.balance,
+                   updated_at = excluded.updated_at""",
+                (int(row[0]), int(row[1])),
+            )
+        db.execute("DROP TABLE ai_usage_monthly")
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS stripe_credit_fulfillments (

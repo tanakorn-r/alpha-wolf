@@ -61,7 +61,7 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
             <input type="number" min={1} value={contribution} onChange={(event) => setContribution(Math.max(1, Number(event.target.value) || 1))} className="w-full rounded-[7px] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2 font-mono text-[12px] text-[#ececee]" />
           </Control>
         </div>
-        <p className="mt-2 text-right text-[10px] text-[#66666f]">Uses {years * 12 + 1} AI runs for {years} year{years === 1 ? "" : "s"}.</p>
+        <p className="mt-2 text-right text-[10px] text-[#66666f]">Uses {years * 12 + 1} AI tokens for {years} year{years === 1 ? "" : "s"}.</p>
       </section>
       {error ? <ErrorCard message={error} /> : null}
       {jobQuery.isError ? <ErrorCard message={(jobQuery.error as Error).message} /> : null}

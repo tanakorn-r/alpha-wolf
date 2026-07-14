@@ -24,7 +24,7 @@ def claim_ai_run(request: Request, *, premium_required: bool = False, cost: int 
     if not result["allowed"]:
         if result["reason"] == "pro_required":
             raise HTTPException(status_code=403, detail="An active Pro plan is required")
-        raise HTTPException(status_code=429, detail="Monthly AI limit reached")
+        raise HTTPException(status_code=429, detail="No AI tokens remaining")
     return user_id, result
 
 
