@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from statistics import median
 from typing import Any
 import warnings
 import pandas as pd
@@ -14,8 +15,10 @@ from internal.market.technicals import (
     year_to_date_return,
 )
 from internal.market.catalog import get_industry_peers
+from internal.market.company_structure import classify_company_structure
 from internal.store.cache import cache_compute_lock, cache_get, cache_set
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
+from internal.store.universe_cache import load_market_universe
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
 from internal.news.kaohoon import market_news as fetch_kaohoon_news
 from internal.yahoo.client import _modules_have_market_data, _refresh_in_background, fetch_dividends, fetch_history, fetch_news, fetch_sector, fetch_industry, load_ticker_modules, safe_call, ticker as make_ticker
@@ -116,6 +119,7 @@ def _build_detail_bundle_uncached(
 
     technicals = build_technicals(history)
     business = build_business_profile(modules, history, stock)
+    company_structure = classify_company_structure(business, stock)
     performance = build_performance_profile(history)
     peers = build_peer_profile(stock, business, strategy)
     verdict = build_verdict(stock, business, performance, peers, strategy, technicals, history=history, mode=selected_mode)
@@ -128,6 +132,7 @@ def _build_detail_bundle_uncached(
         "technicals": technicals,
         "news": news,
         "business": business,
+        "companyStructure": company_structure,
         "performance": performance,
         "peerRank": peers,
         "verdict": verdict,
@@ -386,6 +391,7 @@ def build_business_profile(modules: dict[str, Any], history: pd.DataFrame, stock
         "enterpriseValue": as_float(info.get("enterpriseValue")),
         "totalCash": as_float(info.get("totalCash")),
         "totalDebt": as_float(info.get("totalDebt")),
+        "freeCashflow": as_float(info.get("freeCashflow")),
         "bookValuePerShare": as_float(info.get("bookValue")),
         "peRatio": as_float(info.get("trailingPE") or info.get("forwardPE")),
         "forwardPE": as_float(info.get("forwardPE")),
@@ -474,6 +480,19 @@ def build_peer_profile(stock: dict[str, Any], business: dict[str, Any], strategy
         live_records = get_industry_peers(region, industry) if industry and industry != "Unknown" else []
     except Exception:
         live_records = []
+    peer_source = "Live industry screen"
+    company_profile = classify_company_structure(business, stock)
+    if len(live_records) < 3:
+        # Yahoo's industry screener often returns no Thai rows. Fall back to the persisted regional
+        # universe and select same-archetype, similar-size companies instead of abandoning peer
+        # context or comparing a bank with every financial-services listing/DR.
+        stored = load_market_universe(region)
+        target_cap = as_float(business.get("marketCap") or stock.get("marketCap"))
+        live_records = [
+            item for item in (stored.records if stored else [])
+            if _is_structural_peer(item, company_profile, target_cap, region, str(stock.get("symbol") or ""))
+        ]
+        peer_source = "Stored regional structural-peer cohort"
     scored = sorted(
         (
             {
@@ -487,6 +506,11 @@ def build_peer_profile(stock: dict[str, Any], business: dict[str, Any], strategy
         reverse=True,
     )
     rank = next((index + 1 for index, item in enumerate(scored) if item["symbol"] == stock["symbol"]), None)
+    peer_pb = _median_metric(live_records, "priceToBook", minimum=0.1, maximum=20)
+    peer_pe = _median_metric(live_records, "peRatio", minimum=0.1, maximum=100)
+    peer_one_year = _median_metric(live_records, "oneYearReturn", minimum=-100, maximum=1000)
+    company_pb = as_float(business.get("priceToBook"))
+    company_pe = as_float(business.get("peRatio"))
     return {
         "sector": business.get("sector") or stock.get("sector") or "Unknown",
         "industry": industry or "Unknown",
@@ -495,7 +519,41 @@ def build_peer_profile(stock: dict[str, Any], business: dict[str, Any], strategy
         "isNo1": rank == 1 if rank is not None else False,
         "leader": scored[0]["symbol"] if scored else None,
         "leaderScore": scored[0]["score"] if scored else None,
+        "source": peer_source,
+        "archetype": company_profile.get("archetype"),
+        "sizeMatchedCount": len(live_records),
+        "peerMedianPriceToBook": peer_pb,
+        "peerMedianPeRatio": peer_pe,
+        "peerMedianOneYearReturnPct": peer_one_year,
+        "priceToBookVsPeerPct": _premium_pct(company_pb, peer_pb),
+        "peVsPeerPct": _premium_pct(company_pe, peer_pe),
     }
+
+
+def _is_structural_peer(item: dict[str, Any], target_profile: dict[str, Any], target_cap: float | None, region: str, target_symbol: str) -> bool:
+    symbol = str(item.get("symbol") or "").upper()
+    if not symbol or symbol == target_symbol.upper():
+        return False
+    # Thai depositary receipts contain digits and can carry foreign-company market caps in THB;
+    # keep the local cohort economically comparable.
+    if region == "th" and any(character.isdigit() for character in symbol.split(".")[0]):
+        return False
+    profile = classify_company_structure(item, item)
+    if profile.get("archetype") != target_profile.get("archetype"):
+        return False
+    peer_cap = as_float(item.get("marketCap"))
+    return not (target_cap and peer_cap and not (target_cap * 0.2 <= peer_cap <= target_cap * 5.0))
+
+
+def _median_metric(records: list[dict[str, Any]], key: str, *, minimum: float, maximum: float) -> float | None:
+    values = [number for item in records if (number := as_float(item.get(key))) is not None and minimum <= number <= maximum]
+    return round(float(median(values)), 4) if values else None
+
+
+def _premium_pct(value: float | None, peer: float | None) -> float | None:
+    if value is None or peer is None or peer == 0:
+        return None
+    return round((value / peer - 1.0) * 100.0, 1)
 
 
 def build_verdict(

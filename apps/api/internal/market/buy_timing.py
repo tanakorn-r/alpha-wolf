@@ -8,6 +8,7 @@ import pandas as pd
 
 from internal.market.deep import deep_analysis
 from internal.market.detail import build_detail_bundle
+from internal.market.company_structure import classify_company_structure
 from internal.market.scoring import StrategyKey
 from internal.market.symbol import fetch_symbol_record
 from internal.store.cache import cache_get, cache_set
@@ -22,7 +23,7 @@ MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", 
 
 def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_refresh: bool = False) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
-    cache_key = f"v10-money-weighted-backtest:{normalized}:{strategy}"
+    cache_key = f"v15-industry-company-seasonality:{normalized}:{strategy}"
     cached = cache_get(BUY_TIMING_CACHE_NAMESPACE, cache_key)
     if cached is not None and not force_refresh:
         return cached
@@ -101,7 +102,9 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_re
     monthly_history = _monthly_close_history(closes, history_dividends)
     backtest = _backtest_monthly_plan(monthly_history, monthly_map)
     price_context = _price_context(closes, current_price)
-    business_structure = _business_structure(detail.get("business"))
+    company_structure = detail.get("companyStructure") or classify_company_structure(detail.get("business") or {}, detail.get("stock") or stock)
+    business_structure = _business_structure(detail.get("business"), company_structure)
+    participation_context = _participation_context(detail)
     timeline = _build_timeline(today, last_ex, next_ex, current_buy_start, current_buy_end, buy_start, buy_end, trim_start, trim_end)
     pattern_good = bool(avg_dip is not None and avg_dip < -0.3 and (hit_rate or 0) >= 55)
     action = _action(pattern_good, today, current_buy_start, current_buy_end, trim_start, trim_end, current_price, deep, price_context)
@@ -152,6 +155,8 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_re
         },
         "priceContext": price_context,
         "businessStructure": business_structure,
+        "companyStructureProfile": company_structure,
+        "participationContext": participation_context,
         "timeline": timeline,
         "seasonality": seasonality,
         "comparisonYear": today.year,
@@ -178,6 +183,15 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_re
             "resistance": as_float(deep.get("resistance")),
             "dividendPattern": detail.get("dividendPattern"),
         },
+        # Kept internal to the cached snapshot. The route selects only the sources appropriate
+        # to the active Agent before sending context to the model or returning the response.
+        "_sourceSnapshots": {
+            "business": detail.get("business") or {},
+            "technicals": detail.get("technicals") or {},
+            "performance": detail.get("performance") or {},
+            "industryPeers": detail.get("peerRank") or {},
+            "news": (detail.get("news") or [])[:5],
+        },
         "dataPending": bool(not current_price or history.empty),
     }
     cache_set(
@@ -187,6 +201,169 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_re
         BUY_TIMING_PENDING_TTL_SECONDS if result["dataPending"] else BUY_TIMING_TTL_SECONDS,
     )
     return result
+
+
+def build_agent_evidence(result: dict[str, Any], agent_id: str) -> dict[str, Any]:
+    """Select four genuinely different source groups for the active persona."""
+    agent = (agent_id or "vera").strip().lower()
+    snapshots = result.get("_sourceSnapshots") if isinstance(result.get("_sourceSnapshots"), dict) else {}
+    business = snapshots.get("business") if isinstance(snapshots.get("business"), dict) else {}
+    technicals = snapshots.get("technicals") if isinstance(snapshots.get("technicals"), dict) else {}
+    performance = snapshots.get("performance") if isinstance(snapshots.get("performance"), dict) else {}
+    returns = performance.get("returns") if isinstance(performance.get("returns"), dict) else {}
+    news = snapshots.get("news") if isinstance(snapshots.get("news"), list) else []
+    industry_peers = snapshots.get("industryPeers") if isinstance(snapshots.get("industryPeers"), dict) else {}
+    entry = result.get("entryBand") if isinstance(result.get("entryBand"), dict) else {}
+    price_context = result.get("priceContext") if isinstance(result.get("priceContext"), dict) else {}
+    pattern = result.get("postExDipPattern") if isinstance(result.get("postExDipPattern"), dict) else {}
+    stats = result.get("stats") if isinstance(result.get("stats"), dict) else {}
+    backtest = result.get("backtest") if isinstance(result.get("backtest"), dict) else {}
+    currency = str(result.get("currency") or "USD")
+    company_structure = result.get("companyStructureProfile") if isinstance(result.get("companyStructureProfile"), dict) else {}
+    structure_value = f"{company_structure.get('label') or 'unclassified'} · {str(company_structure.get('sizeBucket') or 'unknown').replace('_', ' ').lower()}"
+
+    fundamentals = _evidence_section("Business economics", "Company financial profile", [
+        ("structure", structure_value),
+        ("ROE", _pct(business.get("roe"))), ("profit margin", _pct(business.get("profitMargin"))),
+        ("revenue growth", _pct(business.get("revenueGrowth"))), ("earnings growth", _pct(business.get("earningsGrowth"))),
+    ])
+    cash_flow = _evidence_section("Owner cash generation", "Reported company fundamentals", [
+        ("free cash flow", _money(business.get("freeCashflow"), currency, compact=True)),
+        ("total cash", _money(business.get("totalCash"), currency, compact=True)),
+        ("total debt", _money(business.get("totalDebt"), currency, compact=True)),
+        ("debt/equity", _pct(business.get("debtToEquity"))),
+    ])
+    valuation_source = "Market valuation + structural peer cohort" if industry_peers.get("sizeMatchedCount") else "Market valuation + derived entry band"
+    valuation = _evidence_section("Valuation & entry", valuation_source, [
+        ("trailing P/E", _multiple(business.get("peRatio"))), ("forward P/E", _multiple(business.get("forwardPE"))),
+        ("price/book", _multiple(business.get("priceToBook"))),
+        ("peer median P/B", _multiple(industry_peers.get("peerMedianPriceToBook"))),
+        ("P/B vs peers", _pct(industry_peers.get("priceToBookVsPeerPct"))),
+        ("peer median P/E", _multiple(industry_peers.get("peerMedianPeRatio"))),
+        ("structural peers", _plain(industry_peers.get("sizeMatchedCount"))),
+        ("price / buy zone", f"{_money(result.get('price'), currency)} / {_money(entry.get('low'), currency)}-{_money(entry.get('high'), currency)}"),
+    ])
+    balance_sheet = _evidence_section("Capital structure", "Reported balance-sheet profile", [
+        ("cash", _money(business.get("totalCash"), currency, compact=True)), ("debt", _money(business.get("totalDebt"), currency, compact=True)),
+        ("debt/equity", _pct(business.get("debtToEquity"))), ("ROA", _pct(business.get("roa"))),
+    ])
+    income = _evidence_section("Income durability", "Dividend + company fundamentals", [
+        ("dividend yield", _pct(business.get("dividendYield"))), ("payout ratio", _pct(business.get("payoutRatio"))),
+        ("post-ex hit rate", _pct(pattern.get("hitRate"))), ("measured cycles", _plain(pattern.get("sampleSize"))),
+    ])
+    tape = _evidence_section("Tape & momentum", "Price/volume technicals", [
+        ("RSI(14)", _plain(technicals.get("rsi14"))), ("volume / 20D average", _multiple(technicals.get("volumeRatio"))),
+        ("MACD histogram", _plain(technicals.get("macdHistogram"))), ("trend", _plain(technicals.get("trend"))),
+    ])
+    levels = _evidence_section("Trade levels", "20-session technical structure", [
+        ("support", _money(technicals.get("support"), currency)), ("resistance", _money(technicals.get("resistance"), currency)),
+        ("hard stop", _money((result.get("technicalContext") or {}).get("stop"), currency)),
+        ("target", _money((result.get("technicalContext") or {}).get("target"), currency)),
+    ])
+    momentum = _evidence_section("Acceleration", "Historical return + momentum model", [
+        ("YTD return", _pct(returns.get("ytd"))), ("1Y return", _pct(returns.get("1y"))),
+        ("momentum score", _score(performance.get("momentumScore"))), ("volatility", _pct(technicals.get("volatility"))),
+    ])
+    catalysts = _evidence_section("Crowd & catalyst check", "Recent stored market news", [
+        ("recent headlines", _headline_summary(news)), ("volume confirmation", _multiple(technicals.get("volumeRatio"))),
+    ])
+    statistics = _evidence_section("Measured timing edge", "Dividend-event backtest", [
+        ("average post-ex dip", _pct(pattern.get("averageDipPct"))), ("hit rate", _pct(pattern.get("hitRate"))),
+        ("cycles", _plain(pattern.get("sampleSize"))), ("edge vs random", _pct(stats.get("edgeVsRandomBuyPct"))),
+    ])
+    factors = _evidence_section("Factor snapshot", "Company + price factor inputs", [
+        ("quality / ROE", _pct(business.get("roe"))), ("value / P/B", _multiple(business.get("priceToBook"))),
+        ("momentum score", _score(performance.get("momentumScore"))), ("5Y range position", _pct(price_context.get("currentPct"))),
+    ])
+    risk = _evidence_section("Risk rule", "Volatility + technical risk inputs", [
+        ("volatility", _pct(technicals.get("volatility"))), ("debt/equity", _pct(business.get("debtToEquity"))),
+        ("stop", _money((result.get("technicalContext") or {}).get("stop"), currency)), ("target upside", _pct(entry.get("upsideLeftPct"))),
+    ])
+    simulation = _evidence_section("Plan simulation", "Five-year monthly backtest", [
+        ("strategy return", _pct(backtest.get("strategyReturnPct"))), ("always-buy return", _pct(backtest.get("alwaysBuyReturnPct"))),
+        ("contributed", _money(backtest.get("totalContributed"), currency)), ("ending value", _money(backtest.get("endingValue"), currency)),
+    ])
+    prime_structure = _evidence_section("Rule anchor · structure & funding", "Rule engine · industry-normalized company evidence", [
+        ("structure", structure_value), ("ROE", _pct(business.get("roe"))),
+        ("profit margin", _pct(business.get("profitMargin"))), ("revenue growth", _pct(business.get("revenueGrowth"))),
+        ("free cash flow", _money(business.get("freeCashflow"), currency, compact=True)),
+        ("debt/equity", _pct(business.get("debtToEquity"))),
+    ])
+    prime_value_income = _evidence_section("Ownership case · value & income", "Valuation, structural peers + income evidence", [
+        ("trailing P/E", _multiple(business.get("peRatio"))), ("forward P/E", _multiple(business.get("forwardPE"))),
+        ("price/book", _multiple(business.get("priceToBook"))), ("peer median P/B", _multiple(industry_peers.get("peerMedianPriceToBook"))),
+        ("dividend yield", _pct(business.get("dividendYield"))), ("payout ratio", _pct(business.get("payoutRatio"))),
+        ("price / buy zone", f"{_money(result.get('price'), currency)} / {_money(entry.get('low'), currency)}-{_money(entry.get('high'), currency)}"),
+    ])
+    prime_timing = _evidence_section("AI judgment · regime & execution", "Tape, catalysts + measured timing evidence", [
+        ("RSI(14)", _plain(technicals.get("rsi14"))), ("volume / 20D average", _multiple(technicals.get("volumeRatio"))),
+        ("trend", _plain(technicals.get("trend"))), ("momentum score", _score(performance.get("momentumScore"))),
+        ("recent headlines", _headline_summary(news)), ("edge vs random", _pct(stats.get("edgeVsRandomBuyPct"))),
+        ("measured cycles", _plain(pattern.get("sampleSize"))),
+    ])
+    prime_risk = _evidence_section("Portfolio decision · risk & benchmark", "Risk engine, trade levels + DCA comparison", [
+        ("volatility", _pct(technicals.get("volatility"))),
+        ("hard stop", _money((result.get("technicalContext") or {}).get("stop"), currency)),
+        ("target upside", _pct(entry.get("upsideLeftPct"))),
+        ("strategy return", _pct(backtest.get("strategyReturnPct"))),
+        ("always-buy return", _pct(backtest.get("alwaysBuyReturnPct"))),
+        ("exposure-normalized return", _pct(backtest.get("exposureNormalizedReturnPct"))),
+        ("average stock exposure", _pct(backtest.get("averageStockExposurePct"))),
+    ])
+
+    profiles = {
+        "vera": ("Institutional underwriting", [fundamentals, balance_sheet, valuation, risk]),
+        "ben": ("Owner-quality research", [fundamentals, cash_flow, balance_sheet, valuation]),
+        "sam": ("Income-source research", [income, cash_flow, balance_sheet, valuation]),
+        "rex": ("Trading-desk sources", [tape, levels, momentum, risk]),
+        "kai": ("Momentum & attention sources", [catalysts, tape, momentum, levels]),
+        "nadia": ("Systematic research sources", [statistics, factors, risk, simulation]),
+        "alphawolf": ("Prime hybrid council stack", [prime_structure, prime_value_income, prime_timing, prime_risk]),
+    }
+    profile, sections = profiles.get(agent, profiles["vera"])
+    return {"agentId": agent, "profile": profile, "sections": sections}
+
+
+def _evidence_section(label: str, source: str, metrics: list[tuple[str, str]]) -> dict[str, Any]:
+    return {"label": label, "source": source, "metrics": [{"label": key, "value": value} for key, value in metrics]}
+
+
+def _plain(value: Any) -> str:
+    number = as_float(value)
+    if number is not None:
+        return f"{number:,.2f}".rstrip("0").rstrip(".")
+    return str(value) if value not in (None, "") else "unavailable"
+
+
+def _pct(value: Any) -> str:
+    number = as_float(value)
+    return f"{number:,.1f}%" if number is not None else "unavailable"
+
+
+def _multiple(value: Any) -> str:
+    number = as_float(value)
+    return f"{number:,.2f}x" if number is not None else "unavailable"
+
+
+def _score(value: Any) -> str:
+    number = as_float(value)
+    return f"{number:,.0f}/100" if number is not None else "unavailable"
+
+
+def _money(value: Any, currency: str, compact: bool = False) -> str:
+    number = as_float(value)
+    if number is None:
+        return "unavailable"
+    if compact and abs(number) >= 1_000_000_000:
+        return f"{currency} {number / 1_000_000_000:,.2f}B"
+    if compact and abs(number) >= 1_000_000:
+        return f"{currency} {number / 1_000_000:,.2f}M"
+    return f"{currency} {number:,.2f}"
+
+
+def _headline_summary(news: list[Any]) -> str:
+    titles = [str(item.get("title")) for item in news if isinstance(item, dict) and item.get("title")]
+    return " | ".join(titles[:2]) if titles else "unavailable"
 
 
 def apply_ai_narrative(result: dict[str, Any], narrative: dict[str, Any]) -> dict[str, Any]:
@@ -199,17 +376,35 @@ def apply_ai_narrative(result: dict[str, Any], narrative: dict[str, Any]) -> dic
     )
     action = narrative.get("action") or result["action"]
     agent_fit = narrative.get("agentFit")
-    if action != "BUY" and agent_fit == "aligned":
+    # Company/philosophy fit and today's execution are separate concepts. An aligned company can
+    # be a WAIT at today's price; collapsing it to neutral makes the thesis contradict the plan.
+    if action == "BUY" and agent_fit == "against":
         agent_fit = "neutral"
-    elif action == "BUY" and agent_fit == "against":
-        agent_fit = "neutral"
+    agent_backtest = _backtest_monthly_plan(
+        result.get("monthlyHistory"), monthly_plan, narrative_agent.get("id")
+    ) if monthly_plan else result.get("backtest")
+    if isinstance(agent_backtest, dict) and monthly_plan:
+        agent_backtest = {
+            **agent_backtest,
+            "battlefield": _evaluate_agent_battlefield(
+                agent_backtest,
+                narrative_agent.get("id"),
+                result.get("businessStructure"),
+                result.get("participationContext"),
+            ),
+        }
     return {
         **result,
         "headline": narrative.get("headline") or result["headline"],
         "summary": narrative.get("summary") or result["summary"],
+        "strategyQuote": narrative.get("strategyQuote"),
         "action": action,
         "perspectiveScore": narrative.get("perspectiveScore"),
         "perspectiveReason": narrative.get("perspectiveReason"),
+        "coreBelief": narrative.get("coreBelief"),
+        "evidencePriority": narrative.get("evidencePriority"),
+        "fitExplanation": narrative.get("fitExplanation"),
+        "thesisBreaker": narrative.get("thesisBreaker"),
         "narrativeSource": narrative.get("source") or "openai",
         "model": narrative.get("model"),
         "recap": narrative.get("recap"),
@@ -221,7 +416,7 @@ def apply_ai_narrative(result: dict[str, Any], narrative: dict[str, Any]) -> dic
         "buyCondition": narrative.get("buyCondition"),
         "reduceCondition": narrative.get("reduceCondition"),
         "agentMonthlyPlan": monthly_plan,
-        "backtest": _backtest_monthly_plan(result.get("monthlyHistory"), monthly_plan) if monthly_plan else result.get("backtest"),
+        "backtest": agent_backtest,
         "generatedAt": narrative.get("generatedAt"),
     }
 
@@ -267,33 +462,100 @@ def _valid_agent_monthly_plan(
     return plan
 
 
-def _business_structure(business: Any) -> dict[str, Any]:
+def _business_structure(business: Any, company_structure: Any = None) -> dict[str, Any]:
     source = business if isinstance(business, dict) else {}
+    profile = company_structure if isinstance(company_structure, dict) else classify_company_structure(source)
+    archetype = str(profile.get("archetype") or "OPERATING_COMPANY")
     roe = as_float(source.get("roe"))
     margin = as_float(source.get("profitMargin"))
     revenue_growth = as_float(source.get("revenueGrowth"))
     debt_to_equity = as_float(source.get("debtToEquity"))
     available = [value for value in (roe, margin, revenue_growth, debt_to_equity) if value is not None]
+    ordinary_debt_archetypes = {
+        "OPERATING_COMPANY", "INDUSTRIAL", "CONSUMER_STAPLES",
+        "CONSUMER_DISCRETIONARY", "GROWTH_TECH", "HEALTHCARE",
+    }
     at_risk_reasons = [
         reason for condition, reason in (
             (margin is not None and margin < 0, "negative profit margin"),
             (roe is not None and roe < 0, "negative return on equity"),
-            (debt_to_equity is not None and debt_to_equity > 250, "very high debt to equity"),
+            (archetype in ordinary_debt_archetypes and debt_to_equity is not None and debt_to_equity > 250, "very high debt to equity"),
+            (archetype == "UTILITY" and debt_to_equity is not None and debt_to_equity > 500, "utility leverage above the broad structural guardrail"),
         ) if condition
     ]
-    intact = (
-        margin is not None and margin > 0
+    industry_native_archetype = archetype not in ordinary_debt_archetypes and archetype != "UTILITY"
+    industry_native_positive = bool(
+        industry_native_archetype
         and roe is not None and roe > 0
-        and (debt_to_equity is None or debt_to_equity <= 200)
+        and margin is not None and margin > 0
     )
+    if industry_native_archetype:
+        # Corporate leverage cutoffs are category errors for balance-sheet businesses and for
+        # industry structures whose debt must be tested through coverage, assets, leases, backlog,
+        # inventory, or mid-cycle cash flow.
+        # Mark the limited snapshot intact only on positive economics; the profile tells the Agent
+        # which specialist capital/coverage evidence is still required before conviction.
+        # Positive snapshot economics prevent a false corporate-leverage veto, but specialist
+        # capital/coverage evidence is still needed before calling the structure fully intact.
+        intact = False
+    elif archetype == "UTILITY":
+        intact = margin is not None and margin > 0 and roe is not None and roe > 0 and (debt_to_equity is None or debt_to_equity <= 500)
+    else:
+        intact = margin is not None and margin > 0 and roe is not None and roe > 0 and (debt_to_equity is None or debt_to_equity <= 200)
     status = "AT_RISK" if at_risk_reasons else "INTACT" if intact else "MIXED" if available else "UNPROVEN"
+    ownership_eligible = bool(not at_risk_reasons and (intact or industry_native_positive))
     return {
         "status": status,
+        "archetype": archetype,
+        "ownershipEligible": ownership_eligible,
+        "industryNativeStatus": (
+            "POSITIVE_BUT_SPECIALIST_METRICS_INCOMPLETE" if industry_native_positive
+            else "SPECIALIST_METRICS_INCOMPLETE" if industry_native_archetype
+            else "POSITIVE" if intact
+            else status
+        ),
+        "genericLeverageIgnored": industry_native_archetype,
         "roe": roe,
         "profitMargin": margin,
         "revenueGrowth": revenue_growth,
         "debtToEquity": debt_to_equity,
         "reasons": at_risk_reasons,
+        "companyStructureProfile": profile,
+    }
+
+
+def _participation_context(detail: dict[str, Any]) -> dict[str, Any]:
+    technicals = detail.get("technicals") if isinstance(detail.get("technicals"), dict) else {}
+    performance = detail.get("performance") if isinstance(detail.get("performance"), dict) else {}
+    returns = performance.get("returns") if isinstance(performance.get("returns"), dict) else {}
+    stock = detail.get("stock") if isinstance(detail.get("stock"), dict) else {}
+    price = as_float(stock.get("price"))
+    sma50 = as_float(technicals.get("sma50"))
+    sma200 = as_float(technicals.get("sma200"))
+    one_year = as_float(returns.get("1y"))
+    momentum_score = as_float(performance.get("momentumScore"))
+    bullish_signals = sum((
+        bool(price is not None and sma50 is not None and price > sma50),
+        bool(price is not None and sma200 is not None and price > sma200),
+        bool(one_year is not None and one_year > 0),
+        bool(momentum_score is not None and momentum_score >= 55),
+    ))
+    bearish_signals = sum((
+        bool(price is not None and sma50 is not None and price < sma50),
+        bool(price is not None and sma200 is not None and price < sma200),
+        bool(one_year is not None and one_year < -15),
+        bool(momentum_score is not None and momentum_score <= 40),
+    ))
+    regime = "BULL" if bullish_signals >= 3 else "BEAR" if bearish_signals >= 3 else "MIXED"
+    return {
+        "regime": regime,
+        "bullishSignals": bullish_signals,
+        "bearishSignals": bearish_signals,
+        "priceAboveSma50": bool(price is not None and sma50 is not None and price > sma50),
+        "priceAboveSma200": bool(price is not None and sma200 is not None and price > sma200),
+        "oneYearReturnPct": one_year,
+        "momentumScore": momentum_score,
+        "instruction": "Balance permanent-loss risk against non-participation/cash-drag risk. A bull regime is a sizing tailwind, not an automatic buy.",
     }
 
 
@@ -340,7 +602,7 @@ def _monthly_close_history(closes: pd.Series, dividends: pd.Series | None = None
     } for index, value in monthly.items()]
 
 
-def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
+def _backtest_monthly_plan(history: Any, plan: Any, agent_id: str | None = None) -> dict[str, Any] | None:
     if not isinstance(history, list) or len(history) < 13 or not isinstance(plan, list):
         return None
     decisions = {item.get("month"): item for item in plan if isinstance(item, dict)}
@@ -357,6 +619,11 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
     strategy_max_drawdown = benchmark_max_drawdown = 0.0
     previous_strategy_value = previous_benchmark_value = 0.0
     strategy_dividends_received = benchmark_dividends_reinvested = 0.0
+    strategy_dividends_reinvested = 0.0
+    agent = (agent_id or "").strip().lower()
+    strategic_owner = agent in {"vera", "ben", "sam", "alphawolf"}
+    tactical_agent = agent in {"rex", "kai"}
+    reinvest_agent_dividends = strategic_owner
     for point in history:
         if not isinstance(point, dict):
             continue
@@ -368,8 +635,12 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
         strategy_dividend = strategy_shares * dividend_per_share
         benchmark_dividend = benchmark_shares * dividend_per_share
         if strategy_dividend > 0:
-            strategy_cash += strategy_dividend
             strategy_dividends_received += strategy_dividend
+            if reinvest_agent_dividends:
+                strategy_shares += strategy_dividend / price
+                strategy_dividends_reinvested += strategy_dividend
+            else:
+                strategy_cash += strategy_dividend
         if benchmark_dividend > 0:
             benchmark_shares += benchmark_dividend / price
             benchmark_dividends_reinvested += benchmark_dividend
@@ -394,15 +665,33 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
         action = decision.get("action")
         fallback_pct = 100 if action in {"BUY", "ADD_SMALL"} else 0
         buy_pct = max(0.0, min(100.0, float(decision.get("buyBudgetPct", fallback_pct) or 0)))
-        # Sizing belongs to this month's delegated DCA envelope, not the whole accumulated cash
-        # reserve. Prior HOLD cash, trim proceeds, and dividends stay available as reserve but a
-        # later "50%" instruction must never sweep half of all of it at once.
-        buy_amount = min(strategy_cash, monthly_contribution * buy_pct / 100.0)
+        # Tactical sizing belongs to this month's DCA envelope. Strategic owners additionally put
+        # accumulated reserve back to work as conviction rises: 75% redeploys half of prior reserve
+        # and 100% redeploys all of it. This prevents a temporary HOLD/TRIM from becoming permanent
+        # cash drag while keeping 25/50% starter sizes genuinely incremental.
+        reserve_redeployment_pct = max(0.0, min(100.0, (buy_pct - 50.0) * 2.0)) if strategic_owner else 0.0
+        prior_reserve = max(0.0, strategy_cash - monthly_contribution)
+        buy_amount = (
+            strategy_cash * buy_pct / 100.0
+            if tactical_agent else
+            min(
+                strategy_cash,
+                monthly_contribution * buy_pct / 100.0 + prior_reserve * reserve_redeployment_pct / 100.0,
+            )
+        )
         if buy_amount > 0:
             strategy_shares += buy_amount / price
             strategy_cash -= buy_amount
             invested_months += 1
-        no_div_buy_amount = min(strategy_no_div_cash, monthly_contribution * buy_pct / 100.0)
+        no_div_prior_reserve = max(0.0, strategy_no_div_cash - monthly_contribution)
+        no_div_buy_amount = (
+            strategy_no_div_cash * buy_pct / 100.0
+            if tactical_agent else
+            min(
+                strategy_no_div_cash,
+                monthly_contribution * buy_pct / 100.0 + no_div_prior_reserve * reserve_redeployment_pct / 100.0,
+            )
+        )
         if no_div_buy_amount > 0:
             strategy_no_div_shares += no_div_buy_amount / price
             strategy_no_div_cash -= no_div_buy_amount
@@ -472,6 +761,7 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
         "alwaysBuyMaxDrawdownPct": round(abs(benchmark_max_drawdown), 2),
         "averageStockExposurePct": round(average_stock_exposure, 2),
         "agentDividendsReceived": round(strategy_dividends_received, 2),
+        "agentDividendsReinvested": round(strategy_dividends_reinvested, 2),
         "alwaysBuyDividendsReinvested": round(benchmark_dividends_reinvested, 2),
         "monthlyContribution": monthly_contribution,
         "totalContributed": round(contributed, 2),
@@ -481,8 +771,133 @@ def _backtest_monthly_plan(history: Any, plan: Any) -> dict[str, Any] | None:
         "profitLoss": round(account_value - contributed, 2),
         "alwaysBuyEndingValue": round(benchmark_value, 2),
         "ledger": ledger,
-        "method": "Starts at 0 and delegates 100 each historical month. Each buy deploys the stated percentage of that month's 100 budget only; unused monthly budget, trim proceeds, and received dividends remain cash reserve and are never swept by a later month's percentage. Trims sell the stated share percentage. Normal DCA invests its full monthly contribution and reinvests dividends at that month-end close. Held shares revalue at actual unadjusted month-end closes.",
+        "method": (
+            "Starts at 0 and delegates 100 each historical month. "
+            + (
+                "Each buy first deploys the stated percentage of that month's 100 budget; a later 75% buy "
+                "redeploys half of accumulated reserve and a 100% buy redeploys all reserve. "
+                if strategic_owner else
+                "Each tactical buy deploys the stated percentage of all currently available strategy cash. "
+                if tactical_agent else
+                "Each buy deploys the stated percentage of that month's 100 budget only; unused monthly "
+                "budget and trim proceeds remain reserve and are never swept automatically. "
+            )
+            +
+            "Strategic long-horizon Agents reinvest received dividends; other Agents bank them as cash. "
+            "Trims sell the stated share percentage. "
+            "Normal DCA invests its full monthly contribution and reinvests dividends at that month-end "
+            "close. Held shares revalue at actual unadjusted month-end closes."
+        ),
         "inSample": True,
+    }
+
+
+def _evaluate_agent_battlefield(
+    result: dict[str, Any], agent_id: str | None,
+    business_structure: Any = None, participation_context: Any = None,
+) -> dict[str, Any]:
+    """Judge each persona on its declared objective without manufacturing a win."""
+    agent = (agent_id or "vera").strip().lower()
+    structure = business_structure if isinstance(business_structure, dict) else {}
+    participation = participation_context if isinstance(participation_context, dict) else {}
+    actual = float(result.get("strategyReturnPct") or 0)
+    dca = float(result.get("alwaysBuyReturnPct") or 0)
+    normalized = result.get("exposureNormalizedReturnPct")
+    normalized = float(normalized) if normalized is not None else None
+    exposure = float(result.get("averageStockExposurePct") or 0)
+    agent_drawdown = float(result.get("strategyMaxDrawdownPct") or 0)
+    dca_drawdown = float(result.get("alwaysBuyMaxDrawdownPct") or 0)
+    matched = float(result.get("matchedExposureBenchmarkReturnPct") or 0)
+    raw_edge = actual - dca
+    normalized_edge = (normalized - dca) if normalized is not None else None
+    drawdown_saved = dca_drawdown - agent_drawdown
+    owner_favorable = bool(
+        structure.get("ownershipEligible")
+        and participation.get("regime") == "BULL"
+    )
+
+    if agent in {"vera", "ben", "sam"}:
+        kind = "OWNER_COMPOUNDING"
+        label = "ownership & compounding"
+        objective = "Stay meaningfully invested in an ownable business and beat full DCA without relying on low exposure."
+        primary_label, primary, benchmark_label, benchmark = "Owner return · 100% exposure", normalized, "Full DCA return", dca
+        edge = normalized_edge
+        if owner_favorable and exposure < 65:
+            verdict = "LOSS"
+            explanation = "Ownable structure plus a bull regime demanded participation; cash drag lost this battlefield."
+        elif normalized_edge is not None and normalized_edge > 0.5 and exposure >= 65:
+            verdict = "WIN"
+            explanation = "The ownership plan added exposure-normalized edge while maintaining meaningful participation."
+        elif normalized_edge is not None and normalized_edge >= -1.0 and exposure >= 70:
+            verdict = "MATCH"
+            explanation = "The owner core stayed close to full DCA after exposure; its next test is adding repeatable tilt edge."
+        else:
+            verdict = "LOSS"
+            explanation = "The plan trailed full DCA after exposure or carried too little capital for an ownership mandate."
+    elif agent in {"rex", "kai"}:
+        kind = "TACTICAL_SWING"
+        label = "swing capture"
+        objective = "Use selective exposure to capture high-energy moves with better return per unit of exposure and controlled exits."
+        primary_label, primary, benchmark_label, benchmark = "Exposure-normalized swing return", normalized, "Full DCA return", dca
+        edge = normalized_edge
+        if normalized_edge is not None and normalized_edge > 1.0 and drawdown_saved >= 0 and exposure >= 5:
+            verdict = "WIN"
+            explanation = "The tactical plan earned more per unit of exposure without a worse drawdown."
+        elif normalized_edge is not None and abs(normalized_edge) <= 1.0 and drawdown_saved >= 0:
+            verdict = "MATCH"
+            explanation = "The swing plan roughly matched DCA efficiency while using a tactical exposure path."
+        else:
+            verdict = "LOSS"
+            explanation = "The entries and exits failed to create enough exposure-normalized edge for a tactical mandate."
+    elif agent == "nadia":
+        kind = "RISK_EFFICIENCY"
+        label = "risk-adjusted efficiency"
+        objective = "Improve return per unit of drawdown and beat the return expected from the same average exposure."
+        agent_efficiency = actual / max(agent_drawdown, 1.0)
+        dca_efficiency = dca / max(dca_drawdown, 1.0)
+        primary_label, primary, benchmark_label, benchmark = "AI return / drawdown", agent_efficiency, "DCA return / drawdown", dca_efficiency
+        edge = agent_efficiency - dca_efficiency
+        matched_edge = actual - matched
+        if edge > 0.05 and drawdown_saved > 0 and matched_edge >= -0.5 and exposure >= 15:
+            verdict = "WIN"
+            explanation = "The quant plan improved return per drawdown and justified its risk reduction at matched exposure."
+        elif abs(edge) <= 0.05 and drawdown_saved >= 0 and exposure >= 15:
+            verdict = "MATCH"
+            explanation = "The risk model roughly matched DCA efficiency; the lower drawdown did not yet create clear alpha."
+        else:
+            verdict = "LOSS"
+            explanation = "Cash or risk reduction did not produce enough return efficiency to justify the foregone exposure."
+    else:
+        kind = "HYBRID_ALLOCATION"
+        label = "hybrid allocation"
+        objective = "Combine participation, timing, and downside control to beat DCA on exposure-normalized return without hiding in cash."
+        primary_label, primary, benchmark_label, benchmark = "Hybrid return · normalized", normalized, "Full DCA return", dca
+        edge = normalized_edge
+        matched_edge = actual - matched
+        if normalized_edge is not None and normalized_edge > 0.5 and matched_edge >= 0 and drawdown_saved >= 0 and exposure >= 25:
+            verdict = "WIN"
+            explanation = "Prime added normalized edge, beat matched exposure, and did not worsen drawdown."
+        elif normalized_edge is not None and abs(normalized_edge) <= 0.5 and matched_edge >= -0.5 and exposure >= 25:
+            verdict = "MATCH"
+            explanation = "Prime roughly matched DCA after exposure; the hybrid council did not yet add decisive edge."
+        else:
+            verdict = "LOSS"
+            explanation = "Prime failed to justify its allocation through return, exposure, and downside control together."
+
+    unit = "ratio" if kind == "RISK_EFFICIENCY" else "percent"
+    return {
+        "kind": kind,
+        "label": label,
+        "objective": objective,
+        "verdict": verdict,
+        "primaryMetricLabel": primary_label,
+        "primaryValue": round(primary, 2) if primary is not None else None,
+        "benchmarkLabel": benchmark_label,
+        "benchmarkValue": round(benchmark, 2),
+        "edgeValue": round(edge, 2) if edge is not None else None,
+        "unit": unit,
+        "explanation": explanation,
+        "expectedTailwind": owner_favorable,
     }
 
 

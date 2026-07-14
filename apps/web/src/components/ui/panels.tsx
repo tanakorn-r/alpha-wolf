@@ -1,5 +1,7 @@
+import { useEffect } from "react";
 import { LoadingSpinner } from "../LoadingSpinner";
 import { surfaceClasses } from "./Surface";
+import { CreditTopUpButton } from "../billing/CreditTopUp";
 
 const panel = surfaceClasses.card;
 
@@ -35,13 +37,22 @@ export function EmptyPanel({ title, body }: { title: string; body: string }) {
 }
 
 export function RetryPanel({ label, busy, onRetry }: { label: string; busy?: boolean; onRetry: () => void }) {
+  const creditLimit = /monthly ai limit|credits? used/i.test(label);
+  useEffect(() => {
+    if (!creditLimit) return;
+    window.addEventListener("aw:credits-added", onRetry);
+    return () => window.removeEventListener("aw:credits-added", onRetry);
+  }, [creditLimit, onRetry]);
   return (
     <div className="flex min-h-[120px] flex-col items-center justify-center gap-3 rounded-xl border border-[#663438] bg-[#2c1719] p-5 text-center text-sm text-[#f2575c]">
       <span>{label}</span>
-      <button type="button" disabled={busy} onClick={onRetry} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">
-        {busy ? <LoadingSpinner size={12} /> : null}
-        Retry
-      </button>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {creditLimit ? <CreditTopUpButton label="Get more credits" /> : null}
+        <button type="button" disabled={busy} onClick={onRetry} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">
+          {busy ? <LoadingSpinner size={12} /> : null}
+          Retry
+        </button>
+      </div>
     </div>
   );
 }

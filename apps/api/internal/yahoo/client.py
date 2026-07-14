@@ -283,6 +283,14 @@ def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
     return _merge_module_payloads(company, quote, normalized)
 
 
+def quote_snapshot_meta(symbol: str) -> dict[str, Any]:
+    cached = load_yahoo_data(symbol.upper().strip(), "quote")
+    return {
+        "fresh": bool(cached and cached.is_fresh and isinstance(cached.payload, dict)),
+        "fetchedAt": cached.fetched_at.isoformat() if cached else None,
+    }
+
+
 def fetch_history(t: yf.Ticker, period: str = "1y", auto_adjust: bool = True) -> pd.DataFrame:
     # auto_adjust=False keeps Close split-adjusted but dividend-UNADJUSTED (plus a raw "Dividends"
     # per-share column). Callers that need to book real dividend cash flows without double-counting

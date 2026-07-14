@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from internal.store.auth import create_session, delete_session, upsert_google_user, user_for_session
-from internal.store.entitlements import redeem_pro_trial
+from internal.store.entitlements import fulfill_stripe_ai_credits, redeem_pro_trial
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -20,6 +20,21 @@ SESSION_TTL_DAYS = 30
 class GoogleCredential(BaseModel):
     credential: str = Field(min_length=20)
     nonce: str = Field(min_length=20)
+
+
+class CreditCheckout(BaseModel):
+    credits: int
+
+
+class CreditCheckoutConfirmation(BaseModel):
+    sessionId: str = Field(min_length=10, max_length=255)
+
+
+CREDIT_PACKS = {
+    25: {"amount": 299, "name": "25 AlphaWolf AI runs"},
+    75: {"amount": 699, "name": "75 AlphaWolf AI runs"},
+    200: {"amount": 1499, "name": "200 AlphaWolf AI runs"},
+}
 
 
 @router.get("/me")
@@ -39,6 +54,110 @@ def redeem_premium_route(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Sign in before redeeming Pro")
     redeem_pro_trial(int(user["id"]))
     return {"user": user_for_session(request.cookies.get(SESSION_COOKIE))}
+
+
+@router.post("/credit-checkout")
+def create_credit_checkout(payload: CreditCheckout, request: Request) -> dict[str, Any]:
+    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in before adding AI credits")
+    pack = CREDIT_PACKS.get(payload.credits)
+    if not pack:
+        raise HTTPException(status_code=400, detail="Unknown credit pack")
+    secret_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
+    if not secret_key:
+        raise HTTPException(status_code=503, detail="Stripe Checkout is not configured")
+    app_url = os.getenv("APP_URL", "http://localhost:4200").strip().rstrip("/")
+    stripe = _stripe_client()
+    stripe.api_key = secret_key
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        client_reference_id=str(user["id"]),
+        customer_email=user.get("email"),
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "unit_amount": pack["amount"],
+                "product_data": {"name": pack["name"]},
+            },
+            "quantity": 1,
+        }],
+        metadata={"user_id": str(user["id"]), "credits": str(payload.credits)},
+        success_url=f"{app_url}/hunt-ai?tab=timing&credit_purchase=success&session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{app_url}/hunt-ai?tab=timing&credit_purchase=cancelled",
+    )
+    return {"checkoutUrl": session.url}
+
+
+@router.post("/credit-checkout/confirm")
+def confirm_credit_checkout(payload: CreditCheckoutConfirmation, request: Request) -> dict[str, Any]:
+    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in before confirming AI credits")
+    stripe = _configured_stripe()
+    session = stripe.checkout.Session.retrieve(payload.sessionId)
+    _fulfill_checkout_session(session, event_key=f"return:{payload.sessionId}", expected_user_id=int(user["id"]))
+    return {"user": user_for_session(request.cookies.get(SESSION_COOKIE))}
+
+
+@router.post("/stripe/webhook")
+async def stripe_webhook(request: Request) -> dict[str, bool]:
+    webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+    if not webhook_secret:
+        raise HTTPException(status_code=503, detail="Stripe webhook is not configured")
+    signature = request.headers.get("stripe-signature", "")
+    payload = await request.body()
+    stripe = _stripe_client()
+    try:
+        event = stripe.Webhook.construct_event(payload, signature, webhook_secret)
+    except (ValueError, stripe.error.SignatureVerificationError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook") from exc
+    if event["type"] in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
+        _fulfill_checkout_session(event["data"]["object"], event_key=str(event["id"]))
+    return {"received": True}
+
+
+def _configured_stripe():
+    secret_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
+    if not secret_key:
+        raise HTTPException(status_code=503, detail="Stripe Checkout is not configured")
+    stripe = _stripe_client()
+    stripe.api_key = secret_key
+    return stripe
+
+
+def _stripe_client():
+    try:
+        import stripe
+    except ImportError as exc:
+        raise HTTPException(status_code=503, detail="Stripe SDK is unavailable") from exc
+    return stripe
+
+
+def _fulfill_checkout_session(session: Any, *, event_key: str, expected_user_id: int | None = None) -> None:
+    metadata = dict(session.get("metadata") or {})
+    try:
+        user_id = int(metadata.get("user_id") or 0)
+        credits = int(metadata.get("credits") or 0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Stripe Session metadata is invalid") from exc
+    pack = CREDIT_PACKS.get(credits)
+    amount_total = int(session.get("amount_total") or 0)
+    currency = str(session.get("currency") or "").lower()
+    if expected_user_id is not None and user_id != expected_user_id:
+        raise HTTPException(status_code=403, detail="Stripe Session belongs to another account")
+    if session.get("payment_status") != "paid":
+        raise HTTPException(status_code=409, detail="Stripe payment is not complete")
+    if not pack or amount_total != pack["amount"] or currency != "usd":
+        raise HTTPException(status_code=400, detail="Stripe credit pack does not match payment")
+    fulfill_stripe_ai_credits(
+        user_id,
+        credits,
+        event_key=event_key,
+        session_id=str(session.get("id") or ""),
+        amount_total=amount_total,
+        currency=currency,
+    )
 
 
 def premium_promo_active() -> bool:

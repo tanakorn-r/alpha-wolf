@@ -169,7 +169,7 @@ export function useDailyBrief() {
 }
 
 function dailyBriefCacheKey(accountScope: string, symbol: string, strategy: string, agentId: string) {
-  return `${accountScope}:persona-v23-score-action-consistency:daily-brief:${symbol}:${strategy}:${agentId}`;
+  return `${accountScope}:persona-v24-agent-evidence-consistency:daily-brief:${symbol}:${strategy}:${agentId}`;
 }
 
 function buildHoldingRow({

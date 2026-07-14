@@ -7,11 +7,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.ai.agents import AGENTS, ANALYST_PERSPECTIVES, DAILY_BRIEF_PERSPECTIVES, compose_instructions
-from internal.ai.context import build_analysis_context
+from internal.ai.context import build_analysis_context, build_today_context
 from internal.ai.openai_client import _today_performance_instructions
 
 
 class AgentPersonaTests(unittest.TestCase):
+    def test_industry_trust_is_horizon_specific(self) -> None:
+        vera = compose_instructions("Return analysis.", "vera")
+        rex = compose_instructions("Return analysis.", "rex")
+        kai = compose_instructions("Return analysis.", "kai")
+        nadia = compose_instructions("Return analysis.", "nadia")
+
+        self.assertIn("This is strategic ownership evidence", vera)
+        self.assertIn("do NOT use peer P/B, P/E, ROE", rex)
+        self.assertIn("cold tape", kai)
+        self.assertIn("quantified\n    cross-sectional edge", nadia)
+
     def test_every_agent_has_a_distinct_decision_contract(self) -> None:
         contracts = [str(agent.get("decisionContract") or "") for agent in AGENTS]
 
@@ -44,8 +55,11 @@ class AgentPersonaTests(unittest.TestCase):
 
         self.assertIn("risk-adjusted owner value", vera)
         self.assertIn("liquid catalysts", rex)
-        self.assertIn("Technical & factor compatibility", nadia)
+        self.assertIn("Scenario book & hedge architecture", nadia)
         self.assertIn("stochastic %K/%D", nadia)
+        self.assertIn("gold call", nadia)
+        self.assertIn("homebuilder put", nadia)
+        self.assertIn("institutional credit hedge", nadia)
         self.assertIn("growing income engine", sam)
         self.assertIn("durable adoption, narrative heat", kai)
         self.assertIn("fast-buy trigger", kai)
@@ -62,7 +76,11 @@ class AgentPersonaTests(unittest.TestCase):
         self.assertIn("Dow Theory, Wyckoff phase", rex)
         self.assertIn("Elliott is low-weight/heuristic", nadia)
         self.assertIn("Fibonacci extensions", kai)
-        self.assertIn("do not average them", prime)
+        self.assertIn("Do not use a majority vote, simple average", prime)
+        self.assertIn("ALPHAWOLF PRIME HYBRID COUNCIL", prime)
+        self.assertIn("SEVEN DESKS", prime)
+        self.assertIn("exposure-normalized, risk-adjusted outcomes", prime)
+        self.assertIn("Never promise to win", prime)
 
     def test_daily_brief_horizons_are_agent_specific(self) -> None:
         self.assertEqual(set(DAILY_BRIEF_PERSPECTIVES), {agent["id"] for agent in AGENTS})
@@ -76,7 +94,11 @@ class AgentPersonaTests(unittest.TestCase):
         self.assertIn("Lead with exactly what the user should do today", ben)
         self.assertIn("ADD is rare", ben)
         self.assertIn("SELL/REDUCE needs the", ben)
-        self.assertIn("Plan horizon: 3 days to 8 weeks", rex)
+        self.assertIn("THINK IN THIS ORDER", ben)
+        self.assertIn("agentDecisionEvidence.inputPriority", ben)
+        self.assertIn("Price resistance alone", ben)
+        self.assertIn("buyScore 80-100 requires ADD", ben)
+        self.assertIn("Plan horizon: 3 days to 3 months", rex)
         self.assertIn("Failed levels can put the plan BEHIND quickly", rex)
         titles = [value["analysisTitle"] for value in DAILY_BRIEF_PERSPECTIVES.values()]
         sections = [value["analysisSections"] for value in DAILY_BRIEF_PERSPECTIVES.values()]
@@ -84,6 +106,31 @@ class AgentPersonaTests(unittest.TestCase):
         self.assertEqual(len(sections), len(set(sections)))
         self.assertIn("Ben's owner update", ben)
         self.assertIn("Rex's live trade map", rex)
+
+    def test_daily_brief_receives_character_specific_company_evidence(self) -> None:
+        bundle = {
+            "stock": {"symbol": "SCB.BK", "name": "SCB X", "price": 120, "currency": "THB", "volume": 1_000_000},
+            "strategy": "stable_dca",
+            "business": {"sector": "Financial Services", "industry": "Banks", "priceToBook": 0.8, "roe": 11, "debtToEquity": 500},
+            "technicals": {"signal": "HOLD", "support": 115, "resistance": 125, "volumeRatio": 1.2},
+            "performance": {"returns": {"1d": 1.0, "1y": 12.0}},
+            "verdict": {"action": "HOLD", "score": 72},
+            "history": [{"date": "2026-07-13", "close": 120}],
+            "news": [],
+        }
+        financials = {"cashFlow": {"latest": {"Operating Cash Flow": 100}}}
+        market = {"benchmark": {"returnPct": 8}, "stock": {"returnPct": 12}, "points": []}
+        domain = {"industryInsight": {"name": "Banks"}}
+
+        vera = build_today_context(bundle, position_context={"isHolding": True}, financials=financials, market_comparison=market, domain_insights=domain, agent_id="vera")
+        rex = build_today_context(bundle, position_context={"isHolding": True}, financials=financials, market_comparison=market, domain_insights=domain, agent_id="rex")
+
+        self.assertEqual(vera["agentDecisionEvidence"]["agent"], "vera")
+        self.assertEqual(rex["agentDecisionEvidence"]["agent"], "rex")
+        self.assertIn("valuation", vera["agentDecisionEvidence"]["primary"])
+        self.assertIn("technicals", rex["agentDecisionEvidence"]["primary"])
+        self.assertNotEqual(vera["agentDecisionEvidence"]["inputPriority"], rex["agentDecisionEvidence"]["inputPriority"])
+        self.assertEqual(vera["companyStructureProfile"]["archetype"], "BANK")
 
     def test_every_ai_task_receives_exclusive_agent_method(self) -> None:
         vera = compose_instructions("Any AI task.", "vera")
@@ -116,6 +163,16 @@ class AgentPersonaTests(unittest.TestCase):
         self.assertIn("pullback, breakout trigger, or failed retest", rex)
         self.assertIn("WAIT must name the failed threshold or next rule event", nadia)
         self.assertNotEqual(rex, nadia)
+
+    def test_nadia_builds_grounded_cross_asset_hedges(self) -> None:
+        nadia = compose_instructions("Explain the portfolio concept.", "nadia", analyst_task=True)
+
+        self.assertIn("client's base exposure", nadia)
+        self.assertIn("scenario tree", nadia)
+        self.assertIn("convex overlay", nadia)
+        self.assertIn("homebuilder credit-default hedge", nadia)
+        self.assertIn("never invent strike, expiry, premium", nadia)
+        self.assertIn("CDS as institutional/not generally retail-accessible", nadia)
 
     def test_strategy_mandate_does_not_masquerade_as_agent_profile(self) -> None:
         bundle = {

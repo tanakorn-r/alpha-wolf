@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from internal.market.company_structure import classify_company_structure
 from internal.store.utils import json_safe
 
 MAX_PRICE_POINTS = 72
@@ -19,12 +20,14 @@ def build_analysis_context(
     financials = _compact_financial_research(financials or {})
     market_comparison = _compact_market_comparison(market_comparison or {})
     domain_insights = _compact_domain_insights(domain_insights or {})
+    company_structure = bundle.get("companyStructure") or classify_company_structure(bundle.get("business") or {}, bundle.get("stock") or {})
     context = {
         "stock": bundle.get("stock"),
         "selectedStrategy": bundle.get("strategy"),
         "positionContext": position_context or {"isHolding": False, "mode": "candidate", "question": "Should the user buy this stock or not?"},
         "agentInputPack": _agent_input_pack(agent_id, bundle, financials, market_comparison, domain_insights),
         "business": bundle.get("business"),
+        "companyStructureProfile": company_structure,
         "performance": bundle.get("performance"),
         "technicals": bundle.get("technicals"),
         "platformVerdict": bundle.get("verdict"),
@@ -48,8 +51,17 @@ def build_analysis_context(
     return json_safe(context)
 
 
-def build_today_context(bundle: dict[str, Any], *, position_context: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_today_context(
+    bundle: dict[str, Any], *, position_context: dict[str, Any] | None = None,
+    financials: dict[str, Any] | None = None,
+    market_comparison: dict[str, Any] | None = None,
+    domain_insights: dict[str, Any] | None = None,
+    agent_id: str | None = None,
+) -> dict[str, Any]:
     """Keep Daily Brief focused on the current decision, not a second full Analyst report."""
+    financials = _compact_financial_research(financials or {})
+    market_comparison = _compact_market_comparison(market_comparison or {})
+    domain_insights = _compact_domain_insights(domain_insights or {})
     stock = bundle.get("stock") or {}
     business = bundle.get("business") or {}
     technicals = bundle.get("technicals") or {}
@@ -59,6 +71,10 @@ def build_today_context(bundle: dict[str, Any], *, position_context: dict[str, A
         "stock": _pick(stock, "symbol", "name", "price", "change", "changePct", "currency", "volume"),
         "selectedStrategy": bundle.get("strategy"),
         "positionContext": position_context or {"isHolding": False},
+        # The same stock should reach each Agent through a different evidence hierarchy. This is
+        # deliberately richer than the shared session snapshot but still compact enough for a
+        # one-decision brief rather than a second full Analyst report.
+        "agentDecisionEvidence": _agent_input_pack(agent_id, bundle, financials, market_comparison, domain_insights),
         "today": {
             "technicals": _pick(technicals, "signal", "rsi14", "macd", "macdSignal", "sma20", "sma50", "sma200", "support", "resistance", "momentum", "volumeRatio", "volatility"),
             "returns": performance.get("returns") or {},
@@ -67,7 +83,9 @@ def build_today_context(bundle: dict[str, Any], *, position_context: dict[str, A
             "recentCloses": _compact_price_history(bundle.get("history") or [])[-20:],
         },
         "structure": _pick(business, "peRatio", "forwardPE", "priceToBook", "targetMeanPrice", "revenueGrowth", "earningsGrowth", "profitMargin", "roe", "debtToEquity", "dividendYield", "payoutRatio"),
-        "instruction": "Use structure only to decide whether today's move changes this Agent's horizon. Do not write a full company analysis.",
+        "companyStructureProfile": bundle.get("companyStructure") or classify_company_structure(business, stock),
+        "marketBackdrop": _market_backdrop(stock, market_comparison),
+        "instruction": "Use the Agent's exclusive evidence hierarchy to decide whether today's facts change the saved holding strategy. Do not write a second full company analysis.",
     })
 
 
@@ -80,6 +98,7 @@ def build_technical_context(bundle: dict[str, Any], *, position_context: dict[st
         "positionContext": position_context or {"isHolding": False},
         "technicals": _pick(technicals, "signal", "rsi14", "macd", "macdSignal", "sma20", "sma50", "sma200", "support", "resistance", "volumeRatio", "dowTheory", "wyckoff", "elliottWave", "fibonacci", "multiTimeframe"),
         "structure": _pick(business, "peRatio", "forwardPE", "priceToBook", "targetMeanPrice", "revenueGrowth", "earningsGrowth", "profitMargin", "roe", "debtToEquity", "dividendYield", "payoutRatio"),
+        "companyStructureProfile": bundle.get("companyStructure") or classify_company_structure(business, stock),
         "recentPriceHistory": _compact_price_history(bundle.get("history") or [])[-72:],
     })
 
@@ -177,6 +196,7 @@ def _agent_input_pack(
     history = _compact_price_history(bundle.get("history") or [])
     latest_history = history[-30:] if history else []
     news = (bundle.get("news") or [])[:5]
+    company_structure = bundle.get("companyStructure") or classify_company_structure(business, stock)
 
     price = _num(stock.get("price")) or _num(business.get("currentPrice"))
     support = _num(technicals.get("support"))
@@ -202,6 +222,7 @@ def _agent_input_pack(
         "price": price,
         "currency": stock.get("currency"),
         "selectedStrategy": bundle.get("strategy"),
+        "companyStructureProfile": company_structure,
     }
 
     if agent == "rex":
@@ -579,6 +600,8 @@ def _build_quant_scorecard(bundle: dict[str, Any], market_comparison: dict[str, 
     returns = performance.get("returns") or {}
     peer_rank = bundle.get("peerRank") or {}
     verdict = bundle.get("verdict") or {}
+    company_structure = bundle.get("companyStructure") or classify_company_structure(business, stock)
+    archetype = str(company_structure.get("archetype") or "OPERATING_COMPANY")
 
     price = _num(stock.get("price"))
     support = _num(technicals.get("support"))
@@ -616,18 +639,30 @@ def _build_quant_scorecard(bundle: dict[str, Any], market_comparison: dict[str, 
     pe = _num(business.get("peRatio"))
     pbv = _num(business.get("priceToBook"))
     target = _num(business.get("targetMeanPrice"))
-    if revenue_growth is not None:
-        business_score += 14 if revenue_growth >= 20 else 7 if revenue_growth >= 8 else -10 if revenue_growth < 0 else 0
-    if earnings_growth is not None:
-        business_score += 14 if earnings_growth >= 25 else 7 if earnings_growth >= 8 else -12 if earnings_growth < 0 else 0
-    if profit_margin is not None:
-        business_score += 8 if profit_margin >= 12 else -7 if profit_margin < 4 else 0
-    if roe is not None:
-        business_score += 7 if roe >= 15 else -5 if roe < 5 else 0
-    if pe is not None and pe > 0:
-        business_score += 5 if pe <= 22 else -8 if pe >= 60 else -3 if pe >= 35 else 0
-    if pbv is not None and pbv > 0:
-        business_score += 4 if pbv <= 3 else -6 if pbv >= 10 else 0
+    if archetype == "BANK":
+        # Banks manufacture spread income with leveraged balance sheets. Grade P/B against ROE;
+        # never run the ordinary industrial growth/margin template over them.
+        if roe is not None:
+            business_score += 18 if roe >= 12 else 10 if roe >= 8 else -12 if roe < 4 else 0
+        if earnings_growth is not None:
+            business_score += 10 if earnings_growth >= 8 else -10 if earnings_growth < -10 else 0
+        if pbv is not None and pbv > 0:
+            business_score += 12 if pbv <= 1.2 and (roe or 0) >= 8 else 5 if pbv <= 1.8 else -8 if pbv >= 3 else 0
+        if pe is not None and pe > 0:
+            business_score += 5 if pe <= 15 else -5 if pe >= 25 else 0
+    else:
+        if revenue_growth is not None:
+            business_score += 14 if revenue_growth >= 20 else 7 if revenue_growth >= 8 else -10 if revenue_growth < 0 else 0
+        if earnings_growth is not None:
+            business_score += 14 if earnings_growth >= 25 else 7 if earnings_growth >= 8 else -12 if earnings_growth < 0 else 0
+        if profit_margin is not None:
+            business_score += 8 if profit_margin >= 12 else -7 if profit_margin < 4 else 0
+        if roe is not None:
+            business_score += 7 if roe >= 15 else -5 if roe < 5 else 0
+        if pe is not None and pe > 0:
+            business_score += 5 if pe <= 22 else -8 if pe >= 60 else -3 if pe >= 35 else 0
+        if pbv is not None and pbv > 0:
+            business_score += 4 if pbv <= 3 else -6 if pbv >= 10 else 0
     if price and target:
         business_score += 10 if target >= price * 1.15 else -10 if target < price else 0
 
@@ -689,6 +724,7 @@ def _build_quant_scorecard(bundle: dict[str, Any], market_comparison: dict[str, 
             negatives.append(f"reward/risk to resistance is weak at {reward / risk:.2f}x")
     return {
         "score": score,
+        "companyStructureProfile": company_structure,
         "bands": {
             "90-100": "rare: buy now only when technical timing, business quality, volume, and market context all agree",
             "75-89": "strong: high-quality setup, but one important risk may still need confirmation",

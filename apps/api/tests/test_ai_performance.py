@@ -10,7 +10,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.ai.context import _funding_quality_audit, _structural_advantage_audit, build_analysis_context
-from internal.ai.openai_client import _align_today_action, _selected_model
+from internal.ai.openai_client import _align_today_action, _calibrate_prime_hybrid_confidence, _selected_model, _today_action_issue, analyze_today_with_openai
 from internal.market.technicals import build_technicals
 from models import BuyTimingNarrative, StockAnalysis, TodayPerformance
 from pydantic import ValidationError
@@ -19,6 +19,32 @@ from routes.analysis import _fetch_analysis_data, _require_ai_market_data
 
 
 class AiPerformanceTests(unittest.TestCase):
+    def test_prime_confidence_blends_ai_with_soft_rule_anchor(self) -> None:
+        class Result:
+            def __init__(self, confidence: int, tier: str) -> None:
+                self.confidence = confidence
+                self.tier = tier
+                self.longTermView = type("LongTerm", (), {
+                    "allocationPlan": type("Allocation", (), {"tier": tier})(),
+                })()
+
+            def model_copy(self, *, update: dict) -> "Result":
+                return Result(update.get("confidence", self.confidence), self.tier)
+
+        context = {"quantScorecard": {
+            "score": 20,
+            "componentScores": {
+                "businessQuality": 20, "technicalTiming": 20, "swingEntry": 20,
+                "relativeStrength": 20, "platformSetup": 20,
+            },
+        }}
+
+        hybrid = _calibrate_prime_hybrid_confidence(context, Result(80, "BUILD"), "alphawolf")
+        specialist = _calibrate_prime_hybrid_confidence(context, Result(80, "BUILD"), "vera")
+
+        self.assertEqual(hybrid.confidence, 61)
+        self.assertEqual(specialist.confidence, 80)
+
     def test_today_profile_skips_heavy_research_sources(self) -> None:
         with (
             patch("routes.analysis.build_detail_bundle", return_value={"stock": {"symbol": "TEST"}}),
@@ -305,6 +331,99 @@ class AiPerformanceTests(unittest.TestCase):
         )
         self.assertEqual(reduced.holdingAction, "REDUCE")
         self.assertEqual(reduced.signal, "REDUCE")
+        self.assertEqual(reduced.horizonAlignment.status, "WATCH")
+        self.assertEqual(reduced.agentFit, "against")
+
+        sold = _align_today_action(
+            {"positionContext": {"isHolding": True}},
+            result.model_copy(update={"buyScore": 12}),
+        )
+        self.assertEqual(sold.holdingAction, "SELL")
+        self.assertEqual(sold.horizonAlignment.status, "BROKEN")
+
+        added = _align_today_action(
+            {"positionContext": {"isHolding": True}},
+            result.model_copy(update={"buyScore": 86}),
+        )
+        self.assertEqual(added.holdingAction, "ADD_SMALL")
+        self.assertEqual(added.horizonAlignment.status, "ALIGNED")
+
+    def test_today_plan_detects_horizon_and_persona_contradictions(self) -> None:
+        payload = {
+            "signal": "HOLD",
+            "tone": "good",
+            "buyScore": 72,
+            "headline": "Hold the owner plan.",
+            "summary": "Daily price noise did not change the owner thesis.",
+            "holdingAction": "HOLD",
+            "holdingActionReason": "Owner earnings remain intact.",
+            "todayRead": "The session is ordinary noise.",
+            "horizonAlignment": {
+                "status": "BROKEN",
+                "planHorizon": "5 years",
+                "structureRead": "The structure is intact.",
+                "why": "Price fell below SMA50.",
+            },
+            "evidence": ["Price fell below SMA50", "RSI weakened"],
+            "continueGate": "Owner earnings remain intact.",
+            "exitGate": "Owner earnings deteriorate.",
+            "nextCheck": "Next earnings update.",
+            "risk": "Funding could weaken.",
+            "recap": "Hold.",
+            "agentFit": "aligned",
+            "agentFitReason": "This remains an owner holding.",
+        }
+        result = TodayPerformance.model_validate(payload)
+        context = {"positionContext": {"isHolding": True}}
+
+        self.assertIn("BROKEN", _today_action_issue(context, result, "ben") or "")
+
+        technical_exit = result.model_copy(update={
+            "buyScore": 34,
+            "holdingAction": "REDUCE",
+            "horizonAlignment": result.horizonAlignment.model_copy(update={"status": "WATCH"}),
+        })
+        self.assertIn("technical noise", _today_action_issue(context, technical_exit, "ben") or "")
+
+    def test_today_plan_retries_one_inconsistent_agent_answer(self) -> None:
+        base = TodayPerformance.model_validate({
+            "signal": "HOLD",
+            "tone": "good",
+            "buyScore": 72,
+            "headline": "Hold the owner plan.",
+            "summary": "The owner thesis remains intact.",
+            "holdingAction": "HOLD",
+            "holdingActionReason": "Owner earnings remain intact.",
+            "todayRead": "This session is ordinary noise.",
+            "horizonAlignment": {
+                "status": "BROKEN",
+                "planHorizon": "5 years",
+                "structureRead": "The structure remains intact.",
+                "why": "Price fell below SMA50.",
+            },
+            "evidence": ["Owner earnings remain intact", "Price fell below SMA50"],
+            "continueGate": "Continue while owner earnings remain intact.",
+            "exitGate": "Exit if owner earnings deteriorate.",
+            "nextCheck": "Check the next earnings report.",
+            "risk": "Funding could weaken.",
+            "recap": "Hold.",
+            "agentFit": "aligned",
+            "agentFitReason": "The owner thesis fits.",
+        })
+        corrected = base.model_copy(update={
+            "horizonAlignment": base.horizonAlignment.model_copy(update={
+                "status": "ALIGNED",
+                "why": "No supplied owner-economics or funding evidence broke the five-year plan.",
+            }),
+        })
+
+        with patch("internal.ai.openai_client._run_openai_structured_request", side_effect=[base, corrected]) as run:
+            result = analyze_today_with_openai({"positionContext": {"isHolding": True}}, "ben")
+
+        self.assertEqual(run.call_count, 2)
+        self.assertIn("consistencyCorrection", run.call_args_list[1].kwargs["context"])
+        self.assertEqual(result["holdingAction"], "HOLD")
+        self.assertEqual(result["horizonAlignment"]["status"], "ALIGNED")
 
 
 if __name__ == "__main__":

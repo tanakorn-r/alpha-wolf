@@ -40,6 +40,19 @@ def _analyst_input_flags(agent_id: str) -> tuple[bool, bool, bool]:
     }.get(agent_id, (True, False, True))
 
 
+def _daily_brief_input_flags(agent_id: str) -> tuple[bool, bool, bool]:
+    """Load only the research sources that can genuinely change this Agent's holding action."""
+    return {
+        "vera": (True, True, True),
+        "ben": (True, True, True),
+        "sam": (True, True, False),
+        "rex": (False, True, False),
+        "kai": (False, True, False),
+        "nadia": (False, True, True),
+        "alphawolf": (True, True, True),
+    }.get(agent_id, (True, True, True))
+
+
 def _fetch_analysis_data(
     symbol: str,
     strategy: StrategyKey,
@@ -125,7 +138,7 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:v21-agent-method:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"{account_scope}:v29-prime-hybrid-council:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached
@@ -183,7 +196,7 @@ def analyst_report(
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:analyst-report:v5-decisive-action:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"{account_scope}:analyst-report:v13-prime-hybrid-council:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
 
     cached_analysis = cache_get("analysis", cache_key)
     if cached_analysis is not None and not force:
@@ -247,7 +260,7 @@ def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     account_scope = account_cache_scope(user_id_from_request(request))
     mode = str((payload or {}).get("mode") or "").strip().lower()
     mode = mode if mode in {"swing", "day", "long", "value", "fomo"} else None
-    cache_key = f"{account_scope}:quant:v16-agent-method:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
+    cache_key = f"{account_scope}:quant:v24-prime-hybrid-council:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached
@@ -289,7 +302,7 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
-    cache_key = f"{account_scope}:valuation:v17-decisive-action:{normalized}:{strategy}:{agent_id}"
+    cache_key = f"{account_scope}:valuation:v25-prime-hybrid-council:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached
@@ -343,23 +356,31 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:today:v14-decisive-action:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"{account_scope}:today:v23-agent-evidence-consistency:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached
 
-    bundle, _, _, _ = _fetch_analysis_data(
+    include_financials, include_market, include_insights = _daily_brief_input_flags(agent_id)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
         normalized,
         strategy,
-        include_financials=False,
-        include_market=False,
-        include_insights=False,
+        include_financials=include_financials,
+        include_market=include_market,
+        include_insights=include_insights,
     )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
     _require_ai_market_data(bundle, normalized)
 
-    context = build_today_context(bundle, position_context=position_context)
+    context = build_today_context(
+        bundle,
+        position_context=position_context,
+        financials=financials_data,
+        market_comparison=market_data,
+        domain_insights=insights_data,
+        agent_id=agent_id,
+    )
 
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
@@ -380,7 +401,7 @@ def technical_analysis(symbol: str, request: Request, agent: str = Query("vera")
     user_id = user_id_from_request(request)
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
-    cache_key = f"{account_scope}:technical:v4-decisive-action:{normalized}:{agent_id}:{_position_cache_key(position_context)}"
+    cache_key = f"{account_scope}:technical:v12-prime-hybrid-council:{normalized}:{agent_id}:{_position_cache_key(position_context)}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached

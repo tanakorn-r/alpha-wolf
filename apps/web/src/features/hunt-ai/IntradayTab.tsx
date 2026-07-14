@@ -120,7 +120,7 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
               agent={analysis.agent}
               label="Intraday signal"
               score={analysis.confidence}
-              scoreLabel="Agent perspective"
+              scoreLabel="Signal confidence"
               signal={analysis.signal}
               headline={`${intraday.ticker} · live tape read`}
               summary={analysis.summary}

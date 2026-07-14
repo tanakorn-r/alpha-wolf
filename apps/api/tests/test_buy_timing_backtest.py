@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from internal.market.buy_timing import MONTHS, _backtest_monthly_plan, _close_series, _valid_agent_monthly_plan
+from internal.market.buy_timing import MONTHS, _backtest_monthly_plan, _close_series, _evaluate_agent_battlefield, _valid_agent_monthly_plan
 
 
 def test_backtest_reports_flow_adjusted_drawdown_for_dca_and_plan() -> None:
@@ -58,6 +58,109 @@ def test_backtest_accumulates_agent_dividends_and_reinvests_dca_dividends() -> N
     assert result["strategyReturnPct"] > result["strategyReturnWithoutDividendsPct"]
 
 
+def test_long_term_agent_reinvests_dividends_instead_of_structurally_losing_to_dca() -> None:
+    history = [
+        {"date": f"2025-{index + 1:02d}-28", "month": MONTHS[index], "close": 100.0, "dividendPerShare": 1.0}
+        for index in range(12)
+    ] + [{"date": "2026-01-28", "month": "Jan", "close": 100.0, "dividendPerShare": 1.0}]
+    plan = [{"month": month, "action": "BUY", "buyBudgetPct": 100} for month in MONTHS]
+
+    sam = _backtest_monthly_plan(history, plan, "sam")
+
+    assert sam is not None
+    assert sam["agentDividendsReinvested"] > 0
+    assert abs(sam["strategyReturnPct"] - sam["alwaysBuyReturnPct"]) < 0.01
+
+
+def test_battlefields_judge_personas_on_their_actual_mandates() -> None:
+    base = {
+        "strategyReturnPct": 8.0,
+        "alwaysBuyReturnPct": 10.0,
+        "exposureNormalizedReturnPct": 12.0,
+        "matchedExposureBenchmarkReturnPct": 4.0,
+        "averageStockExposurePct": 40.0,
+        "strategyMaxDrawdownPct": 5.0,
+        "alwaysBuyMaxDrawdownPct": 12.0,
+    }
+    structure = {"ownershipEligible": True}
+    bull = {"regime": "BULL"}
+
+    owner = _evaluate_agent_battlefield(base, "ben", structure, bull)
+    tactical = _evaluate_agent_battlefield(base, "rex", structure, bull)
+    quant = _evaluate_agent_battlefield(base, "nadia", structure, bull)
+
+    assert owner["kind"] == "OWNER_COMPOUNDING"
+    assert owner["verdict"] == "LOSS"  # 40% exposure is cash drag in an ownable bull structure.
+    assert tactical["kind"] == "TACTICAL_SWING"
+    assert tactical["verdict"] == "WIN"  # +2 normalized points with lower drawdown.
+    assert quant["kind"] == "RISK_EFFICIENCY"
+    assert quant["verdict"] == "WIN"  # Better return/drawdown and better than matched exposure.
+
+
+def test_calibration_ben_wins_a_stable_compounder_with_repeatable_valuation_resets() -> None:
+    seasonal_shape = [1.08, 1.03, 0.96, 0.92, 0.98, 1.02, 1.08, 1.12, 1.04, 0.95, 0.90, 0.98]
+    history = [
+        {
+            "date": f"{2021 + index // 12}-{index % 12 + 1:02d}-28",
+            "month": MONTHS[index % 12],
+            "close": 100 * (1.012 ** index) * (1 + (seasonal_shape[index % 12] - 1) * 1.25),
+            "dividendPerShare": 0.2 if index % 12 in {3, 9} else 0.0,
+        }
+        for index in range(61)
+    ]
+    value_reset_months = {"Mar", "Apr", "May", "Oct", "Nov", "Dec"}
+    plan = [
+        {
+            "month": month,
+            "action": "BUY",
+            "buyBudgetPct": 100 if month in value_reset_months else 75,
+            "trimPositionPct": 0,
+        }
+        for month in MONTHS
+    ]
+
+    result = _backtest_monthly_plan(history, plan, "ben")
+    battlefield = _evaluate_agent_battlefield(
+        result, "ben", {"ownershipEligible": True}, {"regime": "BULL"},
+    )
+
+    assert result is not None
+    assert result["averageStockExposurePct"] >= 80
+    assert battlefield["verdict"] == "WIN"
+    assert battlefield["primaryMetricLabel"] == "Owner return · 100% exposure"
+
+
+def test_calibration_rex_wins_a_repeating_swing_with_complete_exits() -> None:
+    swing_shape = [80, 85, 105, 120, 100, 80, 85, 105, 120, 80, 85, 120]
+    history = [
+        {
+            "date": f"{2021 + index // 12}-{index % 12 + 1:02d}-28",
+            "month": MONTHS[index % 12],
+            "close": swing_shape[index % 12] * (1.01 ** (index // 12)),
+        }
+        for index in range(61)
+    ]
+    entry_months = {"Jan", "Feb", "Jun", "Jul", "Oct", "Nov"}
+    exit_months = {"Apr", "Sep", "Dec"}
+    plan = [
+        {
+            "month": month,
+            "action": "BUY" if month in entry_months else "SELL" if month in exit_months else "HOLD",
+            "buyBudgetPct": 100 if month in entry_months else 0,
+            "trimPositionPct": 100 if month in exit_months else 0,
+        }
+        for month in MONTHS
+    ]
+
+    result = _backtest_monthly_plan(history, plan, "rex")
+    battlefield = _evaluate_agent_battlefield(result, "rex")
+
+    assert result is not None
+    assert result["strategyReturnPct"] > 0
+    assert result["strategyMaxDrawdownPct"] < result["alwaysBuyMaxDrawdownPct"]
+    assert battlefield["verdict"] == "WIN"
+
+
 def test_agent_monthly_plan_does_not_force_hold_months_into_dca_buys() -> None:
     calculated = [{"month": month, "action": "HOLD", "returnPct": 0.0} for month in MONTHS]
     proposed = [{"month": month, "action": "HOLD", "buyBudgetPct": 0, "trimPositionPct": 0, "reason": "My evidence gate failed"} for month in MONTHS]
@@ -95,6 +198,54 @@ def test_backtest_buy_percentage_applies_only_to_current_month_contribution() ->
     assert february["stockValue"] == 50.0
     assert february["cash"] == 150.0
     assert "that month's 100 budget only" in result["method"]
+
+
+def test_strategic_owner_redeploys_reserve_after_a_temporary_hold() -> None:
+    history = [
+        {"date": f"2025-{index + 1:02d}-28", "month": MONTHS[index], "close": 100.0}
+        for index in range(12)
+    ] + [{"date": "2026-01-28", "month": "Jan", "close": 100.0}]
+    plan = [
+        {
+            "month": month,
+            "action": "HOLD" if month == "Jan" else "BUY",
+            "buyBudgetPct": 0 if month == "Jan" else 100,
+            "trimPositionPct": 0,
+        }
+        for month in MONTHS
+    ]
+
+    owner = _backtest_monthly_plan(history, plan, "ben")
+    monthly_envelope = _backtest_monthly_plan(history, plan, "nadia")
+
+    assert owner is not None and monthly_envelope is not None
+    assert owner["ledger"][1]["cash"] == 0
+    assert monthly_envelope["ledger"][1]["cash"] == 100
+    assert "100% buy redeploys all reserve" in owner["method"]
+
+
+def test_tactical_entry_sizes_available_strategy_cash() -> None:
+    history = [
+        {"date": f"2025-{index + 1:02d}-28", "month": MONTHS[index], "close": 100.0}
+        for index in range(12)
+    ] + [{"date": "2026-01-28", "month": "Jan", "close": 100.0}]
+    plan = [
+        {
+            "month": month,
+            "action": "BUY" if month == "Feb" else "HOLD",
+            "buyBudgetPct": 50 if month == "Feb" else 0,
+            "trimPositionPct": 0,
+        }
+        for month in MONTHS
+    ]
+
+    tactical = _backtest_monthly_plan(history, plan, "rex")
+    monthly_envelope = _backtest_monthly_plan(history, plan, "nadia")
+
+    assert tactical is not None and monthly_envelope is not None
+    assert tactical["ledger"][1]["stockValue"] == 100
+    assert monthly_envelope["ledger"][1]["stockValue"] == 50
+    assert "available strategy cash" in tactical["method"]
 
 
 def test_backtest_money_weighting_tracks_accumulated_shares_through_a_drop() -> None:

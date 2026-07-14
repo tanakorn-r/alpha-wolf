@@ -44,7 +44,7 @@ type PersistedReplay = { jobId: string };
 
 // Bump when persona reasoning changes so persisted browser reports cannot make a newly fixed
 // Agent appear to repeat an older, generic answer.
-const AGENT_REASONING_CACHE_VERSION = "persona-v23-score-action-consistency";
+const AGENT_REASONING_CACHE_VERSION = "persona-v24-nadia-convex-hedging";
 
 function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentId: string) {
   return data?.agent?.id === agentId;
@@ -189,13 +189,13 @@ export function useHuntAi() {
   }, [setHuntAiCache, valuationAnalyzedAt, valuationCacheKey, valuationDone, valuationQuery.data]);
 
   const timingQuery = useQuery({
-    queryKey: ["hunt-buy-timing", "live-current-month-v18", AGENT_REASONING_CACHE_VERSION, activeTicker, activeAgentId, timingRunKey],
+    queryKey: ["hunt-buy-timing", "live-current-month-v21", AGENT_REASONING_CACHE_VERSION, activeTicker, activeAgentId, timingRunKey],
     queryFn: () => loadBuyTiming(activeTicker, activeAgentId, true),
     staleTime: 900_000,
     retry: 0,
     enabled: tab === "timing" && Boolean(activeTicker) && timingRunKey > 0 && timingRunTarget === `${activeTicker}:${activeAgentId}`,
   });
-  const timingCacheKey = `${accountScope}:live-current-month-v18:${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
+  const timingCacheKey = `${accountScope}:live-current-month-v21:${AGENT_REASONING_CACHE_VERSION}:buy-timing:${activeTicker}:${activeAgentId}`;
   const timingCached = getHuntAiCache<BuyTimingResponse>(timingCacheKey);
   const timingResultMatches = timingQuery.data?.symbol === activeTicker && matchesAgent(timingQuery.data, activeAgentId);
   const timingRequestActive = timingRunKey > 0 && timingRunTarget === `${activeTicker}:${activeAgentId}`;

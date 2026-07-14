@@ -261,8 +261,24 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
             user_id INTEGER NOT NULL,
             period TEXT NOT NULL,
             used INTEGER NOT NULL DEFAULT 0,
+            bonus INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL,
             PRIMARY KEY(user_id, period)
+        )
+        """
+    )
+    if "bonus" not in _table_columns(db, "ai_usage_monthly"):
+        db.execute("ALTER TABLE ai_usage_monthly ADD COLUMN bonus INTEGER NOT NULL DEFAULT 0")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS stripe_credit_fulfillments (
+            event_key TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL,
+            credits INTEGER NOT NULL,
+            amount_total INTEGER NOT NULL,
+            currency TEXT NOT NULL,
+            created_at TEXT NOT NULL
         )
         """
     )

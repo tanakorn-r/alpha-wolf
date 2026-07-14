@@ -12,7 +12,7 @@ from internal.ai.context import build_analysis_context
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_buy_timing_with_openai, predict_technical_moves_with_openai
 from internal.ai.access import claim_ai_run, release_ai_run, require_ai_account
 from internal.market.deep import deep_analysis
-from internal.market.buy_timing import apply_ai_narrative, build_buy_timing
+from internal.market.buy_timing import apply_ai_narrative, build_agent_evidence, build_buy_timing
 from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials, get_market_comparison
 from internal.market.patterns import signed_moves_from_points
 from internal.market.scoring import StrategyKey
@@ -136,7 +136,7 @@ def details_buy_timing(
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
-    ai_cache_key = f"{account_scope}:ai-buy-timing:v37-contract-normalized:{normalized}:{strategy}:{agent_id}"
+    ai_cache_key = f"{account_scope}:ai-buy-timing:v62-strategic-current-dca:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", ai_cache_key)
     if cached is not None and not force:
         return cached
@@ -168,8 +168,11 @@ def details_buy_timing(
 
         usage_user_id, _ = claim_ai_run(request, premium_required=True)
         try:
-            narrative = analyze_buy_timing_with_openai({"buyTiming": result}, agent_id)
-            response = {**apply_ai_narrative(result, narrative), "agent": agent_badge(agent_id)}
+            agent_evidence = build_agent_evidence(result, agent_id)
+            agent_result = {key: value for key, value in result.items() if key != "_sourceSnapshots"}
+            agent_result["agentEvidence"] = agent_evidence
+            narrative = analyze_buy_timing_with_openai({"buyTiming": agent_result}, agent_id)
+            response = {**apply_ai_narrative(agent_result, narrative), "agent": agent_badge(agent_id)}
         except (OpenAIAnalysisError, KeyError, TypeError, ValueError) as exc:
             release_ai_run(usage_user_id)
             print(f"Warning: Buy Timing Agent plan failed for {normalized}/{agent_id}: {exc}")
@@ -195,7 +198,7 @@ def details_upward_moves(
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
-    cache_key = f"{account_scope}:ai-next-10-technical:v12-agent-method:{normalized}:{timeframe}:{strategy}:{agent_id}"
+    cache_key = f"{account_scope}:ai-next-10-technical:v20-prime-hybrid-council:{normalized}:{timeframe}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached

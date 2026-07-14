@@ -80,7 +80,7 @@ function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: Val
         agent={verdict.agent}
         label="Daily valuation"
         score={verdict.rightNow.conviction}
-        scoreLabel="Agent perspective"
+        scoreLabel="Decision conviction"
         signal={verdictLabel(verdict.verdict, verdict.rightNow.action, band.currentZone)}
         headline={`${verdict.symbol} · ${verdict.name}`}
         summary={verdict.recap ?? verdict.narrative ?? verdict.rightNow.note}

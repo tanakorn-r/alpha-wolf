@@ -6,6 +6,7 @@ import { formatPercent } from "../../lib/format";
 import { loadAgents, loadAuthUser } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 import { NavIcon, type NavIconKind } from "./NavIcon";
+import { CreditPurchaseReturn, CreditTopUpButton } from "../billing/CreditTopUp";
 
 const items: Array<{ to: string; label: string; kind: NavIconKind }> = [
   { to: "/", label: "Dashboard", kind: "dashboard" },
@@ -75,6 +76,7 @@ export function AppSidebar() {
             </div>
           </div>
         ) : authQuery.data ? <AiUsageMeter user={authQuery.data} /> : null}
+        <CreditPurchaseReturn />
 
         <div className="rounded-[10px] border border-[#2a2a31] bg-[#161619] px-3 py-3">
           <div className="mb-[5px] text-[11px] uppercase tracking-[0.6px] text-[#8c8c95]">Portfolio</div>
@@ -113,6 +115,8 @@ function AiUsageMeter({ user }: { user: NonNullable<Awaited<ReturnType<typeof lo
         <span>{usage.used} used this month</span>
         {user.proActive && expiryLabel ? <span>Ends {expiryLabel}</span> : <span>{remainingPct}% left</span>}
       </div>
+      <CreditTopUpButton className="mt-2.5 w-full" />
+      {usage.bonus ? <div className="mt-1.5 text-center text-[8.5px] text-[#696972]">Includes {usage.bonus} purchased credits</div> : null}
     </div>
   );
 }

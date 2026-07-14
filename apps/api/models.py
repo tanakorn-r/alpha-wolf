@@ -642,9 +642,14 @@ class BuyTimingNarrative(BaseModel):
 
     headline: str
     summary: str
+    strategyQuote: str
     action: Literal["BUY", "WAIT", "TRIM", "AVOID"]
     perspectiveScore: DecisiveScore
     perspectiveReason: str
+    coreBelief: str
+    evidencePriority: str
+    fitExplanation: str
+    thesisBreaker: str
     recap: str
     agentFit: Literal["aligned", "neutral", "against"]
     agentFitReason: str

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Body, Request, Response, status
 
 from internal.auth_context import user_id_from_request
-from internal.market.portfolio import build_portfolio_dashboard
+from internal.market.portfolio import build_portfolio_dashboard, build_portfolio_quotes
 from internal.store.portfolio import add_watchlist_symbols, create_dca_order, delete_dca_order, delete_holding, delete_watchlist_symbol, list_watchlist, update_dca_order_amount, upsert_holding
 from models import DcaOrder, DcaOrderInput, Holding, HoldingInput, PortfolioDashboard
 
@@ -11,6 +11,11 @@ router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 @router.get("", response_model=PortfolioDashboard)
 def portfolio(request: Request) -> PortfolioDashboard:
     return build_portfolio_dashboard(user_id_from_request(request))
+
+
+@router.get("/quotes")
+def portfolio_quotes(request: Request) -> dict:
+    return build_portfolio_quotes(user_id_from_request(request))
 
 
 @router.put("/holdings", response_model=Holding)

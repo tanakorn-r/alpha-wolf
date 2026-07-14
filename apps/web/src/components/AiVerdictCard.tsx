@@ -42,7 +42,7 @@ export function AiVerdictCard({
       agent={value.agent}
       label={bylineLabel ?? "Agent analysis"}
       score={value.confidence}
-      scoreLabel="Agent view"
+      scoreLabel="Analysis confidence"
       signal={value.signal}
       headline={value.headline}
       summary={value.summary}

@@ -8,7 +8,7 @@ export function HoldingsTable({ dash }: { dash: Dashboard }) {
     <div className="overflow-hidden rounded-[var(--aw-radius-card)] border border-[var(--aw-border)] bg-[var(--aw-surface)]">
       <div className="flex items-center justify-between border-b border-[#2a2a31] px-4 py-3">
         <h2 className="font-semibold">Holdings</h2>
-        <span className="font-mono text-xs text-[#8c8c95]">{dash.portfolio?.holdings.length ?? 0} positions</span>
+        <span className="font-mono text-xs text-[#8c8c95]">{dash.quotesUpdating ? "Updating prices…" : `${dash.portfolio?.holdings.length ?? 0} positions`}</span>
       </div>
       <div className="divide-y divide-[#23232a]">
         {dash.portfolio?.holdings.map((holding) => {

@@ -9,7 +9,7 @@ import pandas as pd
 from internal.market.records import build_entry_from_info, fetch_record_from_ticker, merge_ticker_info
 from internal.store.portfolio import list_dca_orders, list_holdings
 from internal.store.utils import as_float, coerce_iso_date
-from internal.yahoo.client import fetch_dividends, fetch_history, load_ticker_modules, ticker as make_ticker
+from internal.yahoo.client import fetch_dividends, fetch_history, load_ticker_modules, quote_snapshot_meta, ticker as make_ticker
 from models import IncomeEvent, PortfolioDashboard, PortfolioMarker, PortfolioPoint, PortfolioSummary
 
 
@@ -54,7 +54,9 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
     for holding, data in zip(holdings, live, strict=True):
         record, history, info, paid_dividends = data
         currency = record.get("currency")
-        price_base = _to_base(float(record["price"]), currency) if record.get("price") else 0.0
+        # A brand-new holding may render before its first quote snapshot arrives. Cost basis is the
+        # honest non-live placeholder; zero would fabricate a -100% loss until the quote overlay.
+        price_base = _to_base(float(record["price"]), currency) if record.get("price") else holding.averageCost
         value = holding.shares * price_base
         cost = holding.shares * holding.averageCost
         invested += cost
@@ -82,6 +84,38 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
         markers=buy_markers + [PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
         incomeEvents=sorted(income_events, key=lambda item: item.date),
     )
+
+
+def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
+    """Latest quote overlay only; the browser merges this into the saved dashboard."""
+    holdings = list_holdings(user_id)
+    if not holdings:
+        return {"quotes": [], "pending": False, "updatedAt": None}
+
+    def load(holding) -> dict[str, Any]:
+        modules = load_ticker_modules(make_ticker(holding.symbol), holding.symbol)
+        info = merge_ticker_info(modules, holding.symbol)
+        price = as_float(info.get("currentPrice")) or as_float(info.get("regularMarketPrice"))
+        previous = as_float(info.get("regularMarketPreviousClose"))
+        change_pct = ((price - previous) / previous * 100.0) if price and previous else 0.0
+        meta = quote_snapshot_meta(holding.symbol)
+        return {
+            "symbol": holding.symbol,
+            "price": price,
+            "currency": info.get("currency") or ("THB" if holding.symbol.endswith(".BK") else "USD"),
+            "changePct": round(change_pct, 2),
+            "fresh": meta["fresh"],
+            "fetchedAt": meta["fetchedAt"],
+        }
+
+    with ThreadPoolExecutor(max_workers=min(8, len(holdings))) as pool:
+        quotes = list(pool.map(load, holdings))
+    fresh_dates = [str(item["fetchedAt"]) for item in quotes if item.get("fresh") and item.get("fetchedAt")]
+    return {
+        "quotes": quotes,
+        "pending": any(not item.get("fresh") for item in quotes),
+        "updatedAt": max(fresh_dates) if fresh_dates else None,
+    }
 
 
 def _load_holding_market_data(holding):

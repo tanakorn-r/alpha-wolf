@@ -79,9 +79,7 @@ def analyze_with_openai(context: dict[str, Any], agent_id: str | None = None) ->
     )
     if [score.label for score in result.scores] != EXPECTED_SCORE_LABELS:
         raise OpenAIAnalysisError("OpenAI returned an invalid scorecard order")
-    # Keep this number as the Agent's answer. It used to be blended 82% toward
-    # a deterministic scorecard after the model responded, which made the UI's
-    # "AI score" misleading and pulled thin-data results toward the middle.
+    result = _calibrate_prime_hybrid_confidence(context, result, agent_id)
     result = _calibrate_stock_signal(context, result)
 
     model = os.getenv("OPENAI_MODEL", DEFAULT_OPENAI_MODEL).strip() or DEFAULT_OPENAI_MODEL
@@ -300,6 +298,40 @@ def _calibrate_stock_signal(context: dict[str, Any], result: StockAnalysis) -> S
     }[tier]
     return result.model_copy(update={"signal": signal, "tone": tone})
 
+
+def _calibrate_prime_hybrid_confidence(
+    context: dict[str, Any], result: StockAnalysis, agent_id: str | None,
+) -> StockAnalysis:
+    """Blend Prime's AI conclusion with rule evidence without letting rules choose the action."""
+    if (agent_id or "").strip().lower() != "alphawolf" or result.confidence is None:
+        return result
+    quant = context.get("quantScorecard") if isinstance(context.get("quantScorecard"), dict) else {}
+    components = quant.get("componentScores") if isinstance(quant.get("componentScores"), dict) else {}
+    values = {
+        "quant": _num(quant.get("score")),
+        "business": _num(components.get("businessQuality")),
+        "technical": _num(components.get("technicalTiming")),
+        "swing": _num(components.get("swingEntry")),
+        "relative": _num(components.get("relativeStrength")),
+        "platform": _num(components.get("platformSetup")),
+    }
+    if not any(value is not None for value in values.values()):
+        return result
+    rule_anchor = _weighted(
+        (values["quant"], 0.25), (values["business"], 0.22),
+        (values["technical"], 0.18), (values["relative"], 0.13),
+        (values["swing"], 0.12), (values["platform"], 0.10),
+    )
+    blended = round(0.65 * float(result.confidence) + 0.35 * rule_anchor)
+    tier = result.longTermView.allocationPlan.tier
+    # The AI allocation chooses capital direction; the rule anchor adjusts conviction only.
+    # Keep the schema's decisive ranges without allowing a soft score to reverse the AI action.
+    if tier in {"FULL", "BUILD", "STARTER"}:
+        blended = max(61, blended)
+    else:
+        blended = min(39, blended)
+    return result.model_copy(update={"confidence": int(_clamp(blended, 1, 100))})
+
 def _weighted(*items: tuple[float | None, float]) -> float:
     total = 0.0
     weight = 0.0
@@ -325,30 +357,98 @@ def _clamp(value: float, low: int, high: int) -> float:
 
 def analyze_today_with_openai(context: dict[str, Any], agent_id: str | None = None) -> dict[str, Any]:
     model = _selected_model(fast=True)
-    result = _run_openai_structured_request(
-        context=context,
-        schema_model=TodayPerformance,
-        schema_name="today_performance",
-        instructions=compose_instructions(_today_performance_instructions(), agent_id, daily_brief_task=True),
-        max_output_tokens=1100,
-        model=model,
-        reasoning_effort=_fast_reasoning_effort(),
-    )
-    result = _align_today_action(context, result)
+    instructions = compose_instructions(_today_performance_instructions(), agent_id, daily_brief_task=True)
+
+    def _run(request_context: dict[str, Any]) -> TodayPerformance:
+        return _run_openai_structured_request(
+            context=request_context,
+            schema_model=TodayPerformance,
+            schema_name="today_performance",
+            instructions=instructions,
+            max_output_tokens=1300,
+            model=model,
+            reasoning_effort=_fast_reasoning_effort(),
+        )
+
+    result = _run(context)
+    issue = _today_action_issue(context, result, agent_id)
+    if issue:
+        result = _run({
+            **context,
+            "consistencyCorrection": {
+                "issue": issue,
+                "instruction": "Return the whole Daily Brief again with one coherent persona, horizon, score, capital action, evidence hierarchy, and exit rule.",
+            },
+        })
+    result = _align_today_action(context, result, agent_id)
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
-def _align_today_action(context: dict[str, Any], result: TodayPerformance) -> TodayPerformance:
-    """Prevent the model's safe HOLD fallback from contradicting its own decisive score."""
+def _today_allowed_actions(score: int) -> set[str]:
+    if score >= 80:
+        return {"ADD", "ADD_SMALL"}
+    if score >= 61:
+        return {"HOLD", "NO_ACTION", "ADD_SMALL"}
+    if score >= 21:
+        return {"REDUCE"}
+    return {"SELL"}
+
+
+def _today_action_issue(
+    context: dict[str, Any], result: TodayPerformance, agent_id: str | None = None,
+) -> str | None:
+    """Find capital, horizon, or persona contradictions before publishing the brief."""
+    if not bool((context.get("positionContext") or {}).get("isHolding")):
+        return None
+    score = int(result.buyScore)
+    if result.holdingAction not in _today_allowed_actions(score):
+        return f"{result.holdingAction} contradicts the {score}/100 existing-position action band."
+    if result.horizonAlignment.status == "BROKEN" and result.holdingAction in {"HOLD", "NO_ACTION", "ADD", "ADD_SMALL"}:
+        return "The plan is marked BROKEN but the capital action keeps or adds exposure."
+    if result.horizonAlignment.status == "ALIGNED" and result.holdingAction == "SELL":
+        return "The plan is marked ALIGNED but the capital action exits the position."
+    if len({item.strip().lower() for item in result.evidence}) != len(result.evidence):
+        return "The evidence list repeats the same fact instead of naming distinct controlling evidence."
+    if result.continueGate.strip().lower() == result.exitGate.strip().lower():
+        return "The continue and exit gates are identical."
+
+    agent = (agent_id or "").strip().lower()
+    if agent in {"vera", "ben", "sam"} and result.holdingAction in {"REDUCE", "SELL"}:
+        explanation_parts = [
+            result.holdingActionReason,
+            result.todayRead,
+            result.horizonAlignment.why,
+            *result.evidence,
+        ]
+        explanation = " ".join(explanation_parts).lower()
+        technical = ("support", "resistance", "sma", "moving average", "rsi", "macd", "one-day", "daily move", "price fell")
+        strategic = (
+            "earnings", "cash flow", "cash-flow", "funding", "payout", "dividend", "debt", "balance sheet",
+            "valuation", "fair value", "p/e", "p/b", "roe", "margin", "moat", "capital allocation",
+        )
+        failure = ("deterior", "weaken", "break", "broken", "unsafe", "excessive", "overvalu", "unfunded", "impaired", "failed")
+        has_strategic_failure = any(
+            any(word in part.lower() for word in strategic) and any(word in part.lower() for word in failure)
+            for part in explanation_parts
+        )
+        if any(word in explanation for word in technical) and not has_strategic_failure:
+            return f"{agent} reduces a strategic holding for technical noise without a strategic thesis or valuation failure."
+    return None
+
+
+def _align_today_action(
+    context: dict[str, Any], result: TodayPerformance, agent_id: str | None = None,
+) -> TodayPerformance:
+    """Last-resort repair when two model attempts still return a contradictory capital action."""
     if not bool((context.get("positionContext") or {}).get("isHolding")):
         return result
     score = int(result.buyScore)
-    passive = result.holdingAction in {"HOLD", "NO_ACTION"}
-    replacement = "SELL" if passive and score <= 20 else "REDUCE" if passive and score <= 39 else "ADD_SMALL" if passive and score >= 80 else None
-    if replacement is None:
+    if result.holdingAction in _today_allowed_actions(score):
         return result
-    direction = "exit" if replacement == "SELL" else "reduce exposure" if replacement == "REDUCE" else "add selectively"
-    reason = f"A {score}/100 Agent fit requires the user to {direction}; passive HOLD would contradict the score."
+    replacement = "ADD_SMALL" if score >= 80 else "HOLD" if score >= 61 else "REDUCE" if score >= 21 else "SELL"
+    direction = "exit" if replacement == "SELL" else "reduce exposure" if replacement == "REDUCE" else "hold the position" if replacement == "HOLD" else "add selectively"
+    reason = f"A {score}/100 Agent fit requires the user to {direction}; {result.holdingAction} would contradict the score."
+    alignment_status = "BROKEN" if replacement == "SELL" else "WATCH" if replacement == "REDUCE" else "ALIGNED"
     return result.model_copy(update={
         "signal": replacement,
         "tone": "bad" if replacement in {"SELL", "REDUCE"} else "good",
@@ -356,7 +456,11 @@ def _align_today_action(context: dict[str, Any], result: TodayPerformance) -> To
         "summary": reason,
         "holdingAction": replacement,
         "holdingActionReason": reason,
+        "todayRead": reason,
+        "horizonAlignment": result.horizonAlignment.model_copy(update={"status": alignment_status, "why": reason}),
         "recap": reason,
+        "agentFit": "against" if replacement in {"SELL", "REDUCE"} else "aligned",
+        "agentFitReason": reason,
     })
 
 
@@ -402,118 +506,442 @@ def _buy_timing_needs_reconsideration(
 def _normalize_buy_timing_contract(
     context: dict[str, Any], result: BuyTimingNarrative, agent_id: str | None = None
 ) -> BuyTimingNarrative:
-    """Enforce mechanical sizing/trim contracts without spending another Agent call."""
+    """Preserve the Agent's judgment and repair only contradictions or degenerate plans."""
     timing = context.get("buyTiming") if isinstance(context.get("buyTiming"), dict) else {}
     structure = timing.get("businessStructure") if isinstance(timing.get("businessStructure"), dict) else {}
     agent = (agent_id or "").strip().lower()
     plan = list(result.monthlyPlan)
+    original_plan_signature = _plan_signature(plan)
 
-    if agent in {"ben", "sam"} and structure.get("status") != "AT_RISK":
-        trim_indexes = [
-            index for index, item in enumerate(plan)
-            if item.action in {"TRIM", "SELL"} and item.trimPositionPct > 0
+    if result.action == "AVOID":
+        plan = [
+            item.model_copy(update={
+                "action": "HOLD",
+                "buyBudgetPct": 0,
+                "trimPositionPct": 0,
+                "reason": "The Agent's AVOID thesis blocks deployment until its named condition changes.",
+            }) if _is_funded_month(item) else item
+            for item in plan
         ]
-        keep_index = max(trim_indexes, key=lambda index: plan[index].trimPositionPct) if trim_indexes else None
-        for index in trim_indexes:
-            item = plan[index]
-            if index == keep_index:
-                plan[index] = item.model_copy(update={
-                    "action": "TRIM",
-                    "buyBudgetPct": 0,
-                    "trimPositionPct": min(15, max(5, item.trimPositionPct)),
-                })
-            else:
-                plan[index] = item.model_copy(update={
-                    "action": "HOLD",
-                    "buyBudgetPct": 0,
-                    "trimPositionPct": 0,
-                    "reason": "Ordinary seasonality does not justify another trim while the thesis remains intact.",
-                })
+    else:
+        if agent in {"ben", "sam"} and structure.get("status") != "AT_RISK":
+            plan = _remove_calendar_only_owner_trims(plan)
 
-    if result.agentFit == "aligned" and result.action != "AVOID":
-        evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
-        ranked = sorted(
-            (item for item in evidence if isinstance(item, dict) and item.get("month") in MONTH_NAMES),
-            key=lambda item: _num(item.get("score")) or 0,
-            reverse=True,
+        if agent == "nadia" and (_plan_is_degenerate(plan) or _annual_buy_budget(plan) < 400):
+            plan = _recover_quant_plan(plan, timing, result)
+        elif agent in {"vera", "ben", "sam", "alphawolf"}:
+            plan = _ensure_long_horizon_participation(plan, timing, structure, result, agent)
+
+    plan, current_month = _align_current_month_action(plan, timing, result.action, agent)
+
+    if result.action != "AVOID" and agent in {"rex", "kai"}:
+        plan = _ensure_tactical_lifecycle(plan, timing, agent, current_month if result.action == "WAIT" else None)
+
+    updates: dict[str, Any] = {"monthlyPlan": plan}
+    if _plan_signature(plan) != original_plan_signature:
+        updates["strategyQuote"] = _reconciled_strategy_quote(timing, result, agent, plan)
+    return result.model_copy(update=updates)
+
+
+def _is_funded_month(item: Any) -> bool:
+    return item.action in {"BUY", "ADD_SMALL"} and item.buyBudgetPct > 0
+
+
+def _is_exit_month(item: Any) -> bool:
+    return item.action in {"TRIM", "SELL"} and item.trimPositionPct > 0
+
+
+def _plan_is_degenerate(plan: list[Any]) -> bool:
+    signatures = {(item.action, item.buyBudgetPct, item.trimPositionPct) for item in plan}
+    return len(signatures) <= 1
+
+
+def _annual_buy_budget(plan: list[Any]) -> int:
+    return sum(int(item.buyBudgetPct) for item in plan if _is_funded_month(item))
+
+
+def _plan_signature(plan: list[Any]) -> tuple[tuple[str, str, int, int], ...]:
+    return tuple(
+        (str(item.month), str(item.action), int(item.buyBudgetPct), int(item.trimPositionPct))
+        for item in plan
+    )
+
+
+def _reconciled_strategy_quote(
+    timing: dict[str, Any], result: BuyTimingNarrative, agent: str, _plan: list[Any],
+) -> str:
+    """Describe the executable plan after a guardrail materially changes AI allocation."""
+    symbol = str(timing.get("symbol") or "this stock")
+    if agent == "ben":
+        return (
+            f"I’ll own {symbol} for the long term, compound through noise, and change size only when owner economics or value materially change."
         )
-        top_months = [str(item.get("month")) for item in ranked[:3]]
-        candidate_indexes = [
-            index for index, item in enumerate(plan)
-            if item.month in top_months and item.action in {"BUY", "ADD_SMALL"}
-        ]
-        if candidate_indexes:
-            best_index = max(candidate_indexes, key=lambda index: plan[index].buyBudgetPct)
-        elif top_months:
-            best_index = next(index for index, item in enumerate(plan) if item.month == top_months[0])
-        else:
-            funded_indexes = [
-                index for index, item in enumerate(plan)
-                if item.action in {"BUY", "ADD_SMALL"} and item.buyBudgetPct > 0
-            ]
-            best_index = max(funded_indexes, key=lambda index: plan[index].buyBudgetPct) if funded_indexes else 0
-        best = plan[best_index]
-        plan[best_index] = best.model_copy(update={
-            "action": "BUY",
-            "buyBudgetPct": 100,
-            "trimPositionPct": 0,
-            "reason": f"Highest-conviction month where this Agent's alignment and supplied timing evidence agree: {best.reason}",
-        })
+    if agent == "sam":
+        return (
+            f"I’ll build {symbol} for durable income, reinvest supported distributions, and change size as payout strength, funding, and valuation evolve."
+        )
+    if agent == "vera":
+        return (
+            f"I’ll build {symbol} as a valuation-led owner, add as reported economics and downside underwriting strengthen, and reduce if that case deteriorates."
+        )
+    if agent == "rex":
+        return (
+            f"I’ll trade {symbol} only with a confirmed swing, size against available cash, and exit when trend or reward-to-risk breaks."
+        )
+    if agent == "kai":
+        return (
+            f"I’ll take {symbol} only when acceleration and volume confirm, then leave quickly when momentum or the breakout fails."
+        )
+    if agent == "nadia":
+        return (
+            f"I’ll keep a measured core in {symbol}, tilt toward the strongest ranks, and cut risk when edge or drawdown efficiency fails."
+        )
+    return (
+        f"I’ll combine rules and judgment on {symbol}, participate when the evidence agrees, and reduce when the controlling risk takes over."
+    )
 
-    return result.model_copy(update={"monthlyPlan": plan})
+
+def _ranked_timing_evidence(timing: dict[str, Any]) -> list[dict[str, Any]]:
+    evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
+    return sorted(
+        (item for item in evidence if isinstance(item, dict) and item.get("month") in MONTH_NAMES),
+        key=lambda item: _num(item.get("score")) or 0,
+        reverse=True,
+    )
+
+
+def _recover_quant_plan(plan: list[Any], timing: dict[str, Any], result: BuyTimingNarrative) -> list[Any]:
+    """Replace a nearly idle quant output with a benchmark core plus measured tilts."""
+    if result.action not in {"BUY", "WAIT"} or result.agentFit == "against":
+        return plan
+    structure = timing.get("businessStructure") if isinstance(timing.get("businessStructure"), dict) else {}
+    if structure.get("status") in {"AT_RISK", "UNPROVEN"}:
+        return plan
+    ranked = _ranked_timing_evidence(timing)
+    if len(ranked) != len(MONTH_NAMES):
+        return plan
+
+    stats = timing.get("stats") if isinstance(timing.get("stats"), dict) else {}
+    pattern = timing.get("postExDipPattern") if isinstance(timing.get("postExDipPattern"), dict) else {}
+    edge = _num(stats.get("edgeVsRandomBuyPct"))
+    sample_size = int(_num(pattern.get("sampleSize")) or _num(stats.get("cyclesTested")) or 0)
+    hit_rate = _num(pattern.get("hitRate"))
+    evidence_is_robust = bool(
+        edge is not None and edge >= 1.0 and sample_size >= 12
+        and hit_rate is not None and hit_rate >= 60
+    )
+    # Nadia is an allocator, not a cash-only market timer. Thin evidence keeps a 50% core and
+    # makes symmetric 25/75 tilts; robust evidence permits a wider 25/75/100 ladder. This gives
+    # the risk model enough exposure for its matched-exposure and drawdown tests to be meaningful.
+    budgets = [100] * 4 + [75] * 4 + [25] * 4 if evidence_is_robust else [75] * 4 + [50] * 4 + [25] * 4
+    budget_by_month = {
+        str(item.get("month")): budgets[index]
+        for index, item in enumerate(ranked)
+    }
+    score_by_month = {str(item.get("month")): int(_num(item.get("score")) or 0) for item in ranked}
+    repaired: list[Any] = []
+    for item in plan:
+        budget = budget_by_month.get(item.month, 0)
+        score = score_by_month.get(item.month, 0)
+        repaired.append(item.model_copy(update={
+            "action": "BUY" if budget >= 75 else "ADD_SMALL",
+            "buyBudgetPct": budget,
+            "trimPositionPct": 0,
+            "reason": (
+                f"Quant fallback after uniform output: rank score {score} supports a {budget}% tilt; "
+                "the Agent should replace this fallback when stronger factor/risk evidence is available."
+            ),
+        }))
+    return repaired
+
+
+def _ensure_long_horizon_participation(
+    plan: list[Any], timing: dict[str, Any], structure: dict[str, Any],
+    result: BuyTimingNarrative, agent: str,
+) -> list[Any]:
+    """Keep an owner plan consistent with its mandate while preserving genuine rejections."""
+    participation = timing.get("participationContext") if isinstance(timing.get("participationContext"), dict) else {}
+    eligible = (
+        result.action in {"BUY", "WAIT", "TRIM"}
+        and result.agentFit != "against"
+        and result.perspectiveScore > 20
+        and structure.get("status") not in {"AT_RISK", "UNPROVEN"}
+        and (result.agentFit == "aligned" or participation.get("regime") == "BULL")
+    )
+    ranked = _ranked_timing_evidence(timing)
+    if not eligible or not ranked:
+        return plan
+
+    strong_owner_bull = bool(
+        structure.get("ownershipEligible")
+        and participation.get("regime") == "BULL"
+    )
+    if not strong_owner_bull:
+        if any(_is_funded_month(item) for item in plan):
+            return plan
+        allocations = [50, 25, 25] if agent in {"ben", "sam"} else [50, 25]
+        by_month = {str(item.get("month")): allocations[index] for index, item in enumerate(ranked[:len(allocations)])}
+        return [
+            item.model_copy(update={
+                "action": "ADD_SMALL", "buyBudgetPct": by_month[item.month], "trimPositionPct": 0,
+                "reason": (
+                    f"Soft participation fallback: {by_month[item.month]}% of this month's contribution "
+                    "balances cash-drag risk with the Agent's unresolved evidence."
+                ),
+            }) if item.month in by_month else item
+            for item in plan
+        ]
+
+    # In an ownable bull-regime company, Ben and Sam are recurring owners; Vera remains more
+    # valuation-selective and Prime keeps a sizeable hybrid core. A single token purchase must not
+    # bypass this mandate. The floor applies only after the Agent accepted the company and never
+    # overrides AVOID/against/AT_RISK/UNPROVEN.
+    if agent in {"ben", "sam"}:
+        target_budget, baseline = (1100, 75) if result.perspectiveScore >= 61 or result.agentFit == "aligned" else (900, 50)
+    elif agent == "alphawolf":
+        target_budget, baseline = (1000, 50) if result.perspectiveScore >= 61 or result.agentFit == "aligned" else (750, 25)
+    else:
+        target_budget, baseline = (900, 50) if result.agentFit == "aligned" else (600, 25)
+
+    monthly_evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
+    current_month = next(
+        (str(item.get("month")) for item in monthly_evidence if isinstance(item, dict) and item.get("isCurrent")),
+        None,
+    )
+    # WAIT means no discretionary lump-sum today. It must not erase an accepted owner's routine
+    # monthly contribution or Nadia's benchmark-aware core. TRIM still blocks new current-month cash.
+    blocked_months = {current_month} if result.action == "TRIM" and current_month else set()
+    rank = {str(item.get("month")): index for index, item in enumerate(ranked)}
+    repaired: list[Any] = []
+    for item in plan:
+        if item.month in blocked_months or _is_exit_month(item):
+            repaired.append(item)
+            continue
+        budget = max(int(item.buyBudgetPct) if _is_funded_month(item) else 0, baseline)
+        repaired.append(item.model_copy(update={
+            "action": "BUY" if budget >= 75 else "ADD_SMALL",
+            "buyBudgetPct": budget,
+            "trimPositionPct": 0,
+            "reason": (
+                f"Owner-core guardrail: {budget}% keeps an accepted, ownable bull-regime company "
+                "participating while the Agent's valuation and quality evidence controls the tilt."
+            ),
+        }))
+
+    # Upgrade the Agent's highest-ranked eligible months until the annual owner-core target is met.
+    # This is a minimum consistency repair, not a backtest optimizer: it never reads historical
+    # backtest returns and never changes an explicit thesis rejection into ownership.
+    for index in sorted(range(len(repaired)), key=lambda i: rank.get(repaired[i].month, len(repaired))):
+        if _annual_buy_budget(repaired) >= target_budget:
+            break
+        item = repaired[index]
+        if item.month in blocked_months or _is_exit_month(item):
+            continue
+        increase = min(25, 100 - int(item.buyBudgetPct), target_budget - _annual_buy_budget(repaired))
+        if increase <= 0:
+            continue
+        budget = int(item.buyBudgetPct) + increase
+        repaired[index] = item.model_copy(update={
+            "action": "BUY" if budget >= 75 else "ADD_SMALL",
+            "buyBudgetPct": budget,
+            "trimPositionPct": 0,
+            "reason": (
+                f"Owner-core guardrail: {budget}% preserves long-term participation; stronger supplied "
+                "evidence ranks this month for the additional allocation."
+            ),
+        })
+    return repaired
+
+
+def _remove_calendar_only_owner_trims(plan: list[Any]) -> list[Any]:
+    seasonal_words = (
+        "season", "calendar", "ex-div", "ex dividend", "pre-ex", "post-ex", "midyear", "month",
+    )
+    owner_reasons = (
+        "economics", "cash flow", "cash-flow", "funding", "payout", "coverage", "quality",
+        "valuation", "overvalu", "concentration", "thesis", "deterior", "capital",
+    )
+    for index, item in enumerate(plan):
+        reason = str(item.reason).lower()
+        if not _is_exit_month(item):
+            continue
+        if not any(word in reason for word in seasonal_words) or any(word in reason for word in owner_reasons):
+            continue
+        item = plan[index]
+        plan[index] = item.model_copy(update={
+            "action": "HOLD",
+            "buyBudgetPct": 0,
+            "trimPositionPct": 0,
+            "reason": "Owner guardrail: calendar or ex-dividend timing alone does not justify selling an intact holding.",
+        })
+    return plan
+
+
+def _align_current_month_action(
+    plan: list[Any], timing: dict[str, Any], action: str, agent: str = "",
+) -> tuple[list[Any], str | None]:
+    evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
+    current_month = next(
+        (str(item.get("month")) for item in evidence if isinstance(item, dict) and item.get("isCurrent")),
+        None,
+    )
+    current_index = next((index for index, item in enumerate(plan) if item.month == current_month), None)
+    if current_index is None:
+        return plan, current_month
+    current = plan[current_index]
+    if action == "BUY" and not _is_funded_month(current):
+        plan[current_index] = current.model_copy(update={
+            "action": "ADD_SMALL", "buyBudgetPct": 25, "trimPositionPct": 0,
+            "reason": "Today's BUY call requires a funded starter; 25% preserves room for judgment.",
+        })
+    elif (action == "AVOID" or (action == "WAIT" and agent in {"rex", "kai"})) and current.action != "HOLD":
+        plan[current_index] = current.model_copy(update={
+            "action": "HOLD", "buyBudgetPct": 0, "trimPositionPct": 0,
+            "reason": "Today's tactical or avoid call requires no current-month capital action; wait for the named trigger.",
+        })
+    elif action == "TRIM" and not _is_exit_month(current):
+        plan[current_index] = current.model_copy(update={
+            "action": "TRIM", "buyBudgetPct": 0, "trimPositionPct": 10,
+            "reason": "Today's TRIM call requires a measured reduction; 10% is the minimum fallback size.",
+        })
+    return plan, current_month
+
+
+def _ensure_tactical_lifecycle(
+    plan: list[Any], timing: dict[str, Any], agent: str, blocked_month: str | None,
+) -> list[Any]:
+    """Add missing exits without relocating or resizing the Agent's chosen entries."""
+    funded = {index for index, item in enumerate(plan) if _is_funded_month(item)}
+    if not funded:
+        return plan
+    evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
+    return_by_month = {
+        str(item.get("month")): _num(item.get("returnPct"))
+        for item in evidence if isinstance(item, dict)
+    }
+    starts = [index for index in sorted(funded) if (index - 1) % len(plan) not in funded]
+    for start in starts:
+        cluster_end = start
+        while (cluster_end + 1) % len(plan) in funded and (cluster_end + 1) % len(plan) != start:
+            cluster_end = (cluster_end + 1) % len(plan)
+        horizon = 2 if agent == "kai" else 3
+        window = [
+            (cluster_end + offset) % len(plan) for offset in range(1, horizon + 1)
+            if plan[(cluster_end + offset) % len(plan)].month != blocked_month
+        ]
+        if not window:
+            continue
+        exits = [index for index in window if _is_exit_month(plan[index])]
+        if agent == "kai" and any(plan[index].action == "SELL" for index in exits):
+            continue
+        if agent == "rex" and any(plan[index].action == "SELL" for index in exits):
+            continue
+
+        if agent == "rex" and exits:
+            trim_index = exits[-1]
+            sell_candidates = [
+                (trim_index + offset) % len(plan) for offset in (1, 2)
+                if (trim_index + offset) % len(plan) not in funded
+                and plan[(trim_index + offset) % len(plan)].month != blocked_month
+                and not _is_exit_month(plan[(trim_index + offset) % len(plan)])
+            ]
+            if sell_candidates:
+                sell_index = sell_candidates[0]
+                sell_item = plan[sell_index]
+                plan[sell_index] = sell_item.model_copy(update={
+                    "action": "SELL", "buyBudgetPct": 0, "trimPositionPct": 100,
+                    "reason": "Tactical safety fallback: close Rex's remaining runner after the proposed trim.",
+                })
+            continue
+
+        candidates = [index for index in window if index not in funded and not _is_exit_month(plan[index])]
+        if not candidates:
+            continue
+        strongest = max(
+            candidates,
+            key=lambda index: return_by_month.get(plan[index].month)
+            if return_by_month.get(plan[index].month) is not None else float("-inf"),
+        )
+        if all(return_by_month.get(plan[index].month) is None for index in candidates):
+            strongest = candidates[0]
+        item = plan[strongest]
+        if agent == "kai":
+            plan[strongest] = item.model_copy(update={
+                "action": "SELL", "buyBudgetPct": 0, "trimPositionPct": 100,
+                "reason": "Tactical safety fallback: close Kai's fast trade because the proposed entry had no exit.",
+            })
+        else:
+            plan[strongest] = item.model_copy(update={
+                "action": "TRIM", "buyBudgetPct": 0, "trimPositionPct": 50,
+                "reason": "Tactical safety fallback: trim Rex's swing because the proposed entry had no exit.",
+            })
+            sell_candidates = [
+                (strongest + offset) % len(plan) for offset in (1, 2)
+                if (strongest + offset) % len(plan) not in funded
+                and plan[(strongest + offset) % len(plan)].month != blocked_month
+            ]
+            if sell_candidates and not any(_is_exit_month(plan[index]) for index in sell_candidates):
+                sell_index = sell_candidates[0]
+                sell_item = plan[sell_index]
+                plan[sell_index] = sell_item.model_copy(update={
+                    "action": "SELL", "buyBudgetPct": 0, "trimPositionPct": 100,
+                    "reason": "Tactical safety fallback: close Rex's remaining runner unless fresh tape renews it.",
+                })
+    return plan
 
 
 def _buy_timing_plan_issue(
     context: dict[str, Any], result: BuyTimingNarrative, agent_id: str | None = None
 ) -> str | None:
-    if result.action == "AVOID" and result.perspectiveScore <= 30:
-        return None
-    funded = [
-        item for item in result.monthlyPlan
-        if item.action in {"BUY", "ADD_SMALL"} and item.buyBudgetPct > 0
-    ]
+    """Report contradictions, not differences of investment judgment."""
+    funded = [item for item in result.monthlyPlan if _is_funded_month(item)]
+    exits = [item for item in result.monthlyPlan if _is_exit_month(item)]
     agent = (agent_id or "").strip().lower()
     timing = context.get("buyTiming") if isinstance(context.get("buyTiming"), dict) else {}
     structure = timing.get("businessStructure") if isinstance(timing.get("businessStructure"), dict) else {}
-    trims = [
-        item for item in result.monthlyPlan
-        if item.action in {"TRIM", "SELL"} and item.trimPositionPct > 0
-    ]
+    evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
+    current_month = next(
+        (str(item.get("month")) for item in evidence if isinstance(item, dict) and item.get("isCurrent")),
+        None,
+    )
+    current = next((item for item in result.monthlyPlan if item.month == current_month), None)
+
+    if result.action == "AVOID" and funded:
+        return "Today's AVOID call contradicts a monthly plan that still deploys new capital."
+    if current is not None:
+        if result.action == "BUY" and not _is_funded_month(current):
+            return "Today's BUY call must fund the current month; future-only buying contradicts the action."
+        if result.action == "AVOID" and current.action != "HOLD":
+            return "Today's AVOID call requires no current-month capital action."
+        if result.action == "WAIT" and agent in {"rex", "kai"} and current.action != "HOLD":
+            return "A tactical WAIT call requires no current-month capital action."
+        if result.action == "TRIM" and not _is_exit_month(current):
+            return "Today's TRIM call must reduce the current position in the current month."
+
     if agent in {"ben", "sam"} and structure.get("status") != "AT_RISK":
-        oversized = any(item.action == "SELL" or item.trimPositionPct > 15 for item in trims)
-        if len(trims) > 1 or oversized:
+        seasonal_words = (
+            "season", "calendar", "ex-div", "ex dividend", "pre-ex", "post-ex", "midyear", "month",
+        )
+        owner_reasons = (
+            "economics", "cash flow", "cash-flow", "funding", "payout", "coverage", "quality",
+            "valuation", "overvalu", "concentration", "thesis", "deterior", "capital",
+        )
+        seasonal_exits = [
+            item for item in exits
+            if any(word in str(item.reason).lower() for word in seasonal_words)
+            and not any(word in str(item.reason).lower() for word in owner_reasons)
+        ]
+        if seasonal_exits:
             return (
-                f"Your aligned {agent} plan trims {len(trims)} times with sizes up to "
-                f"{max((item.trimPositionPct for item in trims), default=0)}%. Ben/Sam should keep "
-                "owned shares through ordinary seasonality; allow at most one 5-15% defensive trim "
-                "unless supplied business/income evidence is AT_RISK."
+                f"The {agent} plan sells for calendar or seasonal reasons even though "
+                "the supplied business structure is not AT_RISK. Each sale needs an owner-economics, "
+                "income, valuation, funding, or portfolio reason beyond the month itself."
             )
 
-    if result.agentFit == "aligned" and result.action != "AVOID":
-        if not funded:
-            return "An aligned Agent plan must identify and fund its best opportunity month."
-        max_budget = max(item.buyBudgetPct for item in funded)
-        if max_budget < 100:
-            return (
-                "Your Agent says the stock is aligned but never identifies a highest-conviction "
-                "month. Rank the twelve months and allocate 100% of that month's delegated budget "
-                "to the best opportunity; smaller buys may surround it."
-            )
-        evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
-        ranked = sorted(
-            (item for item in evidence if isinstance(item, dict) and item.get("month") in MONTH_NAMES),
-            key=lambda item: _num(item.get("score")) or 0,
-            reverse=True,
-        )
-        top_evidence_months = {str(item.get("month")) for item in ranked[:3]}
-        largest_months = {item.month for item in funded if item.buyBudgetPct == max_budget}
-        if top_evidence_months and not largest_months.intersection(top_evidence_months):
-            return (
-                f"Your largest allocation is outside the strongest supplied opportunity months "
-                f"({', '.join(item.get('month') for item in ranked[:3])}). Re-rank through your "
-                "persona and place the largest allocation where its method and supplied timing "
-                "evidence agree."
-            )
+    if result.action == "BUY" and not funded:
+        return "The top-level BUY action contradicts a twelve-month plan with no funded entry."
+    if agent in {"rex", "kai"} and funded and not exits:
+        return f"The {agent} plan funds a tactical entry but provides no later trim or exit."
     return None
 
 
@@ -759,20 +1187,55 @@ Historical monthly returns are backward-looking averages, never guaranteed futur
 say or imply the user will surely be richer in a later month. Do not mechanically invert returns
 (a positive month is not automatically TRIM and a negative month is not automatically BUY).
 Every month must include explicit sizing:
-- buyBudgetPct is 0-100% of THIS MONTH'S DELEGATED DCA CONTRIBUTION. It is never a percentage of
-  the whole portfolio or the accumulated cash reserve. Unused monthly money, dividends, and trim
-  proceeds may remain cash, but a later month's 50% still means only half of that later month's
-  contribution. BUY/ADD_SMALL require a positive value; use partial installments such as 25/50/75
-  when conviction is incomplete. All other actions use 0.
+- buyBudgetPct is 0-100%. For strategic owners it first sizes THIS MONTH'S DELEGATED DCA CONTRIBUTION,
+  conviction also controls reserve redeployment: a later 75% buy redeploys half of accumulated owner
+  reserve and a 100% buy redeploys all of it. A 25/50% owner starter does not sweep reserve. For Rex
+  and Kai, buyBudgetPct instead sizes the currently available tactical cash reserve, so 25% is a real
+  quarter-sized position. Nadia sizes only the current monthly envelope. BUY/ADD_SMALL require a
+  positive value; all other actions use 0.
 - trimPositionPct is 0-100% of the CURRENT POSITION reduced that month. TRIM/SELL require a
   positive value; all other actions use 0. SELL normally means 100, while TRIM must state a
   genuinely partial amount such as 10/25/50.
 - HOLD means keep existing shares, deploy no new money, and preserve the available DCA cash for a
   later month. There is no separate SKIP action. If normal DCA should continue, use BUY or
   ADD_SMALL with the appropriate buyBudgetPct instead of HOLD.
-- This is a DCA timing plan, but there is no universal purchase quota across Agents. Fund the months that
-  pass YOUR Agent method. Use 25% sizing when conviction is incomplete but your core evidence gate
-  still passes; use HOLD when that gate fails. Do not buy merely to deploy cash or fill the calendar.
+- Top-level WAIT means do not make an extra discretionary lump-sum purchase today. It does NOT
+  automatically cancel this month's normal strategic DCA or Nadia's benchmark-aware core. Vera,
+  Ben, Sam, Nadia, and AlphaWolf may therefore return WAIT while the current calendar month remains
+  ADD_SMALL/BUY at its routine size. Rex and Kai WAIT means no tactical entry and must remain HOLD.
+- This is a DCA timing plan with persona-specific capital mandates, not one universal quota. Fund the
+  months that pass YOUR Agent method. Use 25% sizing when conviction is incomplete but your core evidence
+  gate still passes; use HOLD when that gate fails. A strategic owner who accepts an ownable bull-regime
+  company must maintain its recurring owner core; a tactical Agent still has no participation quota.
+- EACH AGENT HAS A DIFFERENT BATTLEFIELD. Build the plan to express that mandate, and accept an honest
+  loss when the evidence does not fit it:
+  * Vera, Ben, and Sam — ownership & compounding. When businessStructure.ownershipEligible is true,
+    participationContext is BULL, and the company fits the philosophy, full DCA is the real opponent.
+    Meaningful recurring participation is the prior: normally deploy 75-100% of monthly contributions,
+    reinvest dividends, and use lower sizes only for a named valuation, income, funding, or portfolio
+    reason. A low-exposure plan that merely looks good after normalization loses this battlefield.
+  * Rex and Kai — swing capture. They may use low exposure, but funded entries need live signal quality,
+    favorable stop/reward geometry, and coherent exits. Their primary test is exposure-normalized edge
+    with no worse drawdown, not matching DCA's raw long-term return.
+  * Nadia — risk-adjusted efficiency. Her plan should improve return per unit of drawdown and beat what
+    ordinary DCA would have earned at the same average exposure. Cash alone is not risk skill; require
+    measurable edge, meaningful exposure, and drawdown reduction that justifies return given up.
+  * AlphaWolf Prime — hybrid allocation. Prime must add exposure-normalized edge, beat the matched-
+    exposure benchmark, and avoid worse drawdown. The rule engine sets facts and limits; AI resolves
+    the allocation. No single metric and no in-sample result may manufacture a win.
+- For BANK companies, read businessStructure.archetype, ownershipEligible, industryNativeStatus, and
+  genericLeverageIgnored before sizing. Positive ROE and margin can make a bank ownership-eligible even
+  while capital adequacy, NPL, NIM, and liquidity remain incomplete. Treat missing specialist metrics as
+  a confidence/size limitation—not a generic debt/equity rejection—and compare P/B with ROE and bank peers.
+- Read participationContext as the opportunity-cost side of risk. In a BULL regime, when the
+  businessStructure is not AT_RISK and the company is not against your philosophy, long-horizon
+  Agents should usually preserve a baseline participation path instead of hoarding nearly all cash.
+  Use small 25% installments when valuation is stretched or evidence is incomplete, then reserve
+  50/75/100% for stronger months. This is a sizing bias, not an automatic bullish override.
+- Audit the whole plan's annual participation. For a viable long-horizon holding in a bull regime,
+  ending with most delegated contributions idle requires a named hard blocker and an explicit
+  comparison of expected downside avoided versus compounding/upside forfeited. "Near a high,"
+  "could pull back," or "not perfect" alone are not sufficient hard blockers.
 - A historical +1% to +3% average month is mild strength, not proof of overvaluation. When the
   Agent's core thesis is intact, treat such months as reasonable 25-50% DCA opportunities unless
   current valuation, momentum exhaustion, or a named risk rule specifically blocks buying.
@@ -784,27 +1247,27 @@ Every month must include explicit sizing:
 - Decide participation through the selected Agent's own mind. Ben should normally keep planned DCA
   working when owner economics remain intact; Sam should size around funded income durability; Vera
   needs a valuation margin of safety; Rex and Kai need their trend/acceleration evidence; Nadia needs
-  measurable edge; AlphaWolf resolves the competing evidence. Do not impose one Agent's allocation
+  measurable edge to deviate from normal DCA, not to fund the benchmark core; AlphaWolf resolves the competing evidence. Do not impose one Agent's allocation
   cadence on another, and do not force any action after the model has applied that persona's rules.
   A possibly stronger following month may support buying now, but seasonality is evidence rather than
   a promised future gain.
-- A twelve-month plan with zero BUY/ADD_SMALL allocations is a full rejection, not ordinary patience.
-  It is valid only when your top-level action is AVOID, perspectiveScore is 30 or lower, and you name
-  the exact persona-specific disqualifier. When price is in the lower 35% of its five-year range,
-  at least 10% below its five-year average, or at/below the supplied entry band, and businessStructure
-  is neither AT_RISK nor UNPROVEN, reconsider a zero-deployment plan and fund at least one properly
-  sized month unless your own method can prove a genuine rejection.
-- First decide agentFit. If agentFit is aligned, explicitly rank all twelve months using the supplied
-  monthlyMap score/note, post-ex behavior, price range, structure, and YOUR persona. The single best
-  opportunity month must be BUY at 100% of that month's delegated contribution; state why it beats
-  the other months. Secondary opportunities use 25/50/75. This is ranking, not a promise of profit.
-- For aligned Ben and Sam plans, ordinary DCA should keep working: use at least 50% in most months
-  while owner economics or funded income remains intact, then overweight the best months at 100%.
-  HOLD requires a named valuation, payout, funding, or business-quality blocker—not merely that a
-  different month looks slightly better. Vera/AlphaWolf/Nadia may be more selective according to
-  their margins of safety or measured edge. Rex and Kai remain tactical and need not fill the calendar.
+- A twelve-month plan with zero BUY/ADD_SMALL allocations usually expresses a genuine rejection or
+  an unusually high hurdle. It can still be the Agent's honest conclusion, but name the controlling
+  blocker and compare the protection gained with the opportunity cost of unused cash. A lower range
+  position, discount to the five-year average, or price inside the entry band creates a starter-size
+  presumption for strategic Agents; it does not compel a purchase when stronger evidence disagrees.
+- First decide agentFit, then rank the months through YOUR persona using monthlyMap, post-ex behavior,
+  valuation/signal evidence, structure, and opportunity cost. Use 25/50/75/100 as an expressive sizing
+  vocabulary—not a required ladder. The best month need not receive 100%, and the supplied monthlyMap
+  leader need not win when the Agent's primary evidence points elsewhere; explain the override.
+- For accepted, ownable bull-regime Ben and Sam plans, ordinary DCA is the owner core: normally allocate
+  900-1100% across the twelve 100% monthly envelopes, with 75-100% in ordinary months. HOLD should be
+  exceptional and name a valuation, payout, funding, business-quality, or portfolio blocker—not merely
+  a preferred calendar month. Vera/AlphaWolf may be more selective around their controlling risks.
+  Nadia treats DCA as the benchmark and normally keeps a 25-75% systematic core with larger tilts only
+  when measured evidence is robust. Rex and Kai remain tactical and need not fill the calendar.
 - "Cheap" is not automatically free money. Rex and Kai still require their own signal, acceleration,
-  volume, or trend confirmation; Nadia still requires measurable edge. But each must explicitly
+  volume, or trend confirmation; Nadia requires measurable edge before tilting away from DCA. But each must explicitly
   consider the discount as favorable risk/reward and state the exact failed trigger if choosing HOLD.
 - Do not concentrate the whole plan into only the historically negative months. Ordinary months
   may still qualify, but every BUY needs a concrete Agent-specific reason and every HOLD must name
@@ -813,13 +1276,19 @@ Every month must include explicit sizing:
   A trim requires YOUR thesis/risk/valuation/technical exit rule. In particular, Ben and Sam must
   not trim routine DCA holdings for seasonal weakness; a lower historical-return month can be an
   accumulation month when business or income quality remains intact.
-- For Ben and Sam, ordinary alignment means stay invested. A strong historical month, a small
+- Apply companyStructureProfile.seasonalityRule, trimRule, and companySpecificBias before turning
+  monthly evidence into an action. For a hospitality/restaurant operator, ordinary travel or dining
+  seasonality changes installment size; a strategic Vera/Ben/Sam/AlphaWolf trim requires supplied
+  deterioration in industry-native operating evidence, normalized valuation, margin/cash flow, or
+  lease-adjusted leverage/coverage. Rex and Kai may react faster only when their own live tape and
+  risk triggers confirm the move; Nadia requires a measured seasonal edge and rebalance rule.
+- For Ben and Sam, ordinary alignment usually means stay invested. A strong historical month, a small
   +1% to +5% rise, or an approaching ex-dividend date may change new-cash deployment from BUY to
   HOLD but must not sell existing shares. When business/income structure is not AT_RISK, allow at
-  most one small 5-15% defensive trim in the whole annual plan, and only for a named valuation,
-  concentration, funding, payout, or owner-economics warning. Taking a little profit to reduce a
-  real concentration risk can justify 5-10%; repeated calendar trims cannot. Larger trims require
-  supplied thesis deterioration; SELL requires a genuine break.
+  most occasional small defensive trims, and only for a named valuation, concentration, funding,
+  payout, or owner-economics warning. Taking a little profit to reduce a real concentration risk can
+  be sensible; repeated calendar trims cannot. Let the severity and ownership context determine the
+  size rather than forcing a fixed count. SELL requires a genuine thesis break.
 - Risk reduction is a real part of the plan, not an afterthought. When YOUR supplied invalidation
   evidence is present, use TRIM with a meaningful partial size instead of defaulting to HOLD. Use
   SELL only when the controlling thesis is broken strongly enough to exit the full position. Never
@@ -829,7 +1298,8 @@ Every month must include explicit sizing:
   structure; a cheap price cannot repair weak economics. Sam requires credible income/funding
   durability and must avoid yield traps. Vera requires reported economics plus a valuation margin
   of safety. Rex and Kai require their respective momentum/acceleration confirmation and have no DCA
-  participation quota. Nadia requires measurable edge and risk discipline. AlphaWolf must resolve
+  participation quota. Nadia uses normal DCA as the benchmark, ranks opportunity, and requires an
+  objectively overextended regime plus weak rank before trimming; SELL needs a hard break. AlphaWolf must resolve
   the supplied corners and may HOLD when a named bottleneck blocks capital. When the Agent's required
   evidence is MIXED, AT_RISK, UNPROVEN, or simply absent, HOLD/AVOID is valid and often preferable.
 - Keep risk reduction in character too. Ben trims when ownership economics deteriorate or price is
@@ -845,6 +1315,24 @@ Every month must include explicit sizing:
   Do not treat each calendar cell as an isolated recommendation. A long-horizon Agent should not buy
   in one month and trim the next because of ordinary seasonality. A tactical or rule-based Agent must
   not keep holding merely because the prior month was a BUY when its exit trigger has already fired.
+- Rex and Kai plans should describe a complete trade lifecycle, not disguised DCA. Every funded entry
+  cluster needs a later exit condition and normally a later TRIM or SELL cell, with a named
+  stop/time/volume/momentum trigger. Use the strongest supplied nearby
+  profit-taking window rather than blindly selling in the next calendar cell. Kai's hard stop, failed
+  acceleration, or ten-session limit may exit before that displayed monthly profit window; he may hold
+  to it only while momentum remains confirmed. Rex should normally plan profit-taking into nearby
+  confirmed strength and keep any runner only while live tape confirmation survives. Neither may buy merely because a
+  month or five-year price looks cheap; their live signal must first confirm the entry.
+- For Kai's monthly candidate map, evaluate BUY and SELL together as one fast-trade path. An entry after a
+  historically weak month can be attractive when the immediately following month has materially stronger
+  positive average evidence, but it is only one setup. Rank the whole path by entry quality,
+  acceleration/volume confirmation, stop distance, and realistic exit evidence. Select only the paths
+  that genuinely clear Kai's edge; a full fast exit may occur within one month. A hard stop or failed
+  acceleration always overrides the calendar and exits sooner.
+- For Rex's monthly candidate map, use the same lifecycle discipline with a wider swing horizon.
+  Rank entries against plausible profit-taking or invalidation windows over the following few months.
+  BUY/ADD on confirmed tape, then choose HOLD, TRIM, or SELL as the evidence evolves. A partial trim
+  and a later runner exit are useful patterns, not mandatory choreography or fixed 50% sizes.
 - Holding speed is character-specific. Ben and Sam normally hold through month-to-month noise and
   may reverse a fresh purchase quickly only on a genuine business, funding, or income-thesis break.
   Vera may trim when price rapidly removes the valuation margin of safety, but should not manufacture
@@ -857,41 +1345,106 @@ Every month must include explicit sizing:
 - Apply the same character to opportunity sizing. Ben buys a starter when the business is ownable and
   the supplied price is unusually cheap. Sam buys when that discount improves a durable funded yield.
   Vera leans into a verified valuation margin of safety. AlphaWolf buys when the discount clears every
-  named bottleneck. Rex, Kai, and Nadia may remain selective, but cannot reject the setup with vague
-  language such as "not perfect"; they must name the missing character-specific trigger.
+  named bottleneck. Rex and Kai may remain selective, but cannot reject the setup with vague language
+  such as "not perfect"; they must name the missing character-specific trigger. Nadia must not convert
+  missing timing alpha into a cash signal; use benchmark DCA until a measured rule earns a deviation.
 Make the whole actionable plan unmistakably YOURS, not a generic timing template:
+- strategyQuote is the standalone first-person quote shown above the page. In 14-26 words, name the
+  supplied stock symbol and state YOUR complete OVERALL strategy for it: holding horizon, capital
+  deployment style, what changes position size, and what makes you trim or exit. It must describe the
+  actual monthlyPlan—not today's quote, a resistance level, a generic motto, or one calendar window.
+  Write natural investor language. Never mention implementation terms such as annual envelopes,
+  envelope points, funded-month counts, normalization, guardrails, or internal scoring.
+- The supplied agentEvidence profile is selected specifically for your character. Its four sections
+  are the PRIMARY and EXCLUSIVE sources for coreBelief, evidencePriority, fitExplanation, and
+  thesisBreaker, in that order. Name the source naturally and use its metrics. Shared entryBand,
+  monthlyMap, and calendar fields may control execution and monthlyPlan, but must not replace your
+  character's primary research source in the four hero explanations.
+- Do not imitate another profile: a quant leads with event statistics/factors/risk simulation; a
+  trader with tape, volume, momentum, and levels; an income Agent with yield/payout/cash funding; an
+  owner with business economics and owner cash generation; an institutional banker with statements,
+  capital structure, valuation, and downside underwriting. Missing specialist data must remain an
+  explicit limitation—it is not permission to fall back to the same generic entry-band story.
+- NUMERIC CLARITY IS MANDATORY FOR EVERY AGENT. Do not hide the decision behind phrases such as
+  "reported economics," "durable cash flow," "balance-sheet risk," "quality," "cheap," or
+  "measurable edge." Translate each phrase into the actual supplied number and the explicit rule
+  it must pass. Write comparisons in plain form, for example: "P/B is 1.06x and ROE is 9.1%; my
+  bank-value hurdle is not yet cleared" or "price is 1.51; my full-size zone is 1.39-1.43." Clearly label a threshold chosen
+  by the Agent as "my rule" so it is not mistaken for reported company data.
+- coreBelief, evidencePriority, fitExplanation, and thesisBreaker must each contain at least one
+  relevant supplied number and, where a decision boundary is involved, the exact pass/fail or
+  buy/exit threshold. If no relevant number was supplied, explicitly name the missing metric and
+  say "number unavailable"; do not replace it with qualitative jargon.
+- Never claim free-cash-flow durability, payout coverage, statistical edge, trend confirmation, or
+  another multi-period condition unless the corresponding numeric series or statistic is supplied.
+  State that the number is unavailable and lower the fit when your method depends on it.
+- The hero explanation is about YOUR investment concept, not today's quote or a repeated buy date.
+  coreBelief: the durable principle translated into explicit numeric minimums/maximums and the
+  current supplied values. The user must be able to see exactly how much is enough.
+  evidencePriority: the two or three supplied evidence categories you trust first, and why they
+  matter through your method, including their current numbers. fitExplanation: why this company
+  aligns or conflicts with that philosophy by comparing actual values with your numeric gates.
+  thesisBreaker: the exact numeric business, income, valuation, technical, or measured boundary
+  that would make your underlying concept wrong.
 - todayInstruction: your direct instruction for what to do at today's price.
 - nextMove: the next portfolio action you personally expect to take (not automatically "wait").
 - nextMoveTiming: when or under what supplied condition you would take it.
-- buyCondition: the specific evidence that would earn a buy/add through your method.
-- reduceCondition: the specific evidence that would make you trim, sell, or abandon the idea.
+- buyCondition: your OVERALL position-sizing rule across the full plan: the persona-specific company,
+  industry, valuation, income, quantitative, or tape evidence that makes allocations larger or smaller.
+  Price may support the rule, but an entry band, support, or resistance level cannot be the whole rule.
+- reduceCondition: your OVERALL trim/exit policy across the full plan. Anchor it to the selected Agent's
+  real thesis or risk failure. Price resistance alone is insufficient for strategic owners; it may matter
+  to Rex or Kai only together with their supplied momentum, volume, trend, or reward-to-risk evidence.
 A quality owner should focus these fields on business quality, normalized value, and long holding
 power; a momentum trader on acceleration, volume, stops, and fast exits; a quant on measured edge
 and variance; an income investor on payout durability and yield. Do not force every persona into
 the same post-ex wait/entry-band playbook. If the supplied data cannot support your specialty,
 say what evidence is missing instead of borrowing another agent's method.
-Judge cheap-vs-expensive against the 5-year priceContext, not just the short-term entry band: a
-stock whose price sits in the top of its 5-year range (high currentPct) is NOT cheap even if a
-3-month pullback occurred — prefer WAIT or TRIM there. Favor BUY when price is in the lower part
-of the 5-year range AND at the post-ex reversal dip.
-Never recommend BUY just because the stock is green or running up. BUY only when price is at or
-below the supplied entry zone with target upside remaining and it is not near its 5-year high, or
-when the post-ex dip (reversal) window is open and price has pulled back into the entry zone. If
-price is above entry or near the 5-year high, say WAIT.
-Return concise JSON only. The headline should sound like a direct trading instruction.
-The summary should explain why in 1-2 sentences with the key numbers supplied.
-perspectiveScore: YOUR OWN 1-100 rating for buying at the current price now, through your Agent
-method and horizon. This is not a generic confidence or a platform formula. Use the full range and
-do not use 50 as a missing-data default.
-perspectiveReason: one short sentence naming the supplied evidence that most drives your rating.
+Judge price against the companyStructureProfile, the Agent's primary valuation/signal method, direct
+peers, and the 5-year priceContext. The supplied entryBand and technical target are chart-derived
+execution references, not universal intrinsic value or a mandatory veto. A high range position is a
+reason to reduce size and demand better evidence; it is not proof of overvaluation by itself.
+When agentEvidence supplies a structural peer cohort, compare P/B, P/E, return, and the Agent's
+industry-native economics with that cohort before using the stock's five-year average as a valuation
+anchor. For a bank, a price rerating supported by peer P/B and ROE can be legitimate even at a new
+nominal high; the question is whether current P/B versus ROE and bank peers still offers an adequate
+return, not whether the quote has returned to its old average.
+This peer-valuation rule belongs to strategic Agents. Rex and Kai must ignore it as an entry thesis
+and use only their supplied tape/volume/momentum/catalyst sources; Nadia needs quantified factor edge
+to tilt away from her benchmark, not to maintain the benchmark allocation.
+Never recommend BUY merely because the stock is green. Conversely, do not force WAIT merely because
+price is above the chart entry band or near a historical high. Vera may fund a starter when bank-
+normalized P/B/ROE and risk-adjusted return clear her hurdle; Ben may accumulate an exceptional
+compounder at a sensible price; Sam may maintain funded DCA; Nadia/Rex/Kai still require their own
+measured or tactical triggers. Reserve full-size BUY for strong evidence and use smaller installments
+when participation is justified but entry quality is imperfect.
+CONSISTENCY CONTRACT: company fit, perspectiveScore, strategyQuote, today action, todayInstruction, buy/reduce
+conditions, and monthlyPlan must describe one coherent strategy. Distinguish "ownable company" from
+"full-size buy today." If aligned but expensive today, say WAIT for a lump sum while preserving
+explicit small/staged participation, including the current routine contribution when the core thesis
+still qualifies; name why and where size increases. If action is BUY, the current month must deploy
+money. TRIM/AVOID and tactical Rex/Kai WAIT must not coexist with a current-month buy. Strategic WAIT
+may coexist with routine DCA but not with an unexplained full-conviction override. AVOID cannot coexist with scheduled buys unless a precisely named future
+condition first changes the thesis.
+Return concise JSON only. The headline should state your concept-level conclusion about owning this
+kind of company; do not put a date, current quote, or buy-window instruction in it. The summary
+should explain your philosophy and this company's fit in 1-2 sentences. Save price/date execution
+for todayInstruction, nextMove, nextMoveTiming, and individual monthlyPlan reasons. strategyQuote,
+buyCondition, and reduceCondition must remain full-plan policies rather than today's price call.
+perspectiveScore: YOUR OWN 1-100 rating for how well the company and supplied structure fit your
+investment philosophy. This is not a generic confidence, platform formula, or buy-now score. Use
+the full range and do not use 50 as a missing-data default.
+perspectiveReason: one short sentence naming the supplied concept-level evidence that most drives
+your philosophy-fit rating.
 recap: a plain-words recap a beginner can act on — say directly whether to buy now or wait, and
 if waiting, roughly how long (use the supplied buyWindow opensInDays/dates; if unconfirmed, say
 so). One or two short sentences, no jargon.
-agentFit: judge whether buying at the CURRENT price fits YOUR OWN trading style and strategy as
-the persona you were given — "aligned" (exactly a setup you would take), "neutral" (acceptable
-but not your ideal setup), or "against" (your strategy says stay out here).
-agentFitReason: one sentence, first person, explaining that fit using your persona's priorities
-and the supplied numbers only.
+agentFit: judge whether the COMPANY and supplied evidence fit YOUR OWN style and strategy as the
+persona you were given — "aligned" (naturally belongs in your method), "neutral" (some relevant
+qualities but important evidence is mixed), or "against" (the underlying concept conflicts with
+your method). Entry timing stays in the execution fields.
+agentFitReason: one sentence, first person, explaining that concept fit using your persona's
+priorities and the supplied evidence only.
 """
 
 
@@ -922,27 +1475,32 @@ this is not a hypothetical: Sam and any income-led Agent should read
 buyTimingEvidence.trailingDividendPerShare/trailingDividendYieldPct/sessionsSinceLastExDividend as
 genuine received income, not a forecast, and factor a growing idle-cash balance from banked dividends
 into whether to deploy more now.
-deploymentPolicy is part of the selected Agent's recurring-allocation character. Apply it before
-making the final action. This is a monthly contribution lab, not a one-shot perfect-entry contest.
+deploymentPolicy describes the selected Agent's usual recurring-allocation behavior. Treat its
+percentages and holdRequires text as soft reference points, not automatic orders. This is a monthly
+contribution lab, not a one-shot perfect-entry contest, but the point-in-time evidence may justify an
+exception when the Agent names the controlling reason.
 
 Choose BUY, HOLD, TRIM, or SELL through your own Agent method. This is one combined decision, not
 three votes and not an average score. buyCashPct is the percentage of currently available cash to
 deploy and must be 0 unless action is BUY. trimPositionPct is the percentage of current shares to
 sell and must be 0 unless action is TRIM or SELL; SELL normally uses 100. HOLD uses both zero.
 For recurring_owner, recurring_income, valuation_installments, and balanced_installments styles:
-- When Analyst structure is INTACT and Buy Timing does not show a clear extreme, BUY at least the
-  normalInstallmentPct. A merely ordinary or mildly positive month is not a reason to skip DCA.
-- When evidence is MIXED but contains no AT_RISK condition, prefer a 10-25% starter installment over
-  indefinite HOLD when that fits the Agent. State the missing evidence and keep size small.
-- When cashAvailableAtNextOpen exceeds three monthly contributions because prior months were skipped,
-  explicitly consider 25-50% of available cash to reduce the backlog if the thesis is intact. Do not
-  let cash accumulate forever while repeatedly describing the same acceptable structure.
-- HOLD with zero purchase requires the concrete blocker described by deploymentPolicy.holdRequires.
-  Name that blocker in reason. "Not perfect," routine volatility, or lack of short-term momentum is
-  not sufficient for Ben or Sam.
+- INTACT structure and non-extreme Buy Timing create a normal-installment presumption, not a required
+  purchase. A merely ordinary or mildly positive month is weak evidence for skipping DCA, but a named
+  valuation, funding, portfolio, income, or company-specific reason may outweigh that presumption.
+- MIXED evidence without an AT_RISK condition often supports a small starter rather than indefinite
+  HOLD. Use size to express uncertainty, while allowing HOLD when the Agent identifies the missing
+  evidence or opportunity cost that genuinely controls the decision.
+- When cashAvailableAtNextOpen exceeds three monthly contributions, explicitly weigh backlog and cash
+  drag against current entry risk. The suggested 25-50% range is a reference, not a quota; explain why
+  this Agent deploys less, the same, or more.
+- HOLD with zero purchase should name a concrete Agent-specific blocker, ideally one related to
+  deploymentPolicy.holdRequires. "Not perfect," routine volatility, or lack of short-term momentum is
+  normally insufficient for Ben or Sam unless it changes a fact they actually care about.
 Tactical styles remain selective and must not buy merely to use the monthly budget.
-The final BUY/HOLD remains the Agent's own decision; no hidden rule rewrites it afterward. Use partial
-sizing to express uncertainty instead of demanding a perfect entry.
+The final BUY/HOLD remains the Agent's own decision; no hidden rule rewrites it afterward. Do not
+optimize for fixed activity, cash use, or a pretty replay. Use partial sizing to express uncertainty
+instead of demanding a perfect entry.
 The order executes at the next session's open, so do not assume today's close is available.
 This replay runs one call per month across years of history, so brevity matters: reason and
 invalidation must each be under 12 words, specific and auditable, not full sentences with filler.
@@ -1360,11 +1918,39 @@ def _today_performance_instructions() -> str:
     return """
 You are writing one compact, Agent-exclusive Today Plan for an existing holding. This is not a
 second Analyst report and not a next-day forecast. Use only the supplied current price, recent tape,
-position, key structure metrics, and levels.
+position, company/industry structure, and agentDecisionEvidence.
+
+THINK IN THIS ORDER:
+1. Identify the saved position and selected Agent's mandated horizon. Decide what the user is trying
+   to own or trade before looking at today's candle.
+2. Read companyStructureProfile as an industry/size prior, then use this company's actual evidence to
+   strengthen, weaken, or override that prior. A bank, REIT, utility, property developer, hospitality
+   operator, compounder, and momentum trade must not share one generic leverage or chart rule.
+3. Use agentDecisionEvidence.inputPriority and PRIMARY evidence as this Agent's controlling research
+   source. Shared today fields are a delta check; they must not replace the character's method.
+4. Ask what materially changed TODAY relative to that horizon. Separate ordinary price noise from a
+   real valuation, business, income, factor/risk, or tactical signal change.
+5. Choose one capital action and make every field agree with it. Balance permanent-loss risk against
+   the cost of unnecessary selling, missed compounding, or failed participation.
 
 Lead with exactly what the user should do today: HOLD, NO_ACTION, ADD_SMALL, ADD, REDUCE, or SELL.
 Then explain the two or three supplied facts that control that decision. Do not repeat the same idea
 across headline, summary, reasons, and evidence. Keep every prose field to one short sentence.
+
+PERSONA AND INDUSTRY CONSISTENCY:
+- Vera, Ben, Sam, and AlphaWolf may use price as valuation or sizing evidence, but Price resistance alone,
+  one red session, RSI, MACD, or a moving-average miss cannot by itself reduce a strategic holding.
+  Their REDUCE/SELL requires a supplied business, funding, payout, owner-economics, portfolio, or
+  genuinely excessive valuation reason appropriate to their method.
+- Rex and Kai must use live tape, volume, momentum, stop, catalyst, and reward/risk. Long-term peer
+  multiples or an attractive industry story cannot rescue a broken tactical setup.
+- Nadia must state the measured factor, volatility, drawdown, correlation, scenario, or rebalance rule.
+  Missing timing alpha is not a reason to abandon an otherwise valid benchmark-aware core.
+- For a bank, never treat accounting debt/equity like industrial leverage. Use P/B with ROE and bank
+  peers, then capital adequacy, NPL/asset quality, NIM, liquidity, and loan growth when supplied. Missing
+  specialist numbers reduce confidence; they are not proof of failure.
+- For seasonal businesses, a calendar effect can change today's installment or tactical trade, but a
+  strategic exit still needs supplied normalized operating or funding deterioration.
 
 Future alignment matters only as a guardrail:
 - horizonAlignment says whether today's price and structure remain ALIGNED, need WATCH, are BROKEN,
@@ -1382,6 +1968,21 @@ selected Agent's actual invalidation rule. Never invent levels, catalysts, intra
 saved plan. When a necessary metric is missing, say so briefly. The score is this Agent's decisive
 1-39 or 61-100 fit for today's action. Make the evidence hierarchy and action genuinely specific to
 the selected persona; another Agent should reasonably produce a different plan from the same facts.
+
+NUMERIC AND SOURCE DISCIPLINE:
+- Evidence must use actual supplied values when available and say "number unavailable" when a
+  character-critical metric is missing. Never turn missing evidence into a fabricated threshold.
+- Do not claim cash-flow durability, payout safety, trend confirmation, relative edge, or a moat unless
+  the corresponding evidence exists in agentDecisionEvidence.
+- The two or three evidence items must be distinct and drawn primarily from that Agent's source pack.
+
+FINAL CONSISTENCY CHECK:
+- buyScore 80-100 requires ADD or ADD_SMALL; 61-79 requires HOLD, NO_ACTION, or ADD_SMALL; 21-39
+  requires REDUCE; 1-20 requires SELL.
+- BROKEN cannot coexist with HOLD/ADD. ALIGNED cannot coexist with SELL. continueGate and exitGate
+  must be different observable rules.
+- signal, tone, headline, summary, holdingAction, holdingActionReason, todayRead, horizonAlignment,
+  evidence, recap, agentFit, and agentFitReason must tell one coherent story through one Agent.
 """.strip()
 
 

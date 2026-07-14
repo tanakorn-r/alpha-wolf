@@ -39,7 +39,7 @@ def entitlement_status(user_id: int) -> dict[str, Any]:
     period = now.strftime("%Y-%m")
     with connect() as db:
         user = db.execute("SELECT premium_redeemed_at, premium_expires_at FROM users WHERE id = ?", (user_id,)).fetchone()
-        usage = db.execute("SELECT used FROM ai_usage_monthly WHERE user_id = ? AND period = ?", (user_id, period)).fetchone()
+        usage = db.execute("SELECT used, bonus FROM ai_usage_monthly WHERE user_id = ? AND period = ?", (user_id, period)).fetchone()
     redeemed_at = _parse(user[0]) if user else None
     expires_at = _parse(user[1]) if user else None
     if redeemed_at and expires_at is None:
@@ -47,13 +47,55 @@ def entitlement_status(user_id: int) -> dict[str, Any]:
     pro_active = bool(expires_at and expires_at > now)
     limit = PRO_AI_LIMIT if pro_active else FREE_AI_LIMIT
     used = int(usage[0]) if usage else 0
+    bonus = int(usage[1]) if usage else 0
+    total_limit = limit + bonus
     return {
         "plan": "pro" if pro_active else "free",
         "proActive": pro_active,
         "premiumRedeemedAt": redeemed_at.isoformat() if redeemed_at else None,
         "premiumExpiresAt": expires_at.isoformat() if expires_at else None,
-        "aiUsage": {"period": period, "used": used, "limit": limit, "remaining": max(0, limit - used)},
+        "aiUsage": {
+            "period": period,
+            "used": used,
+            "limit": total_limit,
+            "baseLimit": limit,
+            "bonus": bonus,
+            "remaining": max(0, total_limit - used),
+        },
     }
+
+
+def fulfill_stripe_ai_credits(
+    user_id: int,
+    credits: int,
+    *,
+    event_key: str,
+    session_id: str,
+    amount_total: int,
+    currency: str,
+) -> tuple[dict[str, Any], bool]:
+    if user_id <= 0 or credits <= 0 or not event_key or not session_id:
+        raise ValueError("Invalid Stripe credit fulfillment")
+    period = datetime.now(timezone.utc).strftime("%Y-%m")
+    now = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        cursor = db.execute(
+            """INSERT OR IGNORE INTO stripe_credit_fulfillments(
+                   event_key, session_id, user_id, credits, amount_total, currency, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?)""",
+            (event_key, session_id, user_id, credits, amount_total, currency.lower(), now),
+        )
+        if cursor.rowcount == 0:
+            db.commit()
+            return entitlement_status(user_id), False
+        db.execute(
+            """INSERT INTO ai_usage_monthly(user_id, period, used, bonus, updated_at) VALUES(?, ?, 0, ?, ?)
+               ON CONFLICT(user_id, period) DO UPDATE SET bonus = ai_usage_monthly.bonus + excluded.bonus,
+               updated_at = excluded.updated_at""",
+            (user_id, period, credits, now),
+        )
+        db.commit()
+    return entitlement_status(user_id), True
 
 
 def consume_ai_credit(user_id: int, *, premium_required: bool = False, cost: int = 1) -> dict[str, Any]:

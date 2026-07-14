@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { deleteHolding, loadAuthUser, loadPortfolio, loadPortfolioReview, saveHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
+import { deleteHolding, loadAuthUser, loadPortfolio, loadPortfolioQuotes, loadPortfolioReview, saveHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 import { priceToUsdBase } from "../../lib/format";
 
@@ -28,7 +28,72 @@ export function useDashboard() {
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
   const portfolioQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: Boolean(authQuery.data?.id) });
-  const portfolio = portfolioQuery.data;
+  const savedPortfolio = portfolioQuery.data;
+  const holdingSymbolsKey = (savedPortfolio?.holdings ?? []).map((holding) => holding.symbol).sort().join(",");
+  const quoteRefreshStartedAt = useRef(0);
+  const quotesQuery = useQuery({
+    queryKey: ["portfolio-quotes", accountScope, holdingSymbolsKey],
+    queryFn: loadPortfolioQuotes,
+    enabled: Boolean(authQuery.data?.id && holdingSymbolsKey),
+    staleTime: 0,
+    retry: 0,
+  });
+
+  useEffect(() => {
+    quoteRefreshStartedAt.current = Date.now();
+  }, [holdingSymbolsKey]);
+
+  useEffect(() => {
+    if (!quotesQuery.data?.pending || Date.now() - quoteRefreshStartedAt.current >= 60_000) return;
+    const timer = window.setTimeout(() => { void quotesQuery.refetch(); }, 1_500);
+    return () => window.clearTimeout(timer);
+  }, [quotesQuery.data?.pending, quotesQuery.dataUpdatedAt, quotesQuery.refetch]);
+
+  const portfolio = useMemo(() => {
+    if (!savedPortfolio) return undefined;
+    const freshQuotes = new Map(
+      (quotesQuery.data?.quotes ?? [])
+        .filter((quote) => quote.fresh && (quote.price ?? 0) > 0)
+        .map((quote) => [quote.symbol, quote]),
+    );
+    if (!freshQuotes.size) return savedPortfolio;
+    const holdings = savedPortfolio.holdings.map((holding) => {
+      const quote = freshQuotes.get(holding.symbol);
+      if (!quote?.price) return holding;
+      const value = holding.shares * priceToUsdBase(quote.price, holding.symbol);
+      const gainLoss = value - holding.cost;
+      return {
+        ...holding,
+        price: quote.price,
+        currency: quote.currency ?? holding.currency,
+        changePct: quote.changePct,
+        value,
+        gainLoss,
+        gainLossPct: holding.cost > 0 ? (gainLoss / holding.cost) * 100 : 0,
+      };
+    });
+    const totalValue = holdings.reduce((sum, holding) => sum + holding.value, 0);
+    const invested = holdings.reduce((sum, holding) => sum + holding.cost, 0);
+    const priorAnnualIncome = savedPortfolio.summary.totalValue * savedPortfolio.summary.forwardYield / 100;
+    const today = new Date().toISOString().slice(0, 10);
+    const chart = [...savedPortfolio.chart];
+    const livePoint = { date: today, value: totalValue, cost: invested };
+    if (chart.at(-1)?.date === today) chart[chart.length - 1] = livePoint;
+    else chart.push(livePoint);
+    return {
+      ...savedPortfolio,
+      holdings,
+      chart,
+      summary: {
+        ...savedPortfolio.summary,
+        totalValue,
+        invested,
+        gainLoss: totalValue - invested,
+        gainLossPct: invested > 0 ? ((totalValue - invested) / invested) * 100 : 0,
+        forwardYield: totalValue > 0 ? (priorAnnualIncome / totalValue) * 100 : 0,
+      },
+    };
+  }, [quotesQuery.data?.quotes, savedPortfolio]);
   const refresh = () => { void portfolioQuery.refetch(); };
   useEffect(() => {
     if (portfolio) setPortfolioSummary(portfolio.summary.totalValue, portfolio.summary.gainLossPct);
@@ -75,7 +140,8 @@ export function useDashboard() {
     showEmptyHero: (!hasHoldings && !hasPlan) || !portfolio,
     isSkeleton: authQuery.isPending || (Boolean(authQuery.data?.id) && portfolioQuery.isPending && !portfolio),
     isError: portfolioQuery.isError,
-    isFetching: portfolioQuery.isFetching,
+    isFetching: portfolioQuery.isFetching || quotesQuery.isFetching,
+    quotesUpdating: quotesQuery.isFetching,
     actionError,
     activeAgentId,
     analysis: review,

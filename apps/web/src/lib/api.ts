@@ -13,7 +13,7 @@ export type AuthUser = {
   premiumExpiresAt?: string | null;
   proActive?: boolean;
   plan?: "free" | "pro";
-  aiUsage?: { period: string; used: number; limit: number; remaining: number };
+  aiUsage?: { period: string; used: number; limit: number; baseLimit?: number; bonus?: number; remaining: number };
 };
 
 export async function loadAuthUser(): Promise<AuthUser | null> {
@@ -38,6 +38,38 @@ export async function redeemPremiumPromo(): Promise<AuthUser | null> {
     throw new Error(message);
   }
   const payload = (await response.json()) as { user: AuthUser | null };
+  return payload.user;
+}
+
+export async function createAiCreditCheckout(credits: 25 | 75 | 200): Promise<string> {
+  const response = await fetch(`${API_BASE}/auth/credit-checkout`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credits }),
+  });
+  if (!response.ok) {
+    let message = `Could not add credits (${response.status})`;
+    try { message = ((await response.json()) as { detail?: string }).detail ?? message; } catch { /* HTTP fallback */ }
+    throw new Error(message);
+  }
+  const payload = (await response.json()) as { checkoutUrl: string };
+  return payload.checkoutUrl;
+}
+
+export async function confirmAiCreditCheckout(sessionId: string): Promise<AuthUser> {
+  const response = await fetch(`${API_BASE}/auth/credit-checkout/confirm`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId }),
+  });
+  if (!response.ok) {
+    let message = `Could not confirm credits (${response.status})`;
+    try { message = ((await response.json()) as { detail?: string }).detail ?? message; } catch { /* HTTP fallback */ }
+    throw new Error(message);
+  }
+  const payload = (await response.json()) as { user: AuthUser };
   return payload.user;
 }
 
@@ -648,6 +680,12 @@ export type PortfolioDashboard = {
   incomeEvents: Array<{ date: string; symbol: string; kind: string; amount?: number | null }>;
 };
 
+export type PortfolioQuotesResponse = {
+  quotes: Array<{ symbol: string; price?: number | null; currency?: string | null; changePct: number; fresh: boolean; fetchedAt?: string | null }>;
+  pending: boolean;
+  updatedAt?: string | null;
+};
+
 export type MarketCalendarEvent = {
   date: string;
   symbol: string;
@@ -916,9 +954,14 @@ export type BuyTimingResponse = {
   price?: number | null;
   headline: string;
   summary: string;
+  strategyQuote?: string | null;
   action: "BUY" | "WAIT" | "TRIM" | "AVOID";
   perspectiveScore?: number | null;
   perspectiveReason?: string | null;
+  coreBelief?: string | null;
+  evidencePriority?: string | null;
+  fitExplanation?: string | null;
+  thesisBreaker?: string | null;
   todayInstruction?: string | null;
   nextMove?: string | null;
   nextMoveTiming?: string | null;
@@ -973,7 +1016,12 @@ export type BuyTimingResponse = {
     currentPct?: number | null;
     vsAvgPct?: number | null;
   } | null;
-  businessStructure?: { status: "INTACT" | "MIXED" | "AT_RISK" | "UNPROVEN"; roe?: number | null; profitMargin?: number | null; revenueGrowth?: number | null; debtToEquity?: number | null; reasons: string[] };
+  businessStructure?: { status: "INTACT" | "MIXED" | "AT_RISK" | "UNPROVEN"; archetype?: string; ownershipEligible?: boolean; industryNativeStatus?: string; genericLeverageIgnored?: boolean; roe?: number | null; profitMargin?: number | null; revenueGrowth?: number | null; debtToEquity?: number | null; reasons: string[] };
+  agentEvidence?: {
+    agentId: string;
+    profile: string;
+    sections: Array<{ label: string; source: string; metrics: Array<{ label: string; value: string }> }>;
+  } | null;
   timeline?: {
     start?: string | null;
     end?: string | null;
@@ -989,7 +1037,7 @@ export type BuyTimingResponse = {
   monthlyMap?: Array<{ month: string; score: number; action: "BUY" | "TRIM" | "HOLD"; returnPct: number; currentYearReturnPct?: number | null; isExMonth: boolean; isCurrent: boolean; note: string }>;
   agentMonthlyPlan?: Array<{ month: string; score: number; action: "BUY" | "ADD_SMALL" | "HOLD" | "TRIM" | "SELL"; buyBudgetPct: number; trimPositionPct: number; calculatedAction: "BUY" | "TRIM" | "HOLD"; returnPct: number; currentYearReturnPct?: number | null; isExMonth: boolean; isCurrent: boolean; note: string; reason: string }> | null;
   monthlyHistory?: Array<{ date: string; month: string; close: number }>;
-  backtest?: { years: number; observedMonths: number; investedMonths: number; skippedMonths: number; monthlyContribution: number; totalContributed: number; endingValue: number; endingCash: number; endingStockValue: number; profitLoss: number; alwaysBuyEndingValue: number; strategyReturnPct: number; alwaysBuyReturnPct: number; strategyMoneyWeightedReturnPct?: number | null; alwaysBuyMoneyWeightedReturnPct?: number | null; exposureNormalizedReturnPct?: number | null; matchedExposureBenchmarkReturnPct?: number | null; strategyReturnWithoutDividendsPct: number; alwaysBuyReturnWithoutDividendsPct: number; strategyDividendReturnBoostPct: number; alwaysBuyDividendReturnBoostPct: number; edgePct: number; strategyMaxDrawdownPct: number; alwaysBuyMaxDrawdownPct: number; averageStockExposurePct: number; agentDividendsReceived: number; alwaysBuyDividendsReinvested: number; method: string; inSample: boolean; ledger: Array<{ date: string; month: string; action: string; buyBudgetPct: number; trimPositionPct: number; dividendIncome: number; contributed: number; cash: number; stockValue: number; accountValue: number; profitLoss: number }> } | null;
+  backtest?: { years: number; observedMonths: number; investedMonths: number; skippedMonths: number; monthlyContribution: number; totalContributed: number; endingValue: number; endingCash: number; endingStockValue: number; profitLoss: number; alwaysBuyEndingValue: number; strategyReturnPct: number; alwaysBuyReturnPct: number; strategyMoneyWeightedReturnPct?: number | null; alwaysBuyMoneyWeightedReturnPct?: number | null; exposureNormalizedReturnPct?: number | null; matchedExposureBenchmarkReturnPct?: number | null; strategyReturnWithoutDividendsPct: number; alwaysBuyReturnWithoutDividendsPct: number; strategyDividendReturnBoostPct: number; alwaysBuyDividendReturnBoostPct: number; edgePct: number; strategyMaxDrawdownPct: number; alwaysBuyMaxDrawdownPct: number; averageStockExposurePct: number; agentDividendsReceived: number; agentDividendsReinvested?: number; alwaysBuyDividendsReinvested: number; battlefield?: { kind: "OWNER_COMPOUNDING" | "TACTICAL_SWING" | "RISK_EFFICIENCY" | "HYBRID_ALLOCATION"; label: string; objective: string; verdict: "WIN" | "MATCH" | "LOSS"; primaryMetricLabel: string; primaryValue: number | null; benchmarkLabel: string; benchmarkValue: number; edgeValue: number | null; unit: "percent" | "ratio"; explanation: string; expectedTailwind: boolean }; method: string; inSample: boolean; ledger: Array<{ date: string; month: string; action: string; buyBudgetPct: number; trimPositionPct: number; dividendIncome: number; contributed: number; cash: number; stockValue: number; accountValue: number; profitLoss: number }> } | null;
   events: Array<{ exDate: string; amount?: number | null; dipPct: number; recoverySessions?: number | null }>;
   technicalContext?: {
     signal?: string | null;
@@ -1259,6 +1307,12 @@ export async function loadPortfolio(): Promise<PortfolioDashboard> {
   const response = await fetch(`${API_BASE}/portfolio`, { credentials: "include" });
   if (!response.ok) throw new Error(`Failed to load portfolio: ${response.status}`);
   return (await response.json()) as PortfolioDashboard;
+}
+
+export async function loadPortfolioQuotes(): Promise<PortfolioQuotesResponse> {
+  const response = await fetch(`${API_BASE}/portfolio/quotes`, { credentials: "include" });
+  if (!response.ok) throw new Error(`Failed to load portfolio quotes: ${response.status}`);
+  return (await response.json()) as PortfolioQuotesResponse;
 }
 
 export async function loadPortfolioWatchlist(): Promise<string[]> {

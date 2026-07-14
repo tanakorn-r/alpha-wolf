@@ -12,6 +12,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 
 from internal.market import detail
+from internal.market import portfolio as portfolio_market
 from internal.yahoo import client as yahoo_client
 from routes import analysis
 
@@ -21,6 +22,34 @@ def _request() -> Request:
 
 
 class AnalystCacheFirstTests(unittest.TestCase):
+    def test_portfolio_quote_overlay_loads_holdings_in_parallel_and_reports_pending(self) -> None:
+        holdings = [SimpleNamespace(symbol="AAPL"), SimpleNamespace(symbol="SIRI.BK")]
+
+        def info(_modules, symbol: str):
+            return {
+                "currentPrice": 200 if symbol == "AAPL" else 1.47,
+                "regularMarketPreviousClose": 190 if symbol == "AAPL" else 1.45,
+                "currency": "USD" if symbol == "AAPL" else "THB",
+            }
+
+        with (
+            patch.object(portfolio_market, "list_holdings", return_value=holdings),
+            patch.object(portfolio_market, "make_ticker", side_effect=lambda symbol: SimpleNamespace(symbol=symbol)),
+            patch.object(portfolio_market, "load_ticker_modules", return_value={}),
+            patch.object(portfolio_market, "merge_ticker_info", side_effect=info),
+            patch.object(
+                portfolio_market,
+                "quote_snapshot_meta",
+                side_effect=lambda symbol: {"fresh": symbol == "AAPL", "fetchedAt": "2026-07-13T12:00:00+00:00" if symbol == "AAPL" else None},
+            ),
+        ):
+            result = portfolio_market.build_portfolio_quotes(1)
+
+        self.assertEqual([quote["symbol"] for quote in result["quotes"]], ["AAPL", "SIRI.BK"])
+        self.assertAlmostEqual(result["quotes"][0]["changePct"], 5.26, places=2)
+        self.assertTrue(result["pending"])
+        self.assertEqual(result["updatedAt"], "2026-07-13T12:00:00+00:00")
+
     def test_quote_and_company_snapshots_merge_without_refresh_when_fresh(self) -> None:
         company = {"AAPL": {"price": {"currentPrice": 90}, "summaryProfile": {"sector": "Technology"}}}
         quote = {"AAPL": {"price": {"currentPrice": 100}, "summaryDetail": {"currentPrice": 100}}}

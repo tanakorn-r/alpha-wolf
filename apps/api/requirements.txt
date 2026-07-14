@@ -8,3 +8,4 @@ python-dotenv
 tradingview-screener
 libsql
 google-auth
+stripe>=11,<14
