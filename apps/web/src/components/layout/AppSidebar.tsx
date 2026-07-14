@@ -6,7 +6,7 @@ import { formatPercent } from "../../lib/format";
 import { loadAgents, loadAuthUser } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 import { NavIcon, type NavIconKind } from "./NavIcon";
-import { CreditPurchaseReturn, CreditTopUpButton } from "../billing/CreditTopUp";
+import { CreditTopUpButton } from "../billing/CreditTopUp";
 
 const items: Array<{ to: string; label: string; kind: NavIconKind }> = [
   { to: "/", label: "Dashboard", kind: "dashboard" },
@@ -76,8 +76,6 @@ export function AppSidebar() {
             </div>
           </div>
         ) : authQuery.data ? <AiUsageMeter user={authQuery.data} /> : null}
-        <CreditPurchaseReturn />
-
         <div className="rounded-[10px] border border-[#2a2a31] bg-[#161619] px-3 py-3">
           <div className="mb-[5px] text-[11px] uppercase tracking-[0.6px] text-[#8c8c95]">Portfolio</div>
           <div className="font-mono text-[19px] font-semibold tracking-[-0.5px] text-[#ececee]"><Money value={portfolioValue} secondaryClassName="text-[10px] font-normal text-[#5a5a62]" /></div>

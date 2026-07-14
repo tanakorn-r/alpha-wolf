@@ -97,6 +97,43 @@ class Holding(HoldingInput):
     createdAt: str
 
 
+class BuyHoldingInput(BaseModel):
+    symbol: str = Field(min_length=1, max_length=24)
+    shares: float = Field(gt=0)
+    price: float = Field(gt=0)
+    fees: float = Field(default=0, ge=0)
+    occurredAt: str | None = None
+    strategy: str = "stable_dca"
+    monthlyDca: float = Field(default=0, ge=0)
+
+
+class SellHoldingInput(BaseModel):
+    shares: float = Field(gt=0)
+    price: float = Field(gt=0)
+    fees: float = Field(default=0, ge=0)
+    occurredAt: str | None = None
+
+
+class PortfolioTransaction(BaseModel):
+    id: int
+    symbol: str
+    kind: Literal["BUY", "SELL", "DIVIDEND", "FEE", "ADJUSTMENT"]
+    shares: float = 0
+    price: float = 0
+    amount: float = 0
+    fees: float = 0
+    costBasis: float | None = None
+    realizedPnl: float | None = None
+    occurredAt: str
+    source: str
+    createdAt: str
+
+
+class SellHoldingResult(BaseModel):
+    transaction: PortfolioTransaction
+    holding: Holding | None = None
+
+
 class DcaOrderInput(BaseModel):
     symbol: str = Field(min_length=1, max_length=24)
     amount: float = Field(gt=0)
@@ -165,6 +202,12 @@ class PortfolioSummary(BaseModel):
     gainLossPct: float = 0
     dividendsYtd: float = 0
     forwardYield: float = 0
+    unrealizedGainLoss: float = 0
+    realizedGainLoss: float = 0
+    totalReturn: float = 0
+    grossInvested: float = 0
+    netContributions: float = 0
+    cashBalance: float = 0
 
 
 class PortfolioDashboard(BaseModel):
@@ -174,6 +217,7 @@ class PortfolioDashboard(BaseModel):
     chart: list[PortfolioPoint] = Field(default_factory=list)
     markers: list[PortfolioMarker] = Field(default_factory=list)
     incomeEvents: list[IncomeEvent] = Field(default_factory=list)
+    transactions: list[PortfolioTransaction] = Field(default_factory=list)
 
 
 class MarketSnapshot(BaseModel):
@@ -444,6 +488,18 @@ class ValuationMetrics(BaseModel):
     peRatio: float | None = None
     forwardPE: float | None = None
     dividendYield: float | None = None
+    todayChange: float | None = None
+    todayChangePct: float | None = None
+    previousClose: float | None = None
+    dayOpen: float | None = None
+    dayHigh: float | None = None
+    dayLow: float | None = None
+    currentVolume: float | None = None
+    averageVolume: float | None = None
+    volumeRatio: float | None = None
+    rsi14: float | None = None
+    support: float | None = None
+    resistance: float | None = None
 
 
 class ValuationStructureBand(BaseModel):
@@ -477,7 +533,7 @@ class ValuationVerdict(BaseModel):
     symbol: str
     name: str
     currency: str
-    verdict: Literal["CHASING", "FAIR", "DISCOUNT", "INSUFFICIENT_DATA"]
+    verdict: Literal["CHASING", "BUILDING", "FAIR", "DISCOUNT", "INSUFFICIENT_DATA"]
     chasingAnswer: str
     narrative: str
     rightNow: ValuationRightNow

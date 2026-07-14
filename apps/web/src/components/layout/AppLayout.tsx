@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { CreditPurchaseReturn } from "../billing/CreditTopUp";
 import { RiskDisclaimer } from "../ui/RiskDisclaimer";
 import { AppHeader } from "./AppHeader";
 import { AppSidebar } from "./AppSidebar";
@@ -8,6 +9,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
   return (
     <div className="aw-app-shell min-h-screen">
       <div className="aw-shell min-h-screen">
+        <CreditPurchaseReturn />
         <AppSidebar />
         {/* Content offset is mobile-first so the media queries can't conflict:
             0 (bottom-nav mobile) → 70px (collapsed rail) → 220px (full sidebar). */}

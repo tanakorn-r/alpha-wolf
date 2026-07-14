@@ -35,7 +35,11 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
     setBuying(true);
     setError("");
     try {
-      const checkoutUrl = await createAiCreditCheckout(selected);
+      const returnUrl = new URL(window.location.href);
+      returnUrl.searchParams.delete("credit_purchase");
+      returnUrl.searchParams.delete("session_id");
+      const returnPath = `${returnUrl.pathname}${returnUrl.search}${returnUrl.hash}`;
+      const checkoutUrl = await createAiCreditCheckout(selected, returnPath);
       window.location.assign(checkoutUrl);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not add AI credits");
@@ -48,7 +52,7 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
     <Modal title="Add AI credits" onClose={onClose}>
       <>
           <div className="rounded-[var(--aw-radius-control)] border border-[#f5c451]/25 bg-[#f5c451]/[0.06] px-3 py-2.5 text-[10.5px] leading-[1.5] text-[#d5c28c]">
-            <b className="text-[#f5c451]">Stripe test checkout.</b> You will continue to Stripe&apos;s hosted sandbox. Use a Stripe test card; purchased credits expire with the current monthly quota period.
+            <b className="text-[#f5c451]">Stripe test checkout.</b> You will continue to Stripe&apos;s hosted sandbox. Use a Stripe test card; purchased runs increase your monthly allowance but do not unlock Pro-only tabs.
           </div>
           <div className="mt-3 grid gap-2">
             {PACKS.map((item) => (
@@ -80,36 +84,70 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
 
 export function CreditPurchaseReturn({ onConfirmed }: { onConfirmed?: () => void }) {
   const queryClient = useQueryClient();
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<{ kind: "loading" | "success" | "cancelled" | "error"; title: string; body: string } | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const status = params.get("credit_purchase");
     const sessionId = params.get("session_id");
+    const clearPurchaseParams = () => {
+      params.delete("credit_purchase");
+      params.delete("session_id");
+      window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
+    };
+    if (status === "cancelled") {
+      setNotice({ kind: "cancelled", title: "Checkout cancelled", body: "No payment was taken. Your AI runs are unchanged." });
+      clearPurchaseParams();
+      return;
+    }
     if (status !== "success" || !sessionId) return;
     let cancelled = false;
-    setMessage("Confirming Stripe payment…");
+    setNotice({ kind: "loading", title: "Confirming payment", body: "Stripe approved the checkout. We’re adding your AI runs now…" });
     void confirmAiCreditCheckout(sessionId)
-      .then(async (user) => {
+      .then(async ({ user, purchasedCredits }) => {
         if (cancelled) return;
         queryClient.setQueryData(["auth-user"], user);
         await queryClient.invalidateQueries({ queryKey: ["auth-user"] });
-        setMessage(`${user.aiUsage?.remaining ?? 0} AI runs are now available.`);
+        setNotice({
+          kind: "success",
+          title: "Payment successful",
+          body: `${purchasedCredits} AI runs were added. You now have ${user.aiUsage?.remaining ?? 0} available this month.`,
+        });
         onConfirmed?.();
         window.dispatchEvent(new Event("aw:credits-added"));
+        clearPurchaseParams();
       })
       .catch((reason) => {
-        if (!cancelled) setMessage(reason instanceof Error ? reason.message : "Could not confirm Stripe payment");
-      })
-      .finally(() => {
-        if (cancelled) return;
-        params.delete("credit_purchase");
-        params.delete("session_id");
-        window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
+        if (!cancelled) {
+          setNotice({
+            kind: "error",
+            title: "Payment needs verification",
+            body: reason instanceof Error ? reason.message : "We could not confirm the Stripe payment yet.",
+          });
+        }
       });
     return () => { cancelled = true; };
-  }, [onConfirmed, queryClient]);
+  }, [attempt, onConfirmed, queryClient]);
 
-  if (!message) return null;
-  return <div className="rounded-[var(--aw-radius-control)] border border-[#3ecf8e]/30 bg-[#3ecf8e]/[0.07] px-3 py-2 text-center text-[9.5px] text-[#3ecf8e]">{message}</div>;
+  if (!notice) return null;
+  const accent = notice.kind === "error" ? "#f2575c" : notice.kind === "cancelled" ? "#f5c451" : "#3ecf8e";
+  return (
+    <div className="fixed right-5 top-5 z-[70] w-[min(390px,calc(100vw-2rem))] overflow-hidden rounded-[14px] border bg-[#141417] shadow-[0_24px_80px_rgba(0,0,0,0.65)]" style={{ borderColor: `${accent}55` }} role={notice.kind === "error" ? "alert" : "status"}>
+      <div className="h-1 w-full" style={{ background: accent }} />
+      <div className="flex gap-3 p-4">
+        <div className="grid h-9 w-9 flex-none place-items-center rounded-full border text-[17px] font-bold" style={{ borderColor: `${accent}55`, background: `${accent}16`, color: accent }}>
+          {notice.kind === "loading" ? "…" : notice.kind === "success" ? "✓" : notice.kind === "cancelled" ? "–" : "!"}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-bold text-[#ececee]">{notice.title}</div>
+          <div className="mt-1 text-[11px] leading-[1.5] text-[#9a9aa3]">{notice.body}</div>
+          {notice.kind === "error" ? (
+            <button type="button" onClick={() => setAttempt((value) => value + 1)} className="mt-2 text-[10.5px] font-bold text-[#74a4ff] hover:text-[#9abfff]">Retry verification</button>
+          ) : null}
+        </div>
+        {notice.kind !== "loading" ? <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss payment notice" className="grid h-7 w-7 flex-none place-items-center rounded-[6px] text-[#6f6f78] hover:bg-white/[0.05] hover:text-[#ececee]">×</button> : null}
+      </div>
+    </div>
+  );
 }

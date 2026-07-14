@@ -19,6 +19,7 @@ from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
 from internal.market.universe import build_market_page
 from internal.store.cache import cache_get, cache_set
 from internal.store.portfolio import list_holdings
+from internal.store.utils import as_float
 from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TechnicalAnalysisResponse, TodayPerformanceResponse, ValuationVerdictResponse
 
 router = APIRouter()
@@ -302,7 +303,7 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
     account_scope = account_cache_scope(user_id_from_request(request))
-    cache_key = f"{account_scope}:valuation:v25-prime-hybrid-council:{normalized}:{strategy}:{agent_id}"
+    cache_key = f"{account_scope}:valuation:v26-today-tape-fomo:{normalized}:{strategy}:{agent_id}"
     cached = cache_get("analysis", cache_key)
     if cached is not None and not force:
         return cached
@@ -334,16 +335,86 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
     # Keep objective valuation multiples authoritative even if the model omits an echo field.
     business = bundle.get("business") if isinstance(bundle.get("business"), dict) else {}
     metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    tape_metrics = _valuation_tape_metrics(bundle)
     result = {
         **result,
         "metrics": {
             **metrics,
             "peRatio": business.get("peRatio"),
             "forwardPE": business.get("forwardPE"),
+            **tape_metrics,
         },
     }
+    result = _align_tactical_valuation_state(result, agent_id)
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
+
+
+def _valuation_tape_metrics(bundle: dict[str, Any]) -> dict[str, float | None]:
+    stock = bundle.get("stock") if isinstance(bundle.get("stock"), dict) else {}
+    technicals = bundle.get("technicals") if isinstance(bundle.get("technicals"), dict) else {}
+    history = bundle.get("history") if isinstance(bundle.get("history"), list) else []
+    today = history[-1] if history and isinstance(history[-1], dict) else {}
+    prior = history[-2] if len(history) >= 2 and isinstance(history[-2], dict) else {}
+
+    current = as_float(stock.get("price")) or as_float(today.get("close"))
+    today_change_pct = as_float(stock.get("changePct"))
+    previous_close = as_float(prior.get("close"))
+    if previous_close is None and current is not None and today_change_pct is not None and today_change_pct > -100:
+        previous_close = current / (1 + today_change_pct / 100)
+    today_change = current - previous_close if current is not None and previous_close is not None else None
+    if today_change_pct is None and today_change is not None and previous_close:
+        today_change_pct = today_change / previous_close * 100
+
+    return {
+        "todayChange": round(today_change, 4) if today_change is not None else None,
+        "todayChangePct": round(today_change_pct, 2) if today_change_pct is not None else None,
+        "previousClose": round(previous_close, 4) if previous_close is not None else None,
+        "dayOpen": as_float(today.get("open")),
+        "dayHigh": as_float(today.get("high")),
+        "dayLow": as_float(today.get("low")),
+        "currentVolume": as_float(technicals.get("currentVolume")) or as_float(today.get("volume")),
+        "averageVolume": as_float(technicals.get("avgVolume")),
+        "volumeRatio": as_float(technicals.get("volumeRatio")),
+        "rsi14": as_float(technicals.get("rsi14")),
+        "support": as_float(technicals.get("support")),
+        "resistance": as_float(technicals.get("resistance")),
+    }
+
+
+def _align_tactical_valuation_state(result: dict[str, Any], agent_id: str) -> dict[str, Any]:
+    """Keep the tactical label consistent with its objective breakout geometry.
+
+    This does not decide whether the stock is investable. It only prevents a pre-breakout WAIT
+    setup from being described as already extended beyond the same resistance level.
+    """
+    if agent_id not in {"kai", "rex"}:
+        return result
+    metrics = result.get("metrics") if isinstance(result.get("metrics"), dict) else {}
+    current = as_float(metrics.get("currentPrice"))
+    resistance = as_float(metrics.get("resistance"))
+    if current is None or resistance is None or resistance <= 0:
+        return result
+    gap_pct = (current - resistance) / resistance * 100
+    if gap_pct >= -0.75 or result.get("verdict") != "CHASING":
+        return result
+
+    agent_name = "Kai" if agent_id == "kai" else "Rex"
+    gap_text = f"{abs(gap_pct):.1f}% below resistance at {resistance:.2f}"
+    right_now = result.get("rightNow") if isinstance(result.get("rightNow"), dict) else {}
+    structure_band = result.get("structureBand") if isinstance(result.get("structureBand"), dict) else {}
+    return {
+        **result,
+        "verdict": "BUILDING",
+        "chasingAnswer": f"No. Price is still {gap_text}; the breakout has not happened.",
+        "recap": f"Not a chase yet: the setup is building {gap_text}. {agent_name} waits for price and volume confirmation.",
+        "rightNow": {
+            **right_now,
+            "action": "WAIT",
+            "note": f"Setup is building {gap_text}. Wait for a volume-backed breakout instead of entering early.",
+        },
+        "structureBand": {**structure_band, "zoneLabel": "BUILDING"},
+    }
 
 
 @router.post("/api/analysis/{symbol}/today", response_model=TodayPerformanceResponse)

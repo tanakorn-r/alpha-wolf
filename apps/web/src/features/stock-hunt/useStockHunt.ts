@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StockRecord, StrategyKey } from "../../data/market";
-import { loadDiscoveries, loadPortfolio, saveHolding, summarizeStock, type StockAnalysisResponse } from "../../lib/api";
+import { buyHolding, loadAuthUser, loadDiscoveries, summarizeStock, type StockAnalysisResponse } from "../../lib/api";
 import { formatCurrency, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
 import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useWolfStore } from "../../store/useWolfStore";
@@ -115,7 +115,9 @@ export function useStockHunt() {
   const [top5Applied, setTop5Applied] = useState<{ count: number; amount: number } | null>(null);
   const [applyingTop5, setApplyingTop5] = useState(false);
   const [applyTop5Error, setApplyTop5Error] = useState("");
+  const [signInOpen, setSignInOpen] = useState(false);
   const [discoveryReady, setDiscoveryReady] = useState(false);
+  const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
 
   useEffect(() => {
     // React Strict Mode intentionally performs a throwaway mount in development. Defer the
@@ -237,6 +239,9 @@ export function useStockHunt() {
     top5Applied,
     applyingTop5,
     applyTop5Error,
+    accountUser: authQuery.data ?? null,
+    signInOpen,
+    closeSignIn: () => setSignInOpen(false),
     analysis,
     analyzing,
     analyzingSymbol,
@@ -266,19 +271,19 @@ export function useStockHunt() {
     },
     async applyTop5() {
       if (!top5.length || applyingTop5) return;
+      if (!authQuery.data?.id) {
+        setSignInOpen(true);
+        return;
+      }
       setApplyingTop5(true);
       setApplyTop5Error("");
       try {
-        const portfolio = await loadPortfolio();
         for (const pick of top5) {
           if (!pick.item.price || pick.item.price <= 0) continue;
           // pick.amount is a USD-base budget; convert the native price so share count is right for THB.
           const price = priceToUsdBase(pick.item.price, pick.item.currency ?? pick.item.symbol);
           const boughtShares = pick.amount / price;
-          const existing = portfolio.holdings.find((holding) => holding.symbol === pick.item.symbol);
-          const totalShares = (existing?.shares ?? 0) + boughtShares;
-          const totalCost = (existing?.shares ?? 0) * (existing?.averageCost ?? 0) + pick.amount;
-          await saveHolding({ symbol: pick.item.symbol, shares: totalShares, averageCost: totalCost / totalShares, strategy: baseStrategy, monthlyDca: existing?.monthlyDca ?? 0 });
+          await buyHolding({ symbol: pick.item.symbol, shares: boughtShares, price, strategy: baseStrategy });
         }
         const amount = top5.reduce((sum, pick) => sum + pick.amount, 0);
         setTop5Applied({ count: top5.length, amount });

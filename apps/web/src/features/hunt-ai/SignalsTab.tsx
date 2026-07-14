@@ -74,6 +74,9 @@ function ValuationState({
 function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: ValuationVerdictResponse; analyzedAt: string; fetching: boolean; onRun: () => void; onOpen: () => void }) {
   const band = buildStructureBand(verdict);
   const theme = verdictTheme(verdict.verdict, verdict.rightNow.action, band.currentZone);
+  const companyLabel = verdict.name.trim().toUpperCase() === verdict.symbol.trim().toUpperCase()
+    ? verdict.symbol
+    : `${verdict.symbol} · ${verdict.name}`;
   return (
     <div className="flex flex-col gap-2.5">
       <AgentCall
@@ -81,8 +84,8 @@ function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: Val
         label="Daily valuation"
         score={verdict.rightNow.conviction}
         scoreLabel="Decision conviction"
-        signal={verdictLabel(verdict.verdict, verdict.rightNow.action, band.currentZone)}
-        headline={`${verdict.symbol} · ${verdict.name}`}
+        signal={verdictLabel(verdict.verdict, verdict.rightNow.action, band)}
+        headline={companyLabel}
         summary={verdict.recap ?? verdict.narrative ?? verdict.rightNow.note}
         accent={theme.accent}
         meta={`Cached ${formatAnalyzedAt(analyzedAt)} · supplied fundamentals only · not financial advice`}
@@ -92,11 +95,68 @@ function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: Val
           <button type="button" onClick={onOpen} className="rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2 text-[11px] font-bold text-[#bcbcc2] hover:border-[#3ecf8e]">Open stock detail</button>
         </div>
         <div className="mt-4 flex flex-col gap-2.5">
+          <TodayTape verdict={verdict} />
           <MetricGrid verdict={verdict} theme={theme} />
           <StructureBand band={band} />
           <Evidence verdict={verdict} />
         </div>
       </AgentCall>
+    </div>
+  );
+}
+
+function TodayTape({ verdict }: { verdict: ValuationVerdictResponse }) {
+  const metrics = verdict.metrics;
+  const chase = buildChaseRead(verdict);
+  const todayTone = (metrics.todayChangePct ?? 0) > 0 ? "#3ecf8e" : (metrics.todayChangePct ?? 0) < 0 ? "#f2575c" : "#ececee";
+  const rangePosition = intradayPosition(metrics.currentPrice, metrics.dayLow, metrics.dayHigh);
+  const hasTape = [metrics.todayChangePct, metrics.dayLow, metrics.dayHigh, metrics.volumeRatio, metrics.rsi14, metrics.resistance]
+    .some((value) => typeof value === "number" && Number.isFinite(value));
+
+  if (!hasTape) return null;
+
+  return (
+    <section className="rounded-[10px] border border-[#2a2a31] bg-[#111114] px-3.5 py-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-1.5">
+        <div className="text-[11px] font-bold tracking-[0.02em] text-[#ececee]">Today&apos;s price &amp; FOMO check</div>
+        <div className="font-mono text-[9.5px] text-[#5a5a62]">session move · crowd · trigger</div>
+      </div>
+      <div className="mt-2.5 grid gap-2 min-[720px]:grid-cols-2 min-[1180px]:grid-cols-4">
+        <TapeCard
+          label="Today's move"
+          value={formatNullableMoney(metrics.currentPrice, verdict.currency)}
+          note={todayMoveText(metrics.todayChange, metrics.todayChangePct, verdict.currency)}
+          color={todayTone}
+        />
+        <TapeCard
+          label="Intraday range"
+          value={rangeText(metrics.dayLow, metrics.dayHigh, verdict.currency)}
+          note={rangePosition == null ? "session range unavailable" : `${Math.round(rangePosition * 100)}% through today's range`}
+          color="#ececee"
+        />
+        <TapeCard
+          label="Crowd / volume"
+          value={metrics.volumeRatio != null ? `${metrics.volumeRatio.toFixed(2)}× normal` : "—"}
+          note={volumeText(metrics.currentVolume, metrics.averageVolume)}
+          color={volumeTone(metrics.volumeRatio)}
+        />
+        <TapeCard
+          label={`${verdict.agent?.name ?? "Agent"} chase heat`}
+          value={`${chase.score}/100 · ${chase.label}`}
+          note={chase.reason}
+          color={chase.color}
+        />
+      </div>
+    </section>
+  );
+}
+
+function TapeCard({ label, value, note, color }: { label: string; value: string; note: string; color: string }) {
+  return (
+    <div className="min-w-0 rounded-[8px] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2.5">
+      <div className="text-[9.5px] font-bold uppercase tracking-[0.05em] text-[#6f6f78]">{label}</div>
+      <div className="mt-1 font-mono text-[15px] font-bold" style={{ color }}>{value}</div>
+      <div className="mt-1 text-[10.5px] leading-[1.4] text-[#8c8c95]">{note}</div>
     </div>
   );
 }
@@ -131,7 +191,6 @@ function MetricGrid({ verdict, theme }: { verdict: ValuationVerdictResponse; the
   const bookValueInferred = metrics.bookValuePerShare == null && impliedBookValue != null;
   return (
     <div className="grid gap-2.5 min-[760px]:grid-cols-2 min-[1120px]:grid-cols-3">
-      <MetricCard label="Current price" value={formatNullableMoney(metrics.currentPrice, verdict.currency)} note={metrics.ytdPct != null ? `${signed(metrics.ytdPct)}% YTD` : "live price"} color="#ececee" />
       <MetricCard label="Trailing P / E" value={metrics.peRatio != null ? `${metrics.peRatio.toFixed(2)}x` : "—"} note="price / reported earnings" color={theme.accent} />
       <MetricCard label="Forward P / E" value={metrics.forwardPE != null ? `${metrics.forwardPE.toFixed(2)}x` : "—"} note="price / expected earnings" color={theme.accent} />
       <MetricCard label="Book value / sh" value={formatNullableMoney(impliedBookValue, verdict.currency)} note={bookValueInferred ? "implied from price ÷ P/B" : "reported fair-value anchor"} color="#ececee" />
@@ -355,7 +414,15 @@ function verdictTheme(verdict: ValuationVerdictResponse["verdict"], action?: Val
   };
 }
 
-function verdictLabel(verdict: ValuationVerdictResponse["verdict"], action?: ValuationVerdictResponse["rightNow"]["action"], zone?: StructureZone) {
+function verdictLabel(verdict: ValuationVerdictResponse["verdict"], action: ValuationVerdictResponse["rightNow"]["action"], band: StructureBandModel) {
+  const zone = band.currentZone;
+  if (band.tactical) {
+    if (zone === "deep") return "No setup · stand aside";
+    if (zone === "discount") return "Building · wait for breakout";
+    if (zone === "fair") return "At trigger · demand volume";
+    if (zone === "expensive") return "Extended · manage risk";
+    return "Chase trap · pause / skip";
+  }
   if (zone === "deep") return action === "BUY" ? "Deep value · load zone" : "Deep value · verify risk";
   if (zone === "discount") return action === "BUY" ? "DCA discount · accumulate" : "DCA discount · wait for setup";
   if (zone === "expensive") return "Expensive · wait for pullback";
@@ -412,6 +479,7 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
     const currentMeta = zoneMeta(currentZone);
 
     return {
+      tactical: false,
       scaleLabel: pbvFloor != null ? `P/BV floor ${pbvFloor.toFixed(2)}x → book 1.0x` : verdict.structureBand.zoneLabel,
       deepDiscountLeft: floorPct,
       deepDiscountWidth: Math.max(0, deepEndPct - floorPct),
@@ -443,18 +511,26 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
   const entryHigh = firstNumber(verdict.thePlay.addBackHigh, verdict.rightNow.entryOnlyAt, entry);
   const fair = firstNumber(verdict.structureBand.fairAnchor, book, now);
   const chasingVerdict = verdict.verdict === "CHASING";
+  const tacticalAgent = verdict.agent?.id === "kai" || verdict.agent?.id === "rex";
   // Tactical Agents can use entryOnlyAt as a breakout trigger ABOVE today's price. That is not a
   // value floor, so forcing it through the deep-value → chase valuation scale reverses the map and
   // piles every label on top of another. Render a setup/trigger scale for that shape instead.
-  const tacticalTrigger = chasingVerdict && now != null && entry != null && entry >= now;
+  const trigger = firstNumber(verdict.metrics.resistance, entry != null && now != null && entry >= now ? entry : null);
+  const tacticalTrigger = tacticalAgent && now != null && trigger != null;
   if (tacticalTrigger) {
-    const lo = Math.min(now, entry) * 0.96;
-    const hi = Math.max(now, entry) * 1.06;
+    const lo = Math.min(now, trigger) * 0.96;
+    const hi = Math.max(now, trigger) * 1.08;
     const nowPct = percentOnBand(now, lo, hi);
-    const triggerPct = percentOnBand(entry, lo, hi);
-    const currentZone = zoneFromCall(verdict.verdict, verdict.rightNow.action, nowPct, triggerPct);
+    const triggerPct = percentOnBand(trigger, lo, hi);
+    const currentZone = tacticalZone(now, trigger, verdict.metrics.volumeRatio);
     const currentMeta = zoneMeta(currentZone);
+    const currentLabel = currentZone === "deep" ? "NO SETUP"
+      : currentZone === "discount" ? "BUILDING"
+      : currentZone === "fair" ? "TRIGGER"
+      : currentZone === "expensive" ? "EXTENDED"
+      : "CHASE";
     return {
+      tactical: true,
       scaleLabel: `${verdict.agent?.name ?? "Agent"} setup map · trigger vs current price`,
       deepDiscountLeft: 0,
       deepDiscountWidth: 20,
@@ -473,12 +549,12 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
       chasingLabelLeft: 90,
       zoneLabels: ["NO SETUP", "BUILDING", "TRIGGER", "EXTENDED", "CHASE TRAP"] as const,
       entryPct: triggerPct,
-      entryLabel: `${moneyLabel(entry, verdict.currency)} · trigger`,
+      entryLabel: `${moneyLabel(trigger, verdict.currency)} · trigger`,
       fairPct: triggerPct,
       fairLabel: "",
       showFairMarker: false,
       nowPct,
-      nowLabel: `${currentMeta.shortLabel} ${moneyLabel(now, verdict.currency)}`,
+      nowLabel: `${currentLabel} ${moneyLabel(now, verdict.currency)}`,
       nowColor: currentMeta.color,
       currentZone,
     };
@@ -505,6 +581,7 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
   const currentMeta = zoneMeta(currentZone);
 
   return {
+    tactical: false,
     scaleLabel: pbv != null ? `P/BV now ${pbv.toFixed(2)}x · AI entry map` : verdict.structureBand.zoneLabel,
     deepDiscountLeft: entryPct,
     deepDiscountWidth: Math.max(3, deepEndPct - entryPct),
@@ -534,6 +611,116 @@ function buildStructureBand(verdict: ValuationVerdictResponse) {
 
 function formatNullableMoney(value: number | null | undefined, currency: string) {
   return typeof value === "number" && Number.isFinite(value) ? moneyLabel(value, currency) : "—";
+}
+
+function buildChaseRead(verdict: ValuationVerdictResponse) {
+  const { currentPrice, todayChangePct, dayLow, dayHigh, volumeRatio, rsi14, resistance } = verdict.metrics;
+  const agentName = verdict.agent?.name ?? "This agent";
+  const rangePosition = intradayPosition(currentPrice, dayLow, dayHigh) ?? 0.5;
+  const triggerGapPct = currentPrice != null && resistance != null && resistance > 0
+    ? ((currentPrice - resistance) / resistance) * 100
+    : null;
+  const moveHeat = clamp(Math.max(todayChangePct ?? 0, 0) * 7, 0, 28);
+  const crowdHeat = volumeRatio == null ? 0 : clamp((volumeRatio - 0.6) * 24, 0, 28);
+  const momentumHeat = rsi14 == null ? 0 : clamp((rsi14 - 55) * 1.2, 0, 22);
+  const closeHeat = clamp((rangePosition - 0.7) * 30, 0, 9);
+  const extensionHeat = triggerGapPct == null ? 0 : triggerGapPct > 0
+    ? clamp(8 + triggerGapPct * 4, 0, 30)
+    : triggerGapPct > -1.5 ? 5 : 0;
+  const score = Math.round(clamp(moveHeat + crowdHeat + momentumHeat + closeHeat + extensionHeat, 0, 100));
+  const volumeLabel = volumeRatio == null ? "volume confirmation is unavailable" : `volume is ${volumeRatio.toFixed(2)}× normal`;
+
+  if (triggerGapPct != null && triggerGapPct < -0.75) {
+    return {
+      score,
+      label: score >= 60 ? "WARM" : score >= 35 ? "WATCH" : "LOW",
+      color: score >= 60 ? "#f5c451" : "#78e6b8",
+      reason: `Not a chase yet: ${Math.abs(triggerGapPct).toFixed(1)}% below ${moneyLabel(resistance!, verdict.currency)} resistance; ${volumeLabel}.`,
+    };
+  }
+  if (triggerGapPct != null && triggerGapPct > 5) {
+    return {
+      score,
+      label: "CHASE RISK",
+      color: "#f2575c",
+      reason: `${triggerGapPct.toFixed(1)}% above resistance. ${agentName} treats that extension as FOMO unless price resets.`,
+    };
+  }
+  if (triggerGapPct != null && triggerGapPct > 0 && volumeRatio != null && volumeRatio < 0.8) {
+    return {
+      score,
+      label: "FAKEOUT RISK",
+      color: "#f2575c",
+      reason: `Above resistance, but ${volumeLabel}; a thin breakout is chase risk, not confirmation.`,
+    };
+  }
+  if (triggerGapPct != null && triggerGapPct >= -0.75 && triggerGapPct <= 1) {
+    return {
+      score,
+      label: "AT TRIGGER",
+      color: "#f5c451",
+      reason: `At the ${moneyLabel(resistance!, verdict.currency)} trigger. ${agentName} wants strong volume before calling it a real breakout.`,
+    };
+  }
+  if (triggerGapPct != null && triggerGapPct > 0) {
+    return {
+      score,
+      label: volumeRatio != null && volumeRatio >= 1.2 ? "CONFIRMED" : "EXTENDED",
+      color: volumeRatio != null && volumeRatio >= 1.2 ? "#3ecf8e" : "#ff8c91",
+      reason: `${triggerGapPct.toFixed(1)}% above resistance; ${volumeLabel}. Confirmation determines breakout versus chase.`,
+    };
+  }
+
+  return {
+    score,
+    label: score >= 70 ? "HOT" : score >= 40 ? "WATCH" : "LOW",
+    color: score >= 70 ? "#f2575c" : score >= 40 ? "#f5c451" : "#78e6b8",
+    reason: `No resistance trigger supplied. Heat uses today's move, range position, RSI, and ${volumeLabel}.`,
+  };
+}
+
+function tacticalZone(now: number, trigger: number, volumeRatio: number | null | undefined): StructureZone {
+  const gapPct = ((now - trigger) / trigger) * 100;
+  if (gapPct < -8) return "deep";
+  if (gapPct < -0.75) return "discount";
+  if (gapPct <= 1) return "fair";
+  if (gapPct > 5 || (volumeRatio != null && volumeRatio < 0.8)) return "chasing";
+  return "expensive";
+}
+
+function intradayPosition(current: number | null | undefined, low: number | null | undefined, high: number | null | undefined) {
+  if (current == null || low == null || high == null || high <= low) return null;
+  return clamp((current - low) / (high - low), 0, 1);
+}
+
+function todayMoveText(change: number | null | undefined, pct: number | null | undefined, currency: string) {
+  if (change == null && pct == null) return "daily move unavailable";
+  const changeText = change == null ? "" : `${change > 0 ? "+" : ""}${moneyLabel(change, currency)}`;
+  const pctText = pct == null ? "" : `${signed(pct)}% today`;
+  return [changeText, pctText].filter(Boolean).join(" · ");
+}
+
+function rangeText(low: number | null | undefined, high: number | null | undefined, currency: string) {
+  if (low == null || high == null) return "—";
+  return `${moneyLabel(low, currency)}–${moneyLabel(high, currency)}`;
+}
+
+function volumeText(current: number | null | undefined, average: number | null | undefined) {
+  if (current == null && average == null) return "volume unavailable";
+  if (current == null) return `normal ${compactNumber(average!)} shares`;
+  if (average == null) return `${compactNumber(current)} shares today`;
+  return `${compactNumber(current)} today vs ${compactNumber(average)} normal`;
+}
+
+function volumeTone(ratio: number | null | undefined) {
+  if (ratio == null) return "#8c8c95";
+  if (ratio >= 1.5) return "#3ecf8e";
+  if (ratio < 0.8) return "#f2575c";
+  return "#f5c451";
+}
+
+function compactNumber(value: number) {
+  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
 function signed(value: number) {
@@ -570,9 +757,9 @@ function zoneIndex(zone: StructureZone): number {
   return ZONE_ORDER.indexOf(zone);
 }
 
-// The zone is the AI's call, not geometry. Whatever the agent decided (its verdict + right-now
-// action) is the single source of truth for the badge, colors, and the marker — so "wait" can
-// never render under a green "discount" badge again.
+// Strategic valuation zones follow the Agent's call. Tactical Kai/Rex setup maps are handled
+// separately from actual price-vs-resistance geometry, because BUILDING and CHASING describe
+// opposite sides of the trigger.
 function zoneFromCall(
   verdict: ValuationVerdictResponse["verdict"],
   action: ValuationVerdictResponse["rightNow"]["action"],

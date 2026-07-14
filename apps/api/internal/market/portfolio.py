@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 
 from internal.market.records import build_entry_from_info, fetch_record_from_ticker, merge_ticker_info
-from internal.store.portfolio import list_dca_orders, list_holdings
+from internal.store.portfolio import list_dca_orders, list_holdings, list_transactions
 from internal.store.utils import as_float, coerce_iso_date
 from internal.yahoo.client import fetch_dividends, fetch_history, load_ticker_modules, quote_snapshot_meta, ticker as make_ticker
 from models import IncomeEvent, PortfolioDashboard, PortfolioMarker, PortfolioPoint, PortfolioSummary
@@ -32,8 +32,34 @@ def _to_base_series(series: pd.Series, currency: str | None) -> pd.Series:
 def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
     holdings = list_holdings(user_id)
     orders = list_dca_orders(user_id)
+    transactions = list_transactions(user_id)
+    realized_gain_loss = sum(float(item.realizedPnl or 0) for item in transactions if item.kind == "SELL")
+    gross_invested = sum(float(item.amount or 0) for item in transactions if item.kind == "BUY")
+    ledger_cash, net_contributions = _cash_ledger(transactions)
+    transactions_by_symbol: dict[str, list[Any]] = {}
+    for transaction in transactions:
+        transactions_by_symbol.setdefault(transaction.symbol, []).append(transaction)
+    active_symbols = {holding.symbol for holding in holdings}
+    closed_dividends_ytd = _closed_position_dividends(transactions_by_symbol, active_symbols)
     if not holdings:
-        return PortfolioDashboard(dcaOrders=orders, markers=[PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders])
+        cash_balance = ledger_cash + closed_dividends_ytd
+        total_return = cash_balance - net_contributions
+        return PortfolioDashboard(
+            summary=PortfolioSummary(
+                totalValue=round(cash_balance, 2),
+                gainLoss=round(total_return, 2),
+                gainLossPct=round((total_return / net_contributions) * 100, 2) if net_contributions else 0,
+                dividendsYtd=round(closed_dividends_ytd, 2),
+                realizedGainLoss=round(realized_gain_loss, 2),
+                totalReturn=round(total_return, 2),
+                grossInvested=round(gross_invested, 2),
+                netContributions=round(net_contributions, 2),
+                cashBalance=round(cash_balance, 2),
+            ),
+            dcaOrders=orders,
+            markers=[PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
+            transactions=transactions,
+        )
 
     # Each holding's market data is an independent set of cache/yfinance round trips — a
     # sequential loop pays for every holding back-to-back, which compounds badly on any cache
@@ -44,15 +70,16 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
 
     rows: list[dict[str, object]] = []
     invested = 0.0
-    total_value = 0.0
-    dividends_ytd = 0.0
+    securities_value = 0.0
+    dividends_ytd = closed_dividends_ytd
     annual_income = 0.0
-    histories: list[tuple[float, float, pd.Series]] = []
+    histories: list[tuple[list[Any], pd.Series]] = []
     income_events: list[IncomeEvent] = []
     buy_markers: list[PortfolioMarker] = []
 
     for holding, data in zip(holdings, live, strict=True):
         record, history, info, paid_dividends = data
+        symbol_transactions = transactions_by_symbol.get(holding.symbol, [])
         currency = record.get("currency")
         # A brand-new holding may render before its first quote snapshot arrives. Cost basis is the
         # honest non-live placeholder; zero would fabricate a -100% loss until the quote overlay.
@@ -60,29 +87,47 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
         value = holding.shares * price_base
         cost = holding.shares * holding.averageCost
         invested += cost
-        total_value += value
-        dividends_ytd += holding.shares * _to_base(paid_dividends, currency)
+        securities_value += value
+        dividends_ytd += _to_base(_dividends_for_transactions(paid_dividends, symbol_transactions), currency)
         annual_income += holding.shares * _to_base(as_float(info.get("dividendRate")) or 0.0, currency)
-        purchase_date = _iso_date(holding.createdAt)
+        purchase_date = _first_buy_date(symbol_transactions) or _iso_date(holding.createdAt)
         closes = _to_base_series(
             _close_series(history, since=purchase_date, current_price=float(record["price"]) if record.get("price") else None),
             currency,
         )
         if not closes.empty:
-            histories.append((holding.shares, cost, closes))
+            histories.append((symbol_transactions, closes))
         rows.append({**holding.model_dump(), **record, "value": round(value, 2), "cost": round(cost, 2), "gainLoss": round(value - cost, 2), "gainLossPct": round(((value - cost) / cost) * 100, 2) if cost else 0})
         income_events.extend(_income_events(holding.symbol, holding.shares, info))
-        if purchase_date:
-            buy_markers.append(PortfolioMarker(date=purchase_date, symbol=holding.symbol, amount=round(cost, 2)))
+        for transaction in symbol_transactions:
+            if transaction.kind == "BUY":
+                buy_markers.append(PortfolioMarker(date=transaction.occurredAt[:10], symbol=holding.symbol, amount=round(transaction.amount, 2)))
 
-    gain_loss = total_value - invested
+    cash_balance = ledger_cash + dividends_ytd
+    total_value = securities_value + cash_balance
+    unrealized_gain_loss = securities_value - invested
+    total_return = unrealized_gain_loss + realized_gain_loss + dividends_ytd
     return PortfolioDashboard(
-        summary=PortfolioSummary(totalValue=round(total_value, 2), invested=round(invested, 2), gainLoss=round(gain_loss, 2), gainLossPct=round((gain_loss / invested) * 100, 2) if invested else 0, dividendsYtd=round(dividends_ytd, 2), forwardYield=round((annual_income / total_value) * 100, 2) if total_value else 0),
+        summary=PortfolioSummary(
+            totalValue=round(total_value, 2),
+            invested=round(invested, 2),
+            gainLoss=round(total_return, 2),
+            gainLossPct=round((total_return / net_contributions) * 100, 2) if net_contributions else 0,
+            dividendsYtd=round(dividends_ytd, 2),
+            forwardYield=round((annual_income / securities_value) * 100, 2) if securities_value else 0,
+            unrealizedGainLoss=round(unrealized_gain_loss, 2),
+            realizedGainLoss=round(realized_gain_loss, 2),
+            totalReturn=round(total_return, 2),
+            grossInvested=round(gross_invested, 2),
+            netContributions=round(net_contributions, 2),
+            cashBalance=round(cash_balance, 2),
+        ),
         holdings=rows,
         dcaOrders=orders,
         chart=_portfolio_chart(histories),
         markers=buy_markers + [PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
         incomeEvents=sorted(income_events, key=lambda item: item.date),
+        transactions=transactions,
     )
 
 
@@ -128,8 +173,64 @@ def _load_holding_market_data(holding):
     # Only count dividends whose ex-date fell on/after purchase — a position bought today has
     # not earned any dividend yet; it accrues once an ex-date passes while the stock is held.
     dividends = fetch_dividends(ticker, period="ytd")
-    accrued = _dividends_since(dividends, _iso_date(holding.createdAt))
-    return record, history, info, accrued
+    return record, history, info, dividends
+
+
+def _first_buy_date(transactions: list[Any]) -> str | None:
+    dates = [item.occurredAt[:10] for item in transactions if item.kind == "BUY"]
+    return min(dates) if dates else None
+
+
+def _dividends_for_transactions(dividends: pd.Series | None, transactions: list[Any]) -> float:
+    if dividends is None or dividends.empty:
+        return 0.0
+    total = 0.0
+    ordered = sorted(transactions, key=lambda item: (item.occurredAt, item.id))
+    for timestamp, dividend_per_share in dividends.items():
+        event_date = pd.Timestamp(timestamp).date()
+        shares = 0.0
+        for transaction in ordered:
+            transaction_date = datetime.fromisoformat(transaction.occurredAt.replace("Z", "+00:00")).date()
+            if transaction_date > event_date:
+                break
+            if transaction.kind == "BUY":
+                shares += transaction.shares
+            elif transaction.kind == "SELL":
+                shares -= transaction.shares
+        total += max(0.0, shares) * float(dividend_per_share)
+    return total
+
+
+def _closed_position_dividends(transactions_by_symbol: dict[str, list[Any]], active_symbols: set[str]) -> float:
+    closed_symbols = [symbol for symbol in transactions_by_symbol if symbol not in active_symbols]
+    if not closed_symbols:
+        return 0.0
+
+    def load(symbol: str) -> tuple[str, pd.Series]:
+        return symbol, fetch_dividends(make_ticker(symbol), period="ytd")
+
+    total = 0.0
+    with ThreadPoolExecutor(max_workers=min(6, len(closed_symbols))) as pool:
+        for symbol, dividends in pool.map(load, closed_symbols):
+            native_total = _dividends_for_transactions(dividends, transactions_by_symbol[symbol])
+            total += _to_base(native_total, "THB" if symbol.endswith(".BK") else "USD")
+    return total
+
+
+def _cash_ledger(transactions: list[Any]) -> tuple[float, float]:
+    cash = 0.0
+    contributions = 0.0
+    for transaction in sorted(transactions, key=lambda item: (item.occurredAt, item.id)):
+        amount = float(transaction.amount or 0)
+        if transaction.kind == "BUY":
+            used_cash = min(cash, amount)
+            cash -= used_cash
+            contributions += amount - used_cash
+        elif transaction.kind in {"SELL", "DIVIDEND"}:
+            cash += amount
+        elif transaction.kind == "FEE":
+            cash -= amount
+    return cash, contributions
 
 
 def _dividends_since(dividends: pd.Series | None, since_iso: str | None) -> float:
@@ -161,20 +262,31 @@ def _close_series(history: pd.DataFrame, since: str | None = None, current_price
     return closes
 
 
-def _portfolio_chart(histories: list[tuple[float, float, pd.Series]]) -> list[PortfolioPoint]:
+def _portfolio_chart(histories: list[tuple[list[Any], pd.Series]]) -> list[PortfolioPoint]:
     if not histories:
         return []
-    value_frame = pd.concat([series.rename(str(index)) * shares for index, (shares, _cost, series) in enumerate(histories)], axis=1).sort_index().ffill().fillna(0.0)
-    if value_frame.empty:
+    all_index = pd.concat([series.rename(str(index)) for index, (_transactions, series) in enumerate(histories)], axis=1).sort_index().index
+    if all_index.empty:
         return []
-    value_series = value_frame.sum(axis=1)
-
-    cost_series = pd.Series(0.0, index=value_series.index)
-    for _shares, cost, series in histories:
-        if series.empty:
-            continue
-        start_date = series.index.min().date()
-        cost_series[[ts.date() >= start_date for ts in cost_series.index]] += cost
+    value_series = pd.Series(0.0, index=all_index)
+    cost_series = pd.Series(0.0, index=all_index)
+    for transactions, closes in histories:
+        aligned_closes = closes.reindex(all_index).ffill()
+        shares_path = pd.Series(0.0, index=all_index)
+        position_cost_path = pd.Series(0.0, index=all_index)
+        for transaction in transactions:
+            if transaction.kind not in {"BUY", "SELL"}:
+                continue
+            event_date = datetime.fromisoformat(transaction.occurredAt.replace("Z", "+00:00")).date()
+            mask = [timestamp.date() >= event_date for timestamp in all_index]
+            if transaction.kind == "BUY":
+                shares_path[mask] += transaction.shares
+                position_cost_path[mask] += float(transaction.costBasis or transaction.amount or 0)
+            else:
+                shares_path[mask] -= transaction.shares
+                position_cost_path[mask] -= float(transaction.costBasis or 0)
+        value_series += (aligned_closes * shares_path).fillna(0.0)
+        cost_series += position_cost_path.clip(lower=0.0)
 
     sampled_index = value_series.index[:: max(1, len(value_series) // 80)]
     return [PortfolioPoint(date=index.date().isoformat(), value=round(float(value_series.loc[index]), 2), cost=round(float(cost_series.loc[index]), 2)) for index in sampled_index]

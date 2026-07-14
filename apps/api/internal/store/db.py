@@ -312,6 +312,47 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
     else:
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_holdings_user_symbol ON holdings(user_id, symbol)")
 
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            shares REAL NOT NULL DEFAULT 0,
+            price REAL NOT NULL DEFAULT 0,
+            amount REAL NOT NULL DEFAULT 0,
+            fees REAL NOT NULL DEFAULT 0,
+            cost_basis REAL,
+            realized_pnl REAL,
+            occurred_at TEXT NOT NULL,
+            source TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_user_time ON portfolio_transactions(user_id, occurred_at, id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_user_symbol ON portfolio_transactions(user_id, symbol, occurred_at, id)")
+    # Existing aggregate positions become explicit opening lots once. This preserves every account
+    # while making future buys and sells auditable; anonymous legacy rows remain inaccessible.
+    db.execute(
+        """
+        INSERT INTO portfolio_transactions(
+            user_id, symbol, kind, shares, price, amount, fees, cost_basis,
+            realized_pnl, occurred_at, source, created_at
+        )
+        SELECT h.user_id, h.symbol, 'BUY', h.shares, h.average_cost,
+               h.shares * h.average_cost, 0, h.shares * h.average_cost,
+               NULL, h.created_at, 'OPENING_BALANCE', h.created_at
+        FROM holdings h
+        WHERE h.user_id > 0
+          AND NOT EXISTS (
+              SELECT 1 FROM portfolio_transactions t
+              WHERE t.user_id = h.user_id AND t.symbol = h.symbol
+          )
+        """
+    )
+
     order_columns = _table_columns(db, "dca_orders")
     if "user_id" not in order_columns:
         db.execute("ALTER TABLE dca_orders RENAME TO dca_orders_legacy")

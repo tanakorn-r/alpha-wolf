@@ -7,9 +7,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import HTTPException
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.store import entitlements
+from routes import auth
 
 
 class StripeCreditsTests(unittest.TestCase):
@@ -39,6 +42,71 @@ class StripeCreditsTests(unittest.TestCase):
             self.assertFalse(second_granted)
             self.assertEqual(first["aiUsage"]["bonus"], 25)
             self.assertEqual(second["aiUsage"]["bonus"], 25)
+
+    def test_checkout_fulfillment_requires_paid_payment_for_the_same_user(self) -> None:
+        session = {
+            "id": "cs_test_valid",
+            "mode": "payment",
+            "client_reference_id": "7",
+            "payment_status": "paid",
+            "amount_total": 299,
+            "currency": "usd",
+            "metadata": {"user_id": "7", "credits": "25"},
+        }
+        with patch.object(auth, "fulfill_stripe_ai_credits") as fulfill:
+            auth._fulfill_checkout_session(session, event_key="evt_valid", expected_user_id=7)
+
+        fulfill.assert_called_once_with(
+            7,
+            25,
+            event_key="evt_valid",
+            session_id="cs_test_valid",
+            amount_total=299,
+            currency="usd",
+        )
+
+    def test_checkout_fulfillment_rejects_a_mismatched_client_reference(self) -> None:
+        session = {
+            "id": "cs_test_wrong_user",
+            "mode": "payment",
+            "client_reference_id": "8",
+            "payment_status": "paid",
+            "amount_total": 299,
+            "currency": "usd",
+            "metadata": {"user_id": "7", "credits": "25"},
+        }
+        with self.assertRaises(HTTPException) as raised:
+            auth._fulfill_checkout_session(session, event_key="evt_wrong_user", expected_user_id=7)
+        self.assertEqual(raised.exception.status_code, 400)
+
+    def test_dashboard_price_id_is_used_when_configured(self) -> None:
+        with patch.dict("os.environ", {"STRIPE_PRICE_25": "price_test_25"}):
+            line_item = auth._checkout_line_item(auth.CREDIT_PACKS[25])
+        self.assertEqual(line_item, {"price": "price_test_25", "quantity": 1})
+
+    def test_dynamic_price_is_used_without_dashboard_price_id(self) -> None:
+        with patch.dict("os.environ", {}, clear=False):
+            with patch.dict("os.environ", {"STRIPE_PRICE_25": ""}):
+                line_item = auth._checkout_line_item(auth.CREDIT_PACKS[25])
+        self.assertEqual(line_item["price_data"]["unit_amount"], 299)
+        self.assertEqual(line_item["price_data"]["currency"], "usd")
+
+    def test_checkout_returns_to_the_page_that_started_the_purchase(self) -> None:
+        url = auth._checkout_return_url(
+            "http://localhost:4200",
+            "/scanner?kind=stable#results",
+            status="success",
+            session_id="{CHECKOUT_SESSION_ID}",
+        )
+        self.assertEqual(
+            url,
+            "http://localhost:4200/scanner?kind=stable&credit_purchase=success&session_id={CHECKOUT_SESSION_ID}#results",
+        )
+
+    def test_checkout_rejects_an_external_return_url(self) -> None:
+        with self.assertRaises(HTTPException) as raised:
+            auth._checkout_return_url("http://localhost:4200", "//attacker.example/receipt", status="success")
+        self.assertEqual(raised.exception.status_code, 400)
 
 
 if __name__ == "__main__":

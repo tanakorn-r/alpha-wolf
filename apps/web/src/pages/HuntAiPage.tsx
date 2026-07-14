@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { ErrorCard } from "../components/ui/panels";
+import { GoogleAccountModal } from "../components/auth/GoogleAccount";
 import { AnalystTab } from "../features/hunt-ai/AnalystTab";
 import { BuyTimingTab } from "../features/hunt-ai/BuyTimingTab";
 import { BacktradeTab } from "../features/hunt-ai/BacktradeTab";
@@ -21,12 +22,13 @@ export function HuntAiPage() {
   const queryTab = searchParams.get("tab") as HuntTab | null;
 
   useEffect(() => {
-    if (queryTab && validTabs.has(queryTab) && hunt.tab !== queryTab) hunt.setTab(queryTab);
-  }, [hunt, queryTab]);
+    if (queryTab && validTabs.has(queryTab) && hunt.tab !== queryTab) hunt.syncTab(queryTab);
+  }, [hunt.tab, hunt.syncTab, queryTab]);
 
   return (
     <section className="flex flex-col gap-3 text-[#ececee]">
       <ProPromoBanner open={hunt.trialModalOpen} signedIn={hunt.signedIn} onClose={hunt.closeTrialModal} onRedeem={hunt.redeemPremium} redeeming={hunt.redeemingPremium} />
+      {hunt.accountSignInOpen ? <GoogleAccountModal user={hunt.accountUser} onClose={hunt.closeAccountSignIn} /> : null}
       <WatchlistBar hunt={hunt} />
       <HuntTabsBar hunt={hunt} />
       {hunt.tab === "signals" ? <SignalsTab hunt={hunt} /> : null}

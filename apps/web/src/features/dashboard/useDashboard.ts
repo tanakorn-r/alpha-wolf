@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { deleteHolding, loadAuthUser, loadPortfolio, loadPortfolioQuotes, loadPortfolioReview, saveHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
+import { buyHolding, loadAuthUser, loadPortfolio, loadPortfolioQuotes, loadPortfolioReview, sellHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 import { priceToUsdBase } from "../../lib/format";
+import { localDateKey } from "../../lib/date";
 
 export type Dashboard = ReturnType<typeof useDashboard>;
 
@@ -20,9 +21,11 @@ export function useDashboard() {
   const [analysis, setAnalysis] = useState<PortfolioReviewResponse | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [sellTarget, setSellTarget] = useState<PortfolioHolding | null>(null);
+  const [sellValue, setSellValue] = useState({ shares: "", price: "", fees: "0", occurredAt: localDateKey() });
   const [selling, setSelling] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [formValue, setFormValue] = useState({ symbol: "", shares: "", averageCost: "" });
+  const [signInOpen, setSignInOpen] = useState(false);
+  const [formValue, setFormValue] = useState({ symbol: "", shares: "", averageCost: "", fees: "0", occurredAt: localDateKey() });
   const [formSaving, setFormSaving] = useState(false);
 
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
@@ -72,10 +75,15 @@ export function useDashboard() {
         gainLossPct: holding.cost > 0 ? (gainLoss / holding.cost) * 100 : 0,
       };
     });
-    const totalValue = holdings.reduce((sum, holding) => sum + holding.value, 0);
+    const securitiesValue = holdings.reduce((sum, holding) => sum + holding.value, 0);
+    const totalValue = securitiesValue + (savedPortfolio.summary.cashBalance ?? 0);
     const invested = holdings.reduce((sum, holding) => sum + holding.cost, 0);
-    const priorAnnualIncome = savedPortfolio.summary.totalValue * savedPortfolio.summary.forwardYield / 100;
-    const today = new Date().toISOString().slice(0, 10);
+    const unrealizedGainLoss = securitiesValue - invested;
+    const realizedGainLoss = savedPortfolio.summary.realizedGainLoss ?? 0;
+    const totalReturn = unrealizedGainLoss + realizedGainLoss + savedPortfolio.summary.dividendsYtd;
+    const savedSecuritiesValue = savedPortfolio.holdings.reduce((sum, holding) => sum + holding.value, 0);
+    const priorAnnualIncome = savedSecuritiesValue * savedPortfolio.summary.forwardYield / 100;
+    const today = localDateKey();
     const chart = [...savedPortfolio.chart];
     const livePoint = { date: today, value: totalValue, cost: invested };
     if (chart.at(-1)?.date === today) chart[chart.length - 1] = livePoint;
@@ -88,9 +96,12 @@ export function useDashboard() {
         ...savedPortfolio.summary,
         totalValue,
         invested,
-        gainLoss: totalValue - invested,
-        gainLossPct: invested > 0 ? ((totalValue - invested) / invested) * 100 : 0,
-        forwardYield: totalValue > 0 ? (priorAnnualIncome / totalValue) * 100 : 0,
+        gainLoss: totalReturn,
+        gainLossPct: savedPortfolio.summary.netContributions > 0 ? (totalReturn / savedPortfolio.summary.netContributions) * 100 : 0,
+        unrealizedGainLoss,
+        realizedGainLoss,
+        totalReturn,
+        forwardYield: securitiesValue > 0 ? (priorAnnualIncome / securitiesValue) * 100 : 0,
       },
     };
   }, [quotesQuery.data?.quotes, savedPortfolio]);
@@ -99,10 +110,11 @@ export function useDashboard() {
     if (portfolio) setPortfolioSummary(portfolio.summary.totalValue, portfolio.summary.gainLossPct);
   }, [portfolio, setPortfolioSummary]);
 
-  const todayKey = new Date().toISOString().slice(0, 10);
+  const todayKey = localDateKey();
   const hasHoldings = (portfolio?.holdings.length ?? 0) > 0;
   const hasPlan = (portfolio?.dcaOrders.length ?? 0) > 0;
   const hasIncome = (portfolio?.incomeEvents.length ?? 0) > 0;
+  const hasTransactions = (portfolio?.transactions.length ?? 0) > 0;
 
   const reviewCacheKey = `${accountScope}:${PORTFOLIO_REVIEW_CACHE_VERSION}:portfolio-review:${activeAgentId}`;
   const reviewCached = getHuntAiCache<PortfolioReviewResponse>(reviewCacheKey);
@@ -132,17 +144,22 @@ export function useDashboard() {
   return {
     portfolio,
     summary: portfolio?.summary,
-    firstBuyDate: portfolio?.markers[0]?.date ?? portfolio?.chart[0]?.date,
+    firstBuyDate: portfolio?.transactions.filter((item) => item.kind === "BUY").map((item) => item.occurredAt.slice(0, 10)).sort()[0] ?? portfolio?.chart[0]?.date,
     todayKey,
     hasHoldings,
     hasPlan,
     hasIncome,
-    showEmptyHero: (!hasHoldings && !hasPlan) || !portfolio,
+    hasTransactions,
+    showEmptyHero: (!hasHoldings && !hasPlan && !hasTransactions) || !portfolio,
     isSkeleton: authQuery.isPending || (Boolean(authQuery.data?.id) && portfolioQuery.isPending && !portfolio),
     isError: portfolioQuery.isError,
     isFetching: portfolioQuery.isFetching || quotesQuery.isFetching,
     quotesUpdating: quotesQuery.isFetching,
     actionError,
+    accountUser: authQuery.data ?? null,
+    signedIn: Boolean(authQuery.data?.id),
+    signInOpen,
+    closeSignIn: () => setSignInOpen(false),
     activeAgentId,
     analysis: review,
     analyzing,
@@ -151,15 +168,34 @@ export function useDashboard() {
     openDetail,
     refresh,
     askAi,
-    startSell(holding: PortfolioHolding) { setSellTarget(holding); },
+    startSell(holding: PortfolioHolding) {
+      setSellTarget(holding);
+      setActionError("");
+      setSellValue({ shares: String(holding.shares), price: String(holding.price), fees: "0", occurredAt: localDateKey() });
+    },
     cancelSell() { setSellTarget(null); },
+    sellForm: {
+      value: sellValue,
+      set(field: keyof typeof sellValue, value: string) { setSellValue((current) => ({ ...current, [field]: value })); },
+    },
     async confirmSell() {
       if (!sellTarget) return;
+      const shares = Number(sellValue.shares);
+      const price = priceToUsdBase(Number(sellValue.price), sellTarget.currency ?? sellTarget.symbol);
+      const fees = priceToUsdBase(Number(sellValue.fees || 0), sellTarget.currency ?? sellTarget.symbol);
+      const fullSaleTolerance = Math.max(1e-8, Math.abs(sellTarget.shares) * 1e-10);
+      const normalizedShares = Math.abs(shares - sellTarget.shares) <= fullSaleTolerance ? sellTarget.shares : shares;
+      if (!(normalizedShares > 0) || normalizedShares > sellTarget.shares + fullSaleTolerance || !(price > 0) || fees < 0) {
+        setActionError("Enter a valid share quantity, execution price, and fee.");
+        return;
+      }
       setSelling(true);
       try {
-        await deleteHolding(sellTarget.symbol);
+        await sellHolding(sellTarget.symbol, { shares: normalizedShares, price, fees, occurredAt: sellValue.occurredAt });
         setSellTarget(null);
         refresh();
+      } catch (error) {
+        setActionError(error instanceof Error ? error.message : "Could not remove this holding.");
       } finally {
         setSelling(false);
       }
@@ -173,7 +209,13 @@ export function useDashboard() {
       open: formOpen,
       value: formValue,
       saving: formSaving,
-      show() { setFormOpen(true); },
+      show() {
+        if (!authQuery.data?.id) {
+          setSignInOpen(true);
+          return;
+        }
+        setFormOpen(true);
+      },
       hide() { setFormOpen(false); },
       set(field: keyof typeof formValue, value: string) { setFormValue((current) => ({ ...current, [field]: value })); },
       async submit() {
@@ -181,24 +223,25 @@ export function useDashboard() {
         const boughtShares = Number(formValue.shares);
         // The user types the price in the stock's native currency (THB for .BK); the store is USD base.
         const price = priceToUsdBase(Number(formValue.averageCost), symbol);
-        if (!symbol || !(boughtShares > 0) || !(price > 0)) return;
+        const fees = priceToUsdBase(Number(formValue.fees || 0), symbol);
+        if (!symbol || !(boughtShares > 0) || !(price > 0) || fees < 0) return;
         setFormSaving(true);
         try {
-          // Adding more of a stock already held averages into the existing position;
-          // a fresh symbol just records the buy as-is.
           const existing = portfolio?.holdings.find((holding) => holding.symbol === symbol);
-          const totalShares = (existing?.shares ?? 0) + boughtShares;
-          const totalCost = (existing?.shares ?? 0) * (existing?.averageCost ?? 0) + boughtShares * price;
-          await saveHolding({
+          await buyHolding({
             symbol,
-            shares: totalShares,
-            averageCost: totalCost / totalShares,
+            shares: boughtShares,
+            price,
+            fees,
+            occurredAt: formValue.occurredAt,
             monthlyDca: existing?.monthlyDca ?? 0,
             strategy: existing?.strategy ?? "stable_dca",
           });
           setFormOpen(false);
-          setFormValue({ symbol: "", shares: "", averageCost: "" });
+          setFormValue({ symbol: "", shares: "", averageCost: "", fees: "0", occurredAt: localDateKey() });
           refresh();
+        } catch (error) {
+          setActionError(error instanceof Error ? error.message : "Could not save this holding.");
         } finally {
           setFormSaving(false);
         }

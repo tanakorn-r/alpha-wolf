@@ -6,11 +6,13 @@ import { AgentByline } from "../../components/agents/AgentByline";
 import { AgentRecap } from "../../components/agents/AgentRecap";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { GoogleAccountModal } from "../../components/auth/GoogleAccount";
 import { Modal } from "../../components/ui/Modal";
+import { lockBodyScroll } from "../../lib/bodyScrollLock";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
 import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
-import { loadAgents, loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, saveHolding, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
+import { buyHolding, loadAgents, loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
 import { negative, positive } from "../../lib/ui";
 import { useWolfStore } from "../../store/useWolfStore";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
@@ -45,6 +47,7 @@ export function StockDetailDrawer() {
   const [market, setMarket] = useState<MarketComparisonResponse | null>(null);
   const [addStatus, setAddStatus] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [signInOpen, setSignInOpen] = useState(false);
   const [addShares, setAddShares] = useState("");
   const [addPrice, setAddPrice] = useState("");
   const [pendingTimedOut, setPendingTimedOut] = useState(false);
@@ -75,14 +78,11 @@ export function StockDetailDrawer() {
       if (!(Number(addPrice) > 0)) throw new Error("Enter the price you paid.");
       // The price is in the stock's native currency (THB for .BK); the store keeps USD base.
       const price = priceToUsdBase(Number(addPrice), detail.stock.currency ?? detail.stock.symbol);
-      const portfolio = planQuery.data ?? await loadPortfolio();
-      const existing = portfolio.holdings.find((holding) => holding.symbol === detail.stock.symbol);
-      const totalShares = (existing?.shares ?? 0) + boughtShares;
-      const totalCost = (existing?.shares ?? 0) * (existing?.averageCost ?? 0) + price * boughtShares;
-      return saveHolding({
+      const existing = planQuery.data?.holdings.find((holding) => holding.symbol === detail.stock.symbol);
+      return buyHolding({
         symbol: detail.stock.symbol,
-        shares: totalShares,
-        averageCost: totalCost / totalShares,
+        shares: boughtShares,
+        price,
         strategy: existing?.strategy ?? selectedStrategy,
         monthlyDca: existing?.monthlyDca ?? 0,
       });
@@ -101,6 +101,10 @@ export function StockDetailDrawer() {
   });
 
   function openAddForm() {
+    if (!authQuery.data?.id) {
+      setSignInOpen(true);
+      return;
+    }
     setAddStatus("");
     setAddShares("");
     setAddPrice(detail && Number.isFinite(detail.stock.price) && detail.stock.price > 0 ? String(detail.stock.price) : "");
@@ -138,11 +142,10 @@ export function StockDetailDrawer() {
 
   useEffect(() => {
     if (!detailOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const unlockBodyScroll = lockBodyScroll();
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeDetail(); };
     window.addEventListener("keydown", closeOnEscape);
-    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener("keydown", closeOnEscape); };
+    return () => { unlockBodyScroll(); window.removeEventListener("keydown", closeOnEscape); };
   }, [detailOpen, closeDetail]);
 
   async function analyze() {
@@ -191,6 +194,7 @@ export function StockDetailDrawer() {
 
   return (
     <>
+      {signInOpen ? <GoogleAccountModal user={authQuery.data ?? null} onClose={() => setSignInOpen(false)} /> : null}
       <button type="button" aria-label="Close stock detail" onClick={closeDetail} className={`aw-overlay fixed inset-0 z-30 bg-slate-900/30 transition-opacity ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} />
       <aside ref={drawerRef} onClick={closeDetail} className={`aw-drawer fixed inset-0 z-40 flex items-end justify-center overflow-hidden px-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-opacity min-[720px]:items-start min-[720px]:overflow-y-auto min-[720px]:px-6 min-[720px]:py-8 ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} aria-label="Stock detail panel">
         <div onClick={(event) => event.stopPropagation()} className="aw-detail-panel relative flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-w-0 w-full max-w-[1040px] flex-col overflow-hidden rounded-t-[var(--aw-radius-frame)] border border-[#2a2a31] bg-[#0e0e10] shadow-[0_30px_90px_rgba(0,0,0,.55)] min-[720px]:max-h-none min-[720px]:rounded-[var(--aw-radius-frame)]">

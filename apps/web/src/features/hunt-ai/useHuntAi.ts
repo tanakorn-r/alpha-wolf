@@ -54,6 +54,7 @@ export function useHuntAi() {
   const queryClient = useQueryClient();
   const [tab, setTabState] = useState<HuntTab>("signals");
   const [trialModalOpen, setTrialModalOpen] = useState(false);
+  const [accountSignInOpen, setAccountSignInOpen] = useState(false);
   const [selectedTicker, setSelectedTicker] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [addQuery, setAddQuery] = useState("");
@@ -106,11 +107,19 @@ export function useHuntAi() {
   const addWatchlistMutation = useMutation({
     mutationFn: addPortfolioWatchlistSymbols,
     onSuccess: (nextSymbols) => queryClient.setQueryData(["portfolio-watchlist", accountScope], nextSymbols),
+    onError: (error, addedSymbols) => {
+      queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => current.filter((symbol) => !addedSymbols.includes(symbol)));
+      setAiError(error instanceof Error ? error.message : "Could not save this asset to your watchlist.");
+    },
   });
   const removeWatchlistMutation = useMutation({
     mutationFn: deletePortfolioWatchlistSymbol,
     onSuccess: (_data, removedSymbol) => {
       queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => current.filter((symbol) => symbol !== removedSymbol));
+    },
+    onError: (error, removedSymbol) => {
+      queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => Array.from(new Set([...current, removedSymbol])));
+      setAiError(error instanceof Error ? error.message : "Could not remove this asset from your watchlist.");
     },
   });
   const holdingSymbols = portfolioQuery.data?.holdings.map((holding) => holding.symbol) ?? [];
@@ -163,12 +172,12 @@ export function useHuntAi() {
   });
   const addResults = (addQueryResult.data?.live ?? []).filter((item) => !symbols.includes(item.symbol));
   const valuationQuery = useQuery({
-    queryKey: ["hunt-valuation-verdict", "character-quote-v5", activeTicker, activeAgentId, valuationRunKey],
+    queryKey: ["hunt-valuation-verdict", "character-quote-v6-today-tape", activeTicker, activeAgentId, valuationRunKey],
     queryFn: () => loadValuationVerdict(activeTicker, "stable_dca", activeAgentId, true),
     staleTime: 900_000,
     enabled: tab === "signals" && Boolean(activeTicker) && valuationRunKey > 0 && valuationSyncTicker === activeTicker,
   });
-  const valuationCacheKey = `${accountScope}:character-quote-v5:${AGENT_REASONING_CACHE_VERSION}:signals:${activeTicker}:stable_dca:${activeAgentId}`;
+  const valuationCacheKey = `${accountScope}:character-quote-v6-today-tape:${AGENT_REASONING_CACHE_VERSION}:signals:${activeTicker}:stable_dca:${activeAgentId}`;
   const valuationCached = getHuntAiCache<ValuationVerdictResponse>(valuationCacheKey);
   const valuationDone =
     valuationRunKey > 0 &&
@@ -293,15 +302,24 @@ export function useHuntAi() {
     if (premiumTabs.has(next) && !premium) setTrialModalOpen(true);
   }
 
+  function syncTab(next: HuntTab) {
+    setAiError("");
+    setTabState(next);
+  }
+
   return {
     tab,
     setTab,
+    syncTab,
     premium,
     trialModalOpen,
     closeTrialModal: () => setTrialModalOpen(false),
     aiUsage: authQuery.data?.aiUsage ?? { period: "", used: 0, limit: premium ? 100 : 3, remaining: premium ? 100 : 3 },
     premiumExpiresAt: authQuery.data?.premiumExpiresAt ?? null,
     signedIn: authenticated,
+    accountUser: authQuery.data ?? null,
+    accountSignInOpen,
+    closeAccountSignIn: () => setAccountSignInOpen(false),
     redeemPremium: () => redeemPremiumMutation.mutate(),
     redeemingPremium: redeemPremiumMutation.isPending,
     unlockPremium: () => setTrialModalOpen(true),
@@ -319,8 +337,18 @@ export function useHuntAi() {
       searchLoading: addQueryResult.isFetching,
       select: setSelectedTicker,
       setQuery: setAddQuery,
-      toggle() { setAddOpen((open) => !open); },
+      toggle() {
+        if (!authenticated) {
+          setAccountSignInOpen(true);
+          return;
+        }
+        setAddOpen((open) => !open);
+      },
       add(symbol: string) {
+        if (!authenticated) {
+          setAccountSignInOpen(true);
+          return;
+        }
         const normalized = symbol.trim().toUpperCase();
         queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => Array.from(new Set([...current, normalized])));
         addWatchlistMutation.mutate([normalized]);
@@ -329,6 +357,10 @@ export function useHuntAi() {
         setAddQuery("");
       },
       remove(symbol: string) {
+        if (!authenticated) {
+          setAccountSignInOpen(true);
+          return;
+        }
         queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => current.filter((item) => item !== symbol));
         removeWatchlistMutation.mutate(symbol);
         if (selectedTicker === symbol) setSelectedTicker("");

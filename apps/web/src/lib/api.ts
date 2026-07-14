@@ -41,12 +41,12 @@ export async function redeemPremiumPromo(): Promise<AuthUser | null> {
   return payload.user;
 }
 
-export async function createAiCreditCheckout(credits: 25 | 75 | 200): Promise<string> {
+export async function createAiCreditCheckout(credits: 25 | 75 | 200, returnPath: string): Promise<string> {
   const response = await fetch(`${API_BASE}/auth/credit-checkout`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ credits }),
+    body: JSON.stringify({ credits, returnPath }),
   });
   if (!response.ok) {
     let message = `Could not add credits (${response.status})`;
@@ -57,7 +57,7 @@ export async function createAiCreditCheckout(credits: 25 | 75 | 200): Promise<st
   return payload.checkoutUrl;
 }
 
-export async function confirmAiCreditCheckout(sessionId: string): Promise<AuthUser> {
+export async function confirmAiCreditCheckout(sessionId: string): Promise<{ user: AuthUser; purchasedCredits: number }> {
   const response = await fetch(`${API_BASE}/auth/credit-checkout/confirm`, {
     method: "POST",
     credentials: "include",
@@ -69,8 +69,7 @@ export async function confirmAiCreditCheckout(sessionId: string): Promise<AuthUs
     try { message = ((await response.json()) as { detail?: string }).detail ?? message; } catch { /* HTTP fallback */ }
     throw new Error(message);
   }
-  const payload = (await response.json()) as { user: AuthUser };
-  return payload.user;
+  return (await response.json()) as { user: AuthUser; purchasedCredits: number };
 }
 
 export async function loadGoogleAuthBootstrap(): Promise<{ configured: boolean; clientId?: string | null; nonce?: string | null }> {
@@ -462,7 +461,7 @@ export type ValuationVerdictResponse = {
   symbol: string;
   name: string;
   currency: string;
-  verdict: "CHASING" | "FAIR" | "DISCOUNT" | "INSUFFICIENT_DATA";
+  verdict: "CHASING" | "BUILDING" | "FAIR" | "DISCOUNT" | "INSUFFICIENT_DATA";
   chasingAnswer: string;
   narrative: string;
   rightNow: {
@@ -481,6 +480,18 @@ export type ValuationVerdictResponse = {
     peRatio?: number | null;
     forwardPE?: number | null;
     dividendYield?: number | null;
+    todayChange?: number | null;
+    todayChangePct?: number | null;
+    previousClose?: number | null;
+    dayOpen?: number | null;
+    dayHigh?: number | null;
+    dayLow?: number | null;
+    currentVolume?: number | null;
+    averageVolume?: number | null;
+    volumeRatio?: number | null;
+    rsi14?: number | null;
+    support?: number | null;
+    resistance?: number | null;
   };
   structureBand: {
     discountAnchor?: number | null;
@@ -659,6 +670,21 @@ export type PortfolioHolding = StockRecord & {
   gainLossPct: number;
 };
 
+export type PortfolioTransaction = {
+  id: number;
+  symbol: string;
+  kind: "BUY" | "SELL" | "DIVIDEND" | "FEE" | "ADJUSTMENT";
+  shares: number;
+  price: number;
+  amount: number;
+  fees: number;
+  costBasis?: number | null;
+  realizedPnl?: number | null;
+  occurredAt: string;
+  source: string;
+  createdAt: string;
+};
+
 export type DcaOrder = {
   id: number;
   symbol: string;
@@ -672,12 +698,13 @@ export type DcaOrder = {
 };
 
 export type PortfolioDashboard = {
-  summary: { totalValue: number; invested: number; gainLoss: number; gainLossPct: number; dividendsYtd: number; forwardYield: number };
+  summary: { totalValue: number; invested: number; gainLoss: number; gainLossPct: number; dividendsYtd: number; forwardYield: number; unrealizedGainLoss: number; realizedGainLoss: number; totalReturn: number; grossInvested: number; netContributions: number; cashBalance: number };
   holdings: PortfolioHolding[];
   dcaOrders: DcaOrder[];
   chart: Array<{ date: string; value: number; cost: number }>;
   markers: Array<{ date: string; symbol: string; amount: number }>;
   incomeEvents: Array<{ date: string; symbol: string; kind: string; amount?: number | null }>;
+  transactions: PortfolioTransaction[];
 };
 
 export type PortfolioQuotesResponse = {
@@ -1299,25 +1326,25 @@ export async function loadPortfolioReview(agent?: string, force = false): Promis
   if (force) params.set("force", "true");
   const query = params.size ? `?${params}` : "";
   const response = await fetch(`${API_BASE}/analysis/portfolio/review${query}`, { method: "POST", credentials: "include" });
-  if (!response.ok) throw new Error(`Failed to load portfolio review: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load portfolio review: ${response.status}`));
   return (await response.json()) as PortfolioReviewResponse;
 }
 
 export async function loadPortfolio(): Promise<PortfolioDashboard> {
   const response = await fetch(`${API_BASE}/portfolio`, { credentials: "include" });
-  if (!response.ok) throw new Error(`Failed to load portfolio: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load portfolio: ${response.status}`));
   return (await response.json()) as PortfolioDashboard;
 }
 
 export async function loadPortfolioQuotes(): Promise<PortfolioQuotesResponse> {
   const response = await fetch(`${API_BASE}/portfolio/quotes`, { credentials: "include" });
-  if (!response.ok) throw new Error(`Failed to load portfolio quotes: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load portfolio quotes: ${response.status}`));
   return (await response.json()) as PortfolioQuotesResponse;
 }
 
 export async function loadPortfolioWatchlist(): Promise<string[]> {
   const response = await fetch(`${API_BASE}/portfolio/watchlist`, { credentials: "include" });
-  if (!response.ok) throw new Error(`Failed to load watchlist: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load watchlist: ${response.status}`));
   const payload = (await response.json()) as { symbols?: string[] };
   return payload.symbols ?? [];
 }
@@ -1329,41 +1356,62 @@ export async function addPortfolioWatchlistSymbols(symbols: string[]): Promise<s
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ symbols }),
   });
-  if (!response.ok) throw new Error(`Failed to save watchlist: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to save watchlist: ${response.status}`));
   const payload = (await response.json()) as { symbols?: string[] };
   return payload.symbols ?? [];
 }
 
 export async function deletePortfolioWatchlistSymbol(symbol: string): Promise<void> {
   const response = await fetch(`${API_BASE}/portfolio/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE", credentials: "include" });
-  if (!response.ok) throw new Error(`Failed to remove watchlist symbol: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to remove watchlist symbol: ${response.status}`));
 }
 
 export async function saveHolding(value: { symbol: string; shares: number; averageCost: number; strategy: string; monthlyDca: number }) {
   const response = await fetch(`${API_BASE}/portfolio/holdings`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
-  if (!response.ok) throw new Error(`Failed to save holding: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to save holding: ${response.status}`));
+}
+
+export async function buyHolding(value: { symbol: string; shares: number; price: number; fees?: number; occurredAt?: string; strategy?: string; monthlyDca?: number }) {
+  const response = await fetch(`${API_BASE}/portfolio/holdings/buy`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to record buy: ${response.status}`));
+  return (await response.json()) as PortfolioHolding;
+}
+
+export async function sellHolding(symbol: string, value: { shares: number; price: number; fees?: number; occurredAt?: string }): Promise<{ transaction: PortfolioTransaction; holding?: PortfolioHolding | null }> {
+  const response = await fetch(`${API_BASE}/portfolio/holdings/${encodeURIComponent(symbol)}/sell`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to record sale: ${response.status}`));
+  return (await response.json()) as { transaction: PortfolioTransaction; holding?: PortfolioHolding | null };
 }
 
 export async function deleteHolding(symbol: string) {
   const response = await fetch(`${API_BASE}/portfolio/holdings/${encodeURIComponent(symbol)}`, { method: "DELETE", credentials: "include" });
-  if (!response.ok) throw new Error(`Failed to delete holding: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to delete holding: ${response.status}`));
 }
 
 export async function saveDcaOrder(value: { symbol: string; amount: number; scheduledFor: string; strategy: string; shares?: number }) {
   const response = await fetch(`${API_BASE}/portfolio/dca-orders`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
-  if (!response.ok) throw new Error(`Failed to save DCA order: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to save DCA order: ${response.status}`));
   return (await response.json()) as DcaOrder;
 }
 
 export async function updateDcaOrderAmount(orderId: number, amount: number, shares?: number) {
   const response = await fetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount, shares }) });
-  if (!response.ok) throw new Error(`Failed to update DCA order: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to update DCA order: ${response.status}`));
   return (await response.json()) as DcaOrder;
 }
 
 export async function deleteDcaOrder(orderId: number) {
   const response = await fetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "DELETE", credentials: "include" });
-  if (!response.ok) throw new Error(`Failed to delete DCA order: ${response.status}`);
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to delete DCA order: ${response.status}`));
+}
+
+async function accountDataApiError(response: Response, fallback: string): Promise<string> {
+  if (response.status === 401) return "Sign in to access your private portfolio and watchlist.";
+  try {
+    return ((await response.json()) as { detail?: string }).detail ?? fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function loadStocks(params?: {

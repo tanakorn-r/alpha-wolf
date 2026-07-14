@@ -1,6 +1,6 @@
 import { ErrorBanner } from "../components/ui/panels";
 import { SectionHeading } from "../components/ui/Surface";
-import { GoogleAccount } from "../components/auth/GoogleAccount";
+import { GoogleAccount, GoogleAccountModal } from "../components/auth/GoogleAccount";
 import { AiAdvisor } from "../features/dashboard/AiAdvisor";
 import { ChartsRow } from "../features/dashboard/ChartsRow";
 import { DashboardSkeleton } from "../features/dashboard/DashboardSkeleton";
@@ -11,6 +11,7 @@ import { IncomeList } from "../features/dashboard/IncomeList";
 import { PortfolioValueCard } from "../features/dashboard/PortfolioValueCard";
 import { SellModal } from "../features/dashboard/SellModal";
 import { StatsRow } from "../features/dashboard/StatsRow";
+import { TransactionHistory } from "../features/dashboard/TransactionHistory";
 import { useDashboard } from "../features/dashboard/useDashboard";
 
 export function DashboardPage() {
@@ -22,6 +23,7 @@ export function DashboardPage() {
         <SectionHeading title="Strategy Dashboard" body="Everything happening with your money, in one view" />
         <GoogleAccount />
       </div>
+      {dash.signInOpen ? <GoogleAccountModal user={dash.accountUser} onClose={dash.closeSignIn} /> : null}
       {dash.isSkeleton ? <DashboardSkeleton /> : (
         <>
           {dash.isError || dash.actionError ? (
@@ -45,6 +47,7 @@ export function DashboardPage() {
               {dash.hasIncome ? <IncomeList dash={dash} /> : null}
             </section>
           ) : null}
+          {dash.portfolio?.transactions.length ? <TransactionHistory dash={dash} /> : null}
           {dash.showEmptyHero ? <AiAdvisor dash={dash} /> : null}
 
           {dash.holdingForm.open ? <HoldingFormModal dash={dash} /> : null}

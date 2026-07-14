@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Area, AreaChart, CartesianGrid, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { loadDeepAnalysis, type DeepAnalysisResponse } from "../lib/api";
 import { paddedDomain } from "../lib/chart";
+import { lockBodyScroll } from "../lib/bodyScrollLock";
 import { formatCurrency, formatMultiple, formatPercent } from "../lib/format";
 import { useWolfStore } from "../store/useWolfStore";
 import { LoadingSpinner } from "./LoadingSpinner";
@@ -21,12 +22,11 @@ export function DeepAnalysisPanel() {
 
   useEffect(() => {
     if (!deepOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    const unlockBodyScroll = lockBodyScroll();
     const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeDeepAnalysis(); };
     window.addEventListener("keydown", onEscape);
     return () => {
-      document.body.style.overflow = previousOverflow;
+      unlockBodyScroll();
       window.removeEventListener("keydown", onEscape);
     };
   }, [deepOpen, closeDeepAnalysis]);

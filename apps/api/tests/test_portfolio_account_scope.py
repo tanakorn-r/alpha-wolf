@@ -9,7 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.store import db as store_db
-from internal.store.portfolio import _holding, _order, add_watchlist_symbols, delete_watchlist_symbol, list_holdings, list_watchlist, upsert_holding
+from internal.store.portfolio import _holding, _order, add_watchlist_symbols, delete_watchlist_symbol, list_dca_orders, list_holdings, list_watchlist, upsert_holding
 from models import HoldingInput
 
 
@@ -62,6 +62,15 @@ class PortfolioAccountScopeTests(unittest.TestCase):
         self.assertEqual(list_watchlist(user_id=1), ["GC=F"])
         self.assertEqual(list_watchlist(user_id=2), ["GLD", "CL=F"])
 
+    def test_guest_personal_data_is_always_empty_and_read_only(self) -> None:
+        self.assertEqual(list_holdings(user_id=0), [])
+        self.assertEqual(list_dca_orders(user_id=0), [])
+        self.assertEqual(list_watchlist(user_id=0), [])
+
+        with self.assertRaises(PermissionError):
+            upsert_holding(HoldingInput(symbol="AAPL", shares=1, averageCost=100), user_id=0)
+        with self.assertRaises(PermissionError):
+            add_watchlist_symbols(["AAPL"], user_id=0)
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,8 @@ export function StatsRow({ dash }: { dash: Dashboard }) {
 
   const gainLoss = summary?.gainLoss ?? 0;
   const forwardYield = summary?.forwardYield ?? 0;
-  const annualIncome = (totalValue * forwardYield) / 100;
+  const securitiesValue = holdings.reduce((sum, holding) => sum + holding.value, 0);
+  const annualIncome = (securitiesValue * forwardYield) / 100;
 
   return (
     <section className="grid grid-cols-1 gap-[10px] min-[420px]:grid-cols-2 min-[800px]:grid-cols-4">
@@ -26,8 +27,8 @@ export function StatsRow({ dash }: { dash: Dashboard }) {
         detailTone={tone(dayChange)}
         compact
       />
-      <MetricCard label="Invested (cost)" value={<Money value={summary?.invested} />} detail={holdings.length ? `${holdings.length} position${holdings.length === 1 ? "" : "s"}` : undefined} compact />
-      <MetricCard label="Total gain / loss" value={<Money value={gainLoss} />} detail={formatPercent(summary?.gainLossPct)} tone={tone(gainLoss)} detailTone={tone(gainLoss)} compact />
+      <MetricCard label="Open cost" value={<Money value={summary?.invested} />} detail={summary?.cashBalance ? `Cash ${signed(summary.cashBalance)}` : holdings.length ? `${holdings.length} position${holdings.length === 1 ? "" : "s"}` : undefined} compact />
+      <MetricCard label="Total return" value={<Money value={gainLoss} />} detail={`${formatPercent(summary?.gainLossPct)} · realized ${signed(summary?.realizedGainLoss ?? 0)}`} tone={tone(gainLoss)} detailTone={tone(gainLoss)} compact />
       <MetricCard label="Annual income" value={<Money value={annualIncome} />} detail={`${forwardYield}% forward yield`} compact />
     </section>
   );
