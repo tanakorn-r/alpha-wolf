@@ -1,6 +1,6 @@
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ArrowUpIcon } from "../../components/ui/icons";
-import { EmptyPanel, LoadingStrip, RetryPanel } from "../../components/ui/panels";
+import { EmptyPanel, RetryPanel } from "../../components/ui/panels";
 import { PaywallGate } from "../../components/ui/PaywallGate";
 import { realTimeframes, timeframes, type N100Timeframe } from "./lib";
 import { Next100Result } from "./Next100Result";
@@ -68,14 +68,13 @@ export function Next100Tab({ hunt }: { hunt: HuntAi }) {
           />
         </div>
       ) : null}
-      {n100.fetching && !n100.report?.data ? <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "forecast", n100.ticker)} subject={n100.ticker} agentId={hunt.activeAgentId} task="forecast" /> : null}
-      {n100.fetching && n100.report?.data ? <LoadingStrip label={`Refreshing cached ${n100.ticker} forecast...`} /> : null}
-      {n100.error ? <RetryPanel label={n100.error} onRetry={n100.run} /> : null}
-      {n100.report?.data ? (
+      {n100.fetching ? <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "forecast", n100.ticker)} subject={n100.ticker} agentId={hunt.activeAgentId} task="forecast" /> : null}
+      {n100.error ? <RetryPanel label={n100.error} onRetry={n100.rerun} /> : null}
+      {!n100.fetching && n100.report?.data ? (
         <Next100Result
           report={n100.report.data}
           timeframe={n100.timeframe}
-          onRerun={n100.run}
+          onRerun={n100.rerun}
           canRerun={n100.quotaLeft > 0 && !n100.fetching}
           analyzedAt={n100.report.analyzedAt}
         />

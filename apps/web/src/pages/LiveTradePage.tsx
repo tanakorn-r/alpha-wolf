@@ -57,6 +57,7 @@ export function LiveTradePage() {
   const [series, setSeries] = useState<Record<string, number[]>>({});
   const [strat, setStrat] = useState<StrategyConfig>({ preset: "momentum", active: { emacross: true, macd: true, roc: true, rsi: true }, armed: false });
   const chartRef = useRef<HTMLDivElement>(null);
+  const aiLoadedKeyRef = useRef("");
   const widgetId = useMemo(() => `tv-live-${selected.replace(/[^a-z0-9]/gi, "-").toLowerCase()}`, [selected]);
 
   const quotes = useQueries({
@@ -73,7 +74,12 @@ export function LiveTradePage() {
 
   const ai = useQuery({
     queryKey: ["live-trade-ai", selected, activeAgentId],
-    queryFn: () => summarizeStock(selected, "momentum", activeAgentId, true),
+    queryFn: async () => {
+      const requestKey = `${selected}:${activeAgentId}`;
+      const result = await summarizeStock(selected, "momentum", activeAgentId, aiLoadedKeyRef.current === requestKey);
+      aiLoadedKeyRef.current = requestKey;
+      return result;
+    },
     enabled: autoAi,
     refetchInterval: autoAi ? 60_000 : false,
     staleTime: 0,

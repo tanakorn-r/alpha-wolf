@@ -19,9 +19,9 @@ export function TechnicalAnalysisTab({ hunt }: { hunt: HuntAi }) {
 
   return (
     <div className="flex flex-col gap-3.5">
-      <TickerHeader detail={technical.detail} loading={technical.aiLoading} onRun={technical.run} hasAnalysis={Boolean(technical.analysis)} />
+      <TickerHeader detail={technical.detail} loading={technical.aiLoading} onRun={() => void technical.run(Boolean(technical.analysis))} hasAnalysis={Boolean(technical.analysis)} />
       {technical.aiLoading ? <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "intraday", technical.ticker)} subject={technical.ticker} agentId={hunt.activeAgentId} task="intraday" /> : null}
-      {technical.analysis ? <AgentRead analysis={technical.analysis} onRerun={technical.run} /> : null}
+      {!technical.aiLoading && technical.analysis ? <AgentRead analysis={technical.analysis} onRerun={() => void technical.run(true)} /> : null}
       <StructureChart detail={technical.detail} analysis={technical.analysis} />
     </div>
   );

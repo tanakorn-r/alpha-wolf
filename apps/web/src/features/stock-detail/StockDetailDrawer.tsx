@@ -12,7 +12,7 @@ import { lockBodyScroll } from "../../lib/bodyScrollLock";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
 import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate } from "../../lib/format";
-import { buyHolding, loadAgents, loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
+import { buyHolding, loadAgents, loadAuthUser, loadLatestAiResult, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
 import { negative, positive } from "../../lib/ui";
 import { useWolfStore } from "../../store/useWolfStore";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
@@ -66,6 +66,20 @@ export function StockDetailDrawer() {
   const loading = detailQuery.isPending && detailOpen;
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
+  const savedAnalysisQuery = useQuery({
+    queryKey: ["saved-ai", accountScope, "stock-analysis", selectedSymbol, activeAgentId, selectedStrategy],
+    queryFn: () => loadLatestAiResult<StockAnalysisResponse>({ feature: "stock-analysis", subject: selectedSymbol, agent: activeAgentId, variantPrefix: `v29:${selectedStrategy}:` }),
+    enabled: detailOpen && Boolean(authQuery.data?.id && selectedSymbol),
+    staleTime: 30_000,
+    retry: 0,
+  });
+  const savedQuantQuery = useQuery({
+    queryKey: ["saved-ai", accountScope, "quant", selectedSymbol, activeAgentId, selectedStrategy, selectedMode],
+    queryFn: () => loadLatestAiResult<QuantPerspectiveResponse>({ feature: "quant", subject: selectedSymbol, agent: activeAgentId, variantPrefix: `v24:${selectedStrategy}:${selectedMode ?? "default"}` }),
+    enabled: detailOpen && Boolean(authQuery.data?.id && selectedSymbol),
+    staleTime: 30_000,
+    retry: 0,
+  });
   const analysisCacheKey = `${accountScope}:persona-v23-score-action-consistency:stock-detail:${selectedSymbol}:${selectedStrategy}:${selectedMode ?? "default"}:${activeAgentId}`;
   const quantCacheKey = `${accountScope}:persona-v23-score-action-consistency:stock-quant:${selectedSymbol}:${selectedStrategy}:${selectedMode ?? "default"}:${activeAgentId}`;
   const planQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: detailOpen && Boolean(authQuery.data?.id) });
@@ -126,6 +140,16 @@ export function StockDetailDrawer() {
   }, [detailOpen, selectedSymbol, activeAgentId, analysisCacheKey, quantCacheKey, getHuntAiCache]);
 
   useEffect(() => {
+    const saved = savedAnalysisQuery.data;
+    if (detailOpen && saved?.agent?.id === activeAgentId) setAnalysis(saved);
+  }, [activeAgentId, detailOpen, savedAnalysisQuery.data]);
+
+  useEffect(() => {
+    const saved = savedQuantQuery.data;
+    if (detailOpen && saved?.agent?.id === activeAgentId) setHuntAdvice(saved);
+  }, [activeAgentId, detailOpen, savedQuantQuery.data]);
+
+  useEffect(() => {
     if (!detailOpen || !detail?.dataPending) {
       setPendingTimedOut(false);
       return;
@@ -147,14 +171,14 @@ export function StockDetailDrawer() {
     return () => { unlockBodyScroll(); window.removeEventListener("keydown", closeOnEscape); };
   }, [detailOpen, closeDetail]);
 
-  async function analyze() {
+  async function analyze(force = false) {
     if (!selectedSymbol) return;
     setError("");
     setAnalyzing(true);
     try {
-      const result = await summarizeStock(selectedSymbol, selectedStrategy, activeAgentId, true);
+      const result = await summarizeStock(selectedSymbol, selectedStrategy, activeAgentId, force);
       setAnalysis(result);
-      setHuntAiCache(analysisCacheKey, { analyzedAt: new Date().toISOString(), data: result });
+      setHuntAiCache(analysisCacheKey, { analyzedAt: result.generatedAt ?? new Date().toISOString(), data: result });
     } catch {
       setError("AI analysis is unavailable. Check the API configuration.");
     } finally {
@@ -162,14 +186,14 @@ export function StockDetailDrawer() {
     }
   }
 
-  async function runAlphaHunt() {
+  async function runAlphaHunt(force = false) {
     if (!selectedSymbol) return;
     setError("");
     setHuntLoading(true);
     try {
-      const result = await loadQuantPerspective(selectedSymbol, selectedStrategy, selectedMode ?? undefined, activeAgentId);
+      const result = await loadQuantPerspective(selectedSymbol, selectedStrategy, selectedMode ?? undefined, activeAgentId, force);
       setHuntAdvice(result);
-      setHuntAiCache(quantCacheKey, { analyzedAt: new Date().toISOString(), data: result });
+      setHuntAiCache(quantCacheKey, { analyzedAt: result.generatedAt ?? new Date().toISOString(), data: result });
     } catch {
       setError("Alpha Hunt is unavailable. Check the API configuration.");
     } finally {
@@ -259,10 +283,10 @@ export function StockDetailDrawer() {
               </div>
             ) : null}
             {detail && !loading && !detail.dataPending ? <>
-              {analyzing ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
+              {analyzing || savedAnalysisQuery.isPending ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing || savedAnalysisQuery.isPending} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
               <QuickReadCard detail={detail} analysis={analysis} agent={activeAgent} />
               <ResearchTabs ref={tabsRef} active={tab} onSelect={selectTab} />
-              {tab === "overview" ? <DetailContent detail={detail} huntAdvice={huntAdvice} huntLoading={huntLoading} onHunt={runAlphaHunt} /> : tab === "news" ? <NewsSection detail={detail} research={research} researchLoading={researchLoading} /> : researchLoading ? <DetailSkeleton symbol={selectedSymbol} /> : tab === "market" ? <MarketResearch market={market} analyzing={analyzing} onAnalyze={analyze} /> : <ResearchContent tab={tab} research={research} detail={detail} />}
+              {tab === "overview" ? <DetailContent detail={detail} huntAdvice={huntAdvice} huntLoading={huntLoading || savedQuantQuery.isPending} onHunt={runAlphaHunt} activeAgentId={activeAgentId} /> : tab === "news" ? <NewsSection detail={detail} research={research} researchLoading={researchLoading} /> : researchLoading ? <DetailSkeleton symbol={selectedSymbol} /> : tab === "market" ? <MarketResearch market={market} analyzing={analyzing || savedAnalysisQuery.isPending} onAnalyze={() => analyze(Boolean(analysis))} /> : <ResearchContent tab={tab} research={research} detail={detail} />}
             </> : null}
           </div>
         </div>
@@ -798,10 +822,10 @@ function IndustryRankBadge({ detail }: { detail: StockDetailResponse }) {
   );
 }
 
-function AiGate({ symbol, analysis, analyzing, onAnalyze, activeAgentId }: { symbol: string; analysis: StockAnalysisResponse | null; analyzing: boolean; onAnalyze: () => void; activeAgentId: string }) {
+function AiGate({ symbol, analysis, analyzing, onAnalyze, activeAgentId }: { symbol: string; analysis: StockAnalysisResponse | null; analyzing: boolean; onAnalyze: (force: boolean) => void; activeAgentId: string }) {
   if (analyzing) return <PremiumLoading title={agentLoadingTitle(activeAgentId, "deep", symbol)} subject={symbol} agentId={activeAgentId} task="deep" />;
-  if (analysis) return <AiVerdictCard value={analysis} onRerun={onAnalyze} size="modal" />;
-  return <div className="flex flex-col items-center gap-3.5 rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask AI to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">OpenAI will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><PremiumAiButton label={`Analyze ${symbol}`} sublabel="Premium · full picture" onClick={onAnalyze} size="wide" /></div>;
+  if (analysis) return <AiVerdictCard value={analysis} onRerun={() => onAnalyze(true)} size="modal" />;
+  return <div className="flex flex-col items-center gap-3.5 rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask AI to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">OpenAI will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><PremiumAiButton label={`Analyze ${symbol}`} sublabel="Premium · full picture" onClick={() => onAnalyze(false)} size="wide" /></div>;
 }
 
 function V4HeroMetric({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: "good" | "warn" | "neutral" }) {
@@ -830,7 +854,8 @@ function marketCapTier(value?: number) {
   return "small cap";
 }
 
-function AlphaHuntDecisionDesk({ advice, loading, onHunt }: { advice: QuantPerspectiveResponse | null; loading: boolean; onHunt: () => void }) {
+function AlphaHuntDecisionDesk({ advice, loading, onHunt, activeAgentId }: { advice: QuantPerspectiveResponse | null; loading: boolean; onHunt: (force: boolean) => void; activeAgentId: string }) {
+  if (loading) return <PremiumLoading title={agentLoadingTitle(activeAgentId, "valuation")} subject="Alpha Hunt" agentId={activeAgentId} task="valuation" />;
   if (advice) {
     const tone = huntTone(advice.tone);
     return (
@@ -887,7 +912,7 @@ function AlphaHuntDecisionDesk({ advice, loading, onHunt }: { advice: QuantPersp
         <AgentRecap agent={advice.agent} recap={advice.recap} fit={advice.agentFit} reason={advice.agentFitReason} className="mt-3" />
         <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#242429] pt-3">
           <span className="text-[11px] text-[#8c8c95]">Swing investor read{advice.generatedAt ? ` · generated ${new Date(advice.generatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ", generated on request."}</span>
-          <button type="button" onClick={onHunt} className="rounded-lg border border-[#2a2a31] bg-[#161619] px-3 py-2 text-xs font-semibold text-[#bcbcc2] hover:border-[#3ecf8e] hover:text-[#3ecf8e]">Re-hunt</button>
+          <button type="button" onClick={() => onHunt(true)} className="rounded-lg border border-[#2a2a31] bg-[#161619] px-3 py-2 text-xs font-semibold text-[#bcbcc2] hover:border-[#3ecf8e] hover:text-[#3ecf8e]">Re-hunt</button>
         </div>
       </div>
     );
@@ -901,7 +926,7 @@ function AlphaHuntDecisionDesk({ advice, loading, onHunt }: { advice: QuantPersp
       </div>
       <button
         type="button"
-        onClick={onHunt}
+        onClick={() => onHunt(false)}
         disabled={loading}
         className="group inline-flex flex-none items-center overflow-hidden rounded-[12px] border border-[#3ecf8e]/35 bg-[#0e0e10] p-[2px] shadow-[0_10px_28px_rgba(0,0,0,0.24)] transition-colors hover:border-[#c77dff]/70 disabled:opacity-60 max-[560px]:self-start"
       >
@@ -937,7 +962,7 @@ function huntTone(tone: MetricTone | "good" | "warn" | "bad") {
   return { color: "#8c8c95" };
 }
 
-function DetailContent({ detail, huntAdvice, huntLoading, onHunt }: { detail: StockDetailResponse; huntAdvice: QuantPerspectiveResponse | null; huntLoading: boolean; onHunt: () => void }) {
+function DetailContent({ detail, huntAdvice, huntLoading, onHunt, activeAgentId }: { detail: StockDetailResponse; huntAdvice: QuantPerspectiveResponse | null; huntLoading: boolean; onHunt: (force: boolean) => void; activeAgentId: string }) {
   const overviewReturns = detail.performance?.returns ?? {};
   const overviewSeries = buildReturnSeries(overviewReturns);
   const positiveCount = overviewSeries.filter((item) => item.value > 0).length;
@@ -1059,7 +1084,7 @@ function DetailContent({ detail, huntAdvice, huntLoading, onHunt }: { detail: St
 
       <div className="grid min-w-0 grid-cols-2 gap-4 max-[900px]:grid-cols-1">
         <div className={panel}><PanelHeader title="Price path" /><div className="h-48"><TickerPerformanceChart points={detail.history} currency={detail.stock.currency} /></div><div className={`text-right font-mono text-sm font-semibold ${detail.stock.changePct >= 0 ? positive : negative}`}>{formatPercent(detail.stock.changePct)}</div></div>
-        <AlphaHuntDecisionDesk advice={huntAdvice} loading={huntLoading} onHunt={onHunt} />
+        <AlphaHuntDecisionDesk advice={huntAdvice} loading={huntLoading} onHunt={onHunt} activeAgentId={activeAgentId} />
       </div>
 
       <div className="grid min-w-0 grid-cols-2 gap-4 max-[900px]:grid-cols-1">

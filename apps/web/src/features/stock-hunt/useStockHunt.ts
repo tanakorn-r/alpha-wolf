@@ -300,7 +300,7 @@ export function useStockHunt() {
       setAnalyzing(true);
       setAnalyzingSymbol(symbol);
       try {
-        setAnalysis(await summarizeStock(symbol, baseStrategy, activeAgentId, true));
+        setAnalysis(await summarizeStock(symbol, baseStrategy, activeAgentId, analysis?.agent?.id === activeAgentId));
       } finally {
         setAnalyzing(false);
         setAnalyzingSymbol("");

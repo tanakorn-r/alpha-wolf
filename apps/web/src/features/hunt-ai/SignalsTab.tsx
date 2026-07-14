@@ -19,7 +19,7 @@ export function SignalsTab({ hunt }: { hunt: HuntAi }) {
   if (signals.fetching) return <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "valuation", signals.ticker)} subject={signals.ticker} agentId={hunt.activeAgentId} task="valuation" />;
   if (!signals.verdict || !signals.hasRun) return <ValuationStart ticker={signals.ticker} fetching={signals.fetching} agentId={hunt.activeAgentId} onRun={signals.run} onOpen={() => signals.openDetail(signals.ticker)} />;
 
-  return <ValuationVerdict verdict={signals.verdict} analyzedAt={signals.analyzedAt} fetching={signals.fetching} onRun={signals.run} onOpen={() => signals.openDetail(signals.ticker)} />;
+  return <ValuationVerdict verdict={signals.verdict} analyzedAt={signals.analyzedAt} fetching={signals.fetching} onRun={signals.rerun} onOpen={() => signals.openDetail(signals.ticker)} />;
 }
 
 function ValuationStart({ ticker, fetching, agentId, onRun, onOpen }: { ticker: string; fetching: boolean; agentId: string; onRun: () => void; onOpen: () => void }) {

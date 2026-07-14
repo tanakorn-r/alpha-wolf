@@ -654,6 +654,7 @@ export type PortfolioReviewResponse = {
   sign: string;
   source?: "openai";
   model?: string;
+  generatedAt?: string;
   agent: AgentBadge;
 };
 
@@ -1121,6 +1122,20 @@ export async function loadAgents(): Promise<AgentProfile[]> {
   const response = await fetch(`${API_BASE}/agents`);
   if (!response.ok) throw new Error(`Failed to load agents: ${response.status}`);
   return (await response.json()) as AgentProfile[];
+}
+
+export async function loadLatestAiResult<T>(params: {
+  feature: "stock-analysis" | "analyst-report" | "quant" | "valuation" | "today" | "technical" | "strategy" | "portfolio" | "buy-timing" | "next-10";
+  subject: string;
+  agent: string;
+  variantPrefix?: string;
+}): Promise<T | null> {
+  const query = new URLSearchParams({ feature: params.feature, subject: params.subject, agent: params.agent });
+  if (params.variantPrefix) query.set("variantPrefix", params.variantPrefix);
+  const response = await fetch(`${API_BASE}/ai/results/latest?${query}`, { credentials: "include" });
+  if (response.status === 204) return null;
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to restore saved AI result: ${response.status}`));
+  return (await response.json()) as T;
 }
 
 export async function loadBuyTiming(symbol: string, agent?: string, force = false): Promise<BuyTimingResponse> {

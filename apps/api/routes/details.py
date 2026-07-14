@@ -17,11 +17,42 @@ from internal.market.detail import build_detail_bundle, get_domain_insights, get
 from internal.market.patterns import signed_moves_from_points
 from internal.market.scoring import StrategyKey
 from internal.store.cache import cache_compute_lock, cache_get, cache_set
+from internal.store.ai_results import AIResultKey, AIResultQualityError, load_ai_result, save_ai_result
 from models import MarketComparison, TechnicalMovesPredictionResponse
 
 router = APIRouter()
 
 UPWARD_MOVES_TTL_SECONDS = 900
+
+
+def _publish_ai_result(
+    key: AIResultKey,
+    result: dict[str, Any],
+    previous: dict[str, Any] | None,
+    usage_user_id: int | None,
+) -> dict[str, Any]:
+    try:
+        return save_ai_result(key, result)
+    except Exception as exc:
+        release_ai_run(usage_user_id)
+        if previous is not None:
+            print(f"Warning: AI refresh failed quality gate for {key.feature}/{key.subject}: {exc}")
+            return previous
+        raise HTTPException(status_code=503, detail=f"AI response failed quality checks: {exc}") from exc
+
+
+def _load_saved_ai_result(key: AIResultKey, legacy_cache_key: str) -> dict[str, Any] | None:
+    saved = load_ai_result(key)
+    if saved is not None:
+        return saved
+    legacy = cache_get("analysis", legacy_cache_key)
+    if not isinstance(legacy, dict):
+        return None
+    try:
+        return save_ai_result(key, legacy)
+    except AIResultQualityError as exc:
+        print(f"Warning: rejected legacy AI result for {key.feature}/{key.subject}: {exc}")
+        return None
 
 
 @router.post("/api/details/batch")
@@ -135,9 +166,11 @@ def details_buy_timing(
     require_ai_account(request, premium_required=True)
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
-    account_scope = account_cache_scope(user_id_from_request(request))
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
     ai_cache_key = f"{account_scope}:ai-buy-timing:v62-strategic-current-dca:{normalized}:{strategy}:{agent_id}"
-    cached = cache_get("analysis", ai_cache_key)
+    result_key = AIResultKey(user_id, "buy-timing", normalized, agent_id, f"v62:{strategy}")
+    cached = _load_saved_ai_result(result_key, ai_cache_key)
     if cached is not None and not force:
         return cached
 
@@ -145,7 +178,7 @@ def details_buy_timing(
     # forced request that was already waiting on the same lock returns the result produced ahead of
     # it instead of spending another quota unit and repeating OpenAI work.
     with cache_compute_lock("buy_timing_ai", ai_cache_key):
-        latest = cache_get("analysis", ai_cache_key)
+        latest = _load_saved_ai_result(result_key, ai_cache_key)
         if latest is not None and (not force or latest != cached):
             return latest
 
@@ -173,14 +206,17 @@ def details_buy_timing(
             agent_result["agentEvidence"] = agent_evidence
             narrative = analyze_buy_timing_with_openai({"buyTiming": agent_result}, agent_id)
             response = {**apply_ai_narrative(agent_result, narrative), "agent": agent_badge(agent_id)}
-        except (OpenAIAnalysisError, KeyError, TypeError, ValueError) as exc:
+        except (OpenAIAnalysisError, AIResultQualityError, KeyError, TypeError, ValueError) as exc:
             release_ai_run(usage_user_id)
             print(f"Warning: Buy Timing Agent plan failed for {normalized}/{agent_id}: {exc}")
+            if cached is not None:
+                return cached
             # Mechanical seasonality is useful evidence, but it is not a successful persona plan.
             raise HTTPException(
                 status_code=503,
                 detail="The Agent response was incomplete. Please retry Buy Timing.",
             ) from exc
+        response = _publish_ai_result(result_key, response, cached, usage_user_id)
         cache_set("analysis", ai_cache_key, response, UPWARD_MOVES_TTL_SECONDS)
         return response
 
@@ -197,9 +233,11 @@ def details_upward_moves(
     require_ai_account(request, premium_required=True)
     normalized = symbol.upper()
     agent_id = normalize_agent_id(agent)
-    account_scope = account_cache_scope(user_id_from_request(request))
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
     cache_key = f"{account_scope}:ai-next-10-technical:v20-prime-hybrid-council:{normalized}:{timeframe}:{strategy}:{agent_id}"
-    cached = cache_get("analysis", cache_key)
+    result_key = AIResultKey(user_id, "next-10", normalized, agent_id, f"v20:{timeframe}:{strategy}")
+    cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
 
@@ -231,11 +269,14 @@ def details_upward_moves(
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = predict_technical_moves_with_openai(context, agent_id)
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     result["history"] = historical.get("history", [])
     result["historicalMoves"] = historical.get("moves", [])[:10]
+    result = _publish_ai_result(result_key, result, cached, usage_user_id)
     cache_set("analysis", cache_key, result, UPWARD_MOVES_TTL_SECONDS)
     return result

@@ -56,7 +56,7 @@ export function DailyBriefView({ brief }: { brief: DailyBrief }) {
             row={row}
             agentId={brief.activeAgentId}
             state={brief.rowAnalysis[row.symbol]}
-            onOpen={() => void brief.analyzeRow(row)}
+            onOpen={(force) => void brief.analyzeRow(row, force)}
           />
         )) : (
           <div className="rounded-[10px] border border-[#2a2a31] bg-[#161619] px-5 py-8 text-center text-[13px] text-[#8c8c95]">No holdings in this filter.</div>
@@ -88,7 +88,7 @@ function BriefQueueRow({
   row: HoldingBriefRow;
   agentId: string;
   state?: DailyBrief["rowAnalysis"][string];
-  onOpen: () => void;
+  onOpen: (force: boolean) => void;
 }) {
   const tag = triageTag(row);
   const hasResult = Boolean(state?.data);
@@ -98,7 +98,7 @@ function BriefQueueRow({
 
   function runAnalysis() {
     setOpen(true);
-    onOpen();
+    onOpen(hasResult);
   }
 
   return (

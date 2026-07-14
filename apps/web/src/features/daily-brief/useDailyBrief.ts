@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   loadAuthUser,
+  loadLatestAiResult,
   loadMarketCalendar,
   loadPortfolio,
   loadStockDetailsBatch,
@@ -141,6 +142,45 @@ export function useDailyBrief() {
     return cached?.data.agent?.id === activeAgentId ? [[row.symbol, { loading: false, data: cached.data, error: "" } satisfies RowAnalysisState]] : [];
   }));
   const displayedRowAnalysis = { ...persistedRowAnalysis, ...rowAnalysis };
+  const savedHydrationKey = model.rows.map((row) => `${row.symbol}:${row.strategy}`).join("|");
+
+  useEffect(() => {
+    if (!auth.data?.id || !savedHydrationKey) return;
+    let cancelled = false;
+    setRowAnalysis((current) => {
+      const next = { ...current };
+      for (const row of model.rows) {
+        if (!next[row.symbol]?.data) next[row.symbol] = { loading: true, data: null, error: "" };
+      }
+      return next;
+    });
+    void Promise.all(model.rows.map(async (row) => ({
+      row,
+      data: await loadLatestAiResult<TodayPerformanceResponse>({
+        feature: "today",
+        subject: row.symbol,
+        agent: activeAgentId,
+        variantPrefix: `v23:${row.strategy}:`,
+      }).catch(() => null),
+    }))).then((saved) => {
+      if (cancelled) return;
+      const restored = saved.filter((item) => item.data?.agent?.id === activeAgentId);
+      for (const item of restored) {
+        setHuntAiCache(dailyBriefCacheKey(accountScope, item.row.symbol, item.row.strategy, activeAgentId), {
+          analyzedAt: item.data?.generatedAt ?? new Date().toISOString(),
+          data: item.data,
+        });
+      }
+      setRowAnalysis((current) => {
+        const next = { ...current };
+        for (const item of saved) {
+          if (!next[item.row.symbol]?.data) next[item.row.symbol] = { loading: false, data: item.data?.agent?.id === activeAgentId ? item.data : null, error: "" };
+        }
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [accountScope, activeAgentId, auth.data?.id, savedHydrationKey]);
 
   return {
     loading: auth.isPending || (Boolean(auth.data?.id) && portfolio.isPending),
@@ -149,13 +189,13 @@ export function useDailyBrief() {
     setFilter,
     activeAgentId,
     rowAnalysis: displayedRowAnalysis,
-    async analyzeRow(row: HoldingBriefRow) {
+    async analyzeRow(row: HoldingBriefRow, force = false) {
       setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: true, data: displayedRowAnalysis[row.symbol]?.data ?? null, error: "" } }));
       try {
         // A deliberate Analyze/Refresh remains a forced rerun. Persistence only restores the
         // previous result when the user returns; it never turns Refresh into a stale cache read.
-        const data = await loadTodayPerformance(row.symbol, row.strategy, activeAgentId, true);
-        setHuntAiCache(dailyBriefCacheKey(accountScope, row.symbol, row.strategy, activeAgentId), { analyzedAt: new Date().toISOString(), data });
+        const data = await loadTodayPerformance(row.symbol, row.strategy, activeAgentId, force);
+        setHuntAiCache(dailyBriefCacheKey(accountScope, row.symbol, row.strategy, activeAgentId), { analyzedAt: data.generatedAt ?? new Date().toISOString(), data });
         setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, data, error: "" } }));
       } catch (error) {
         setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, data: current[row.symbol]?.data ?? null, error: error instanceof Error ? error.message : "AI analysis is unavailable." } }));

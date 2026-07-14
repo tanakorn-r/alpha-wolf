@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { buyHolding, loadAuthUser, loadPortfolio, loadPortfolioQuotes, loadPortfolioReview, sellHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
+import { buyHolding, loadAuthUser, loadLatestAiResult, loadPortfolio, loadPortfolioQuotes, loadPortfolioReview, sellHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 import { priceToUsdBase, setFxRates } from "../../lib/format";
 import { localDateKey } from "../../lib/date";
@@ -119,22 +119,31 @@ export function useDashboard() {
 
   const reviewCacheKey = `${accountScope}:${PORTFOLIO_REVIEW_CACHE_VERSION}:portfolio-review:${activeAgentId}`;
   const reviewCached = getHuntAiCache<PortfolioReviewResponse>(reviewCacheKey);
+  const savedReviewQuery = useQuery({
+    queryKey: ["saved-ai", accountScope, "portfolio", activeAgentId],
+    queryFn: () => loadLatestAiResult<PortfolioReviewResponse>({ feature: "portfolio", subject: "portfolio", agent: activeAgentId, variantPrefix: "v5" }),
+    enabled: Boolean(authQuery.data?.id && hasHoldings),
+    staleTime: 30_000,
+    retry: 0,
+  });
   // Re-key on the active Agent: a review for a different Agent (in local state or
   // the persisted cache) must never render as if it were the current Agent's take.
   const review =
     analysis?.agent.id === activeAgentId
       ? analysis
+      : savedReviewQuery.data?.agent.id === activeAgentId
+        ? savedReviewQuery.data
       : reviewCached?.data.agent.id === activeAgentId
         ? reviewCached.data
         : null;
 
-  async function askAi() {
+  async function askAi(force = false) {
     if (!portfolio?.holdings.length) return;
     setAnalyzing(true);
     try {
-      const result = await loadPortfolioReview(activeAgentId, true);
+      const result = await loadPortfolioReview(activeAgentId, force);
       setAnalysis(result);
-      setHuntAiCache(reviewCacheKey, { analyzedAt: new Date().toISOString(), data: result });
+      setHuntAiCache(reviewCacheKey, { analyzedAt: result.generatedAt ?? new Date().toISOString(), data: result });
     } catch {
       setActionError("AI analysis could not be generated.");
     } finally {
@@ -163,7 +172,7 @@ export function useDashboard() {
     closeSignIn: () => setSignInOpen(false),
     activeAgentId,
     analysis: review,
-    analyzing,
+    analyzing: analyzing || savedReviewQuery.isPending,
     sellTarget,
     selling,
     openDetail,

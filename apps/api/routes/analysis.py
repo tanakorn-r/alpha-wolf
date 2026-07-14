@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import normalize_agent_id
@@ -18,6 +19,8 @@ from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
 from internal.market.universe import build_market_page
 from internal.store.cache import cache_get, cache_set
+from internal.store.ai_results import AIResultKey, AIResultQualityError, load_ai_result, load_latest_ai_result, save_ai_result
+from internal.store.db import connect
 from internal.store.portfolio import list_holdings
 from internal.store.utils import as_float
 from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TechnicalAnalysisResponse, TodayPerformanceResponse, ValuationVerdictResponse
@@ -26,6 +29,134 @@ router = APIRouter()
 
 DETAIL_TTL_SECONDS = 180
 ANALYST_REPORT_TTL_SECONDS = 900
+
+SAVED_AI_FEATURES = {
+    "stock-analysis",
+    "analyst-report",
+    "quant",
+    "valuation",
+    "today",
+    "technical",
+    "strategy",
+    "portfolio",
+    "buy-timing",
+    "next-10",
+}
+
+_LEGACY_AI_MARKERS = {
+    "stock-analysis": ":v29-prime-hybrid-council:",
+    "analyst-report": ":analyst-report:",
+    "quant": ":quant:",
+    "valuation": ":valuation:",
+    "today": ":today:",
+    "technical": ":technical:",
+    "strategy": ":strategy-playbook:",
+    "portfolio": ":portfolio-review:",
+    "buy-timing": ":ai-buy-timing:",
+    "next-10": ":ai-next-10-technical:",
+}
+
+
+@router.get("/api/ai/results/latest", response_model=None)
+def latest_ai_result(
+    request: Request,
+    feature: str = Query(...),
+    subject: str = Query(...),
+    agent: str = Query("vera"),
+    variant_prefix: str = Query("", alias="variantPrefix"),
+) -> dict[str, Any] | Response:
+    """Return a saved AI result only. A miss is 204 and never spends quota or calls OpenAI."""
+    user_id, _ = require_ai_account(request)
+    normalized_feature = feature.strip().lower()
+    if normalized_feature not in SAVED_AI_FEATURES:
+        raise HTTPException(status_code=400, detail="Unknown AI result feature")
+    normalized_subject = subject.strip().lower() if normalized_feature in {"strategy", "portfolio"} else subject.strip().upper()
+    result = load_latest_ai_result(
+        user_id,
+        normalized_feature,
+        normalized_subject,
+        normalize_agent_id(agent),
+        variant_prefix=variant_prefix.strip(),
+    )
+    if result is None:
+        result = _adopt_legacy_ai_result(
+            user_id,
+            normalized_feature,
+            normalized_subject,
+            normalize_agent_id(agent),
+            variant_prefix.strip(),
+        )
+    return result if result is not None else Response(status_code=204)
+
+
+def _adopt_legacy_ai_result(
+    user_id: int,
+    feature: str,
+    subject: str,
+    agent_id: str,
+    variant_prefix: str,
+) -> dict[str, Any] | None:
+    """Make pre-migration AI cards available to saved-only page hydration."""
+    marker = _LEGACY_AI_MARKERS[feature]
+    account_prefix = f"user:{user_id}:%"
+    try:
+        with connect() as db:
+            rows = db.execute(
+                """SELECT cache_key, payload FROM ai_response_cache
+                   WHERE namespace = 'analysis' AND cache_key LIKE ?
+                   ORDER BY updated_at DESC""",
+                (account_prefix,),
+            ).fetchall()
+        for row in rows:
+            cache_key = str(row["cache_key"] if hasattr(row, "keys") else row[0])
+            if marker not in cache_key:
+                continue
+            if feature not in {"strategy", "portfolio"} and f":{subject}:" not in cache_key:
+                continue
+            semantic_tokens = [token for token in variant_prefix.rstrip(":").split(":")[1:] if token]
+            if any(f":{token}:" not in f"{cache_key}:" for token in semantic_tokens):
+                continue
+            payload_text = row["payload"] if hasattr(row, "keys") else row[1]
+            payload = json.loads(str(payload_text))
+            legacy_variant = f"{variant_prefix}legacy:{hashlib.sha256(cache_key.encode()).hexdigest()[:12]}"
+            try:
+                return save_ai_result(AIResultKey(user_id, feature, subject, agent_id, legacy_variant), payload)
+            except AIResultQualityError:
+                continue
+    except Exception as exc:
+        print(f"Warning: legacy AI hydration failed for {feature}/{subject}: {exc}")
+    return None
+
+
+def _publish_ai_result(
+    key: AIResultKey,
+    result: dict[str, Any],
+    previous: dict[str, Any] | None,
+    usage_user_id: int | None,
+) -> dict[str, Any]:
+    """Never let a failed quality gate erase the account's last known good answer."""
+    try:
+        return save_ai_result(key, result)
+    except Exception as exc:
+        release_ai_run(usage_user_id)
+        if previous is not None:
+            print(f"Warning: AI refresh failed quality gate for {key.feature}/{key.subject}: {exc}")
+            return previous
+        raise HTTPException(status_code=503, detail=f"AI response failed quality checks: {exc}") from exc
+
+
+def _load_saved_ai_result(key: AIResultKey, legacy_cache_key: str) -> dict[str, Any] | None:
+    saved = load_ai_result(key)
+    if saved is not None:
+        return saved
+    legacy = cache_get("analysis", legacy_cache_key)
+    if not isinstance(legacy, dict):
+        return None
+    try:
+        return save_ai_result(key, legacy)
+    except AIResultQualityError as exc:
+        print(f"Warning: rejected legacy AI result for {key.feature}/{key.subject}: {exc}")
+        return None
 
 
 def _analyst_input_flags(agent_id: str) -> tuple[bool, bool, bool]:
@@ -140,7 +271,8 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
     cache_key = f"{account_scope}:v29-prime-hybrid-council:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
-    cached = cache_get("analysis", cache_key)
+    result_key = AIResultKey(user_id, "stock-analysis", normalized, agent_id, f"v29:{strategy}:{position_cache_key}")
+    cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
 
@@ -168,10 +300,13 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
     usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_with_openai(context, agent_id)
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    result = _publish_ai_result(result_key, result, cached, usage_user_id)
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -199,7 +334,8 @@ def analyst_report(
     position_cache_key = _position_cache_key(position_context)
     cache_key = f"{account_scope}:analyst-report:v13-prime-hybrid-council:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
 
-    cached_analysis = cache_get("analysis", cache_key)
+    result_key = AIResultKey(user_id, "analyst-report", normalized, agent_id, f"v13:{strategy}:{position_cache_key}")
+    cached_analysis = _load_saved_ai_result(result_key, cache_key)
     if cached_analysis is not None and not force:
         bundle = build_detail_bundle(normalized, strategy)
         if not bundle:
@@ -233,7 +369,7 @@ def analyst_report(
     openai_started_at = time.monotonic()
     try:
         result = analyze_brief_with_openai(context, agent_id)
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
         if cached_analysis is not None:
             # A failed explicit refresh must never erase a previously saved report. Return the
@@ -248,6 +384,7 @@ def analyst_report(
     finally:
         print(f"Analyst OpenAI timing {normalized}: {time.monotonic() - openai_started_at:.3f}s")
 
+    result = _publish_ai_result(result_key, result, cached_analysis, usage_user_id)
     cache_set("analysis", cache_key, result, ANALYST_REPORT_TTL_SECONDS)
     return {"status": "ready", "detail": bundle, "analysis": result}
 
@@ -258,11 +395,13 @@ def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    account_scope = account_cache_scope(user_id_from_request(request))
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
     mode = str((payload or {}).get("mode") or "").strip().lower()
     mode = mode if mode in {"swing", "day", "long", "value", "fomo"} else None
     cache_key = f"{account_scope}:quant:v24-prime-hybrid-council:{normalized}:{strategy}:{mode or 'default'}:{agent_id}"
-    cached = cache_get("analysis", cache_key)
+    result_key = AIResultKey(user_id, "quant", normalized, agent_id, f"v24:{strategy}:{mode or 'default'}")
+    cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
 
@@ -288,10 +427,13 @@ def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_quant_with_openai(context, agent_id)
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    result = _publish_ai_result(result_key, result, cached, usage_user_id)
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -302,9 +444,11 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
     normalized = symbol.upper().strip()
     strategy = parse_strategy((payload or {}).get("strategy"))
     agent_id = normalize_agent_id(agent)
-    account_scope = account_cache_scope(user_id_from_request(request))
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
     cache_key = f"{account_scope}:valuation:v26-today-tape-fomo:{normalized}:{strategy}:{agent_id}"
-    cached = cache_get("analysis", cache_key)
+    result_key = AIResultKey(user_id, "valuation", normalized, agent_id, f"v26:{strategy}")
+    cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
 
@@ -328,8 +472,10 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
     usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_valuation_with_openai(context, agent_id)
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     # Keep objective valuation multiples authoritative even if the model omits an echo field.
@@ -346,6 +492,7 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
         },
     }
     result = _align_tactical_valuation_state(result, agent_id)
+    result = _publish_ai_result(result_key, result, cached, usage_user_id)
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -428,7 +575,8 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
     cache_key = f"{account_scope}:today:v23-agent-evidence-consistency:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
-    cached = cache_get("analysis", cache_key)
+    result_key = AIResultKey(user_id, "today", normalized, agent_id, f"v23:{strategy}:{position_cache_key}")
+    cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
 
@@ -456,10 +604,13 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = analyze_today_with_openai(context, agent_id)
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    result = _publish_ai_result(result_key, result, cached, usage_user_id)
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -473,7 +624,9 @@ def technical_analysis(symbol: str, request: Request, agent: str = Query("vera")
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     cache_key = f"{account_scope}:technical:v12-prime-hybrid-council:{normalized}:{agent_id}:{_position_cache_key(position_context)}"
-    cached = cache_get("analysis", cache_key)
+    position_cache_key = _position_cache_key(position_context)
+    result_key = AIResultKey(user_id, "technical", normalized, agent_id, f"v12:{position_cache_key}")
+    cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
 
@@ -485,9 +638,12 @@ def technical_analysis(symbol: str, request: Request, agent: str = Query("vera")
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = {**analyze_technicals_with_openai(context, agent_id), "symbol": normalized}
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    result = _publish_ai_result(result_key, result, cached, usage_user_id)
     cache_set("analysis", cache_key, result, ANALYST_REPORT_TTL_SECONDS)
     return result
 
@@ -594,12 +750,14 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
     strategy_prompt = payload.strategy.strip()
     base_strategy = _infer_base_strategy(strategy_prompt)
     agent_id = normalize_agent_id(agent)
-    account_scope = account_cache_scope(user_id_from_request(request))
+    user_id = user_id_from_request(request)
+    account_scope = account_cache_scope(user_id)
     cache_digest = hashlib.sha256(
         f"{account_scope}:{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}".encode("utf-8")
     ).hexdigest()[:24]
     cache_key = f"{account_scope}:strategy-playbook:v7-agent-method:{cache_digest}"
-    cached = cache_get("analysis", cache_key)
+    result_key = AIResultKey(user_id, "strategy", "universe", agent_id, f"v7:{cache_digest}")
+    cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
 
@@ -626,11 +784,14 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = recommend_strategy_with_openai(context, agent_id)
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     result = _filter_strategy_picks(result, candidates, payload.limit, strategy_prompt)
+    result = _publish_ai_result(result_key, result, cached, usage_user_id)
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -647,17 +808,24 @@ def portfolio_review(request: Request, agent: str = Query("vera"), force: bool =
         f"{account_scope}:{agent_id}:{context.get('totalValue')}:{context.get('gainLossPct')}:{context.get('forwardYield')}:{','.join(item.get('symbol', '') for item in context.get('holdings', []))}".encode("utf-8")
     ).hexdigest()[:24]
     cache_key = f"{account_scope}:portfolio-review:v5-agent-method:{cache_digest}"
-    cached = cache_get("analysis", cache_key)
+    # One durable slot per account/Agent intentionally keeps the last review visible after the
+    # portfolio changes. The generation timestamp tells the user how old its holdings snapshot is;
+    # an explicit rerun replaces it with a review of the current portfolio.
+    result_key = AIResultKey(user_id, "portfolio", "portfolio", agent_id, "v5")
+    cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
 
     usage_user_id, _ = claim_ai_run(request)
     try:
         result = review_portfolio_with_openai({"portfolioContext": context}, agent_id)
-    except OpenAIAnalysisError as exc:
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
         release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    result = _publish_ai_result(result_key, result, cached, usage_user_id)
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 

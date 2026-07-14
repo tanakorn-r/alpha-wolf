@@ -210,6 +210,27 @@ def migrate() -> None:
         )
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS ai_results (
+                user_id INTEGER NOT NULL,
+                feature TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                variant TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL,
+                model TEXT,
+                generated_at TEXT NOT NULL,
+                quality_status TEXT NOT NULL DEFAULT 'passed',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(user_id, feature, subject, agent_id, variant)
+            )
+            """
+        )
+        db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_results_user_recent ON ai_results(user_id, updated_at DESC)"
+        )
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS backtrade_jobs (
                 id TEXT PRIMARY KEY,
                 account_scope TEXT NOT NULL,

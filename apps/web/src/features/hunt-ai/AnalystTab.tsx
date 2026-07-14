@@ -36,7 +36,7 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
         </div>
         <div className="flex items-center gap-2">
           {analysis && analyst.analyzedAt ? <span className="font-mono text-[10px] uppercase text-[#8c8c95]">{formatAnalyzedAt(analyst.analyzedAt)}</span> : null}
-          <PremiumAiButton label={analyst.loading ? "Analyzing" : analysis ? "Refresh" : "Analyze"} sublabel="Analyst" disabled={!selectedTicker} loading={analyst.loading} onClick={() => void analyst.run()} size="xs" />
+          <PremiumAiButton label={analyst.loading ? "Analyzing" : analysis ? "Refresh" : "Analyze"} sublabel="Analyst" disabled={!selectedTicker} loading={analyst.loading} onClick={() => void analyst.run(undefined, Boolean(analysis))} size="xs" />
         </div>
       </div>
 
@@ -56,7 +56,7 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
           summary={<span className="whitespace-pre-line">{analysis.recap || analysis.summary}</span>}
           accent={analysis.agent?.color ?? verdict.color}
           meta={`${analysis.agentFitReason} · not financial advice`}
-          onRerun={() => void analyst.run()}
+          onRerun={() => void analyst.run(undefined, true)}
         >
           <div className="grid gap-3 text-[12px] leading-[1.6] min-[900px]:grid-cols-2">
             <div className="rounded-[10px] border border-white/[0.07] bg-black/20 p-3.5">

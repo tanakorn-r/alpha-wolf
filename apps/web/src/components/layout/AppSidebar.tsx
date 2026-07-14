@@ -114,7 +114,7 @@ function AiUsageMeter({ user }: { user: NonNullable<Awaited<ReturnType<typeof lo
         {user.proActive && expiryLabel ? <span>Ends {expiryLabel}</span> : <span>{remainingPct}% left</span>}
       </div>
       <CreditTopUpButton className="mt-2.5 w-full" />
-      {usage.bonus ? <div className="mt-1.5 text-center text-[8.5px] text-[#696972]">Includes {usage.bonus} purchased credits</div> : null}
+      {"bonus" in usage && usage.bonus ? <div className="mt-1.5 text-center text-[8.5px] text-[#696972]">Includes {usage.bonus} purchased credits</div> : null}
     </div>
   );
 }

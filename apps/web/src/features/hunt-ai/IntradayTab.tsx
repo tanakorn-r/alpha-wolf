@@ -16,7 +16,7 @@ import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
 import { PremiumChartTooltip } from "./ChartTooltip";
 import { buildTechnicalChartData, colorForTone, formatAnalyzedAt, moneyMaybe, stopFromEntry } from "./lib";
-import { ChartLoading, SpinnerOrb, agentName, panel } from "./ui";
+import { ChartLoading, SpinnerOrb, agentLoadingTitle, agentName, panel, PremiumLoading } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
 export function IntradayTab({ hunt }: { hunt: HuntAi }) {
@@ -115,7 +115,9 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
           </div>
         </div>
         <div className="flex flex-col gap-2.5">
-          {analysis ? (
+          {intraday.aiLoading ? (
+            <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "intraday", intraday.ticker)} subject={intraday.ticker} agentId={hunt.activeAgentId} task="intraday" />
+          ) : analysis ? (
             <AgentCall
               agent={analysis.agent}
               label="Intraday signal"
@@ -140,7 +142,7 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
             </div>
           )}
           <div className="flex flex-col gap-1.5">
-            {analysis ? (
+            {!intraday.aiLoading && analysis ? (
               <div className="text-right font-mono text-[10px] font-bold uppercase tracking-[0.06em] text-white">
                 Last sync {formatAnalyzedAt(intraday.analyzedAt)}
               </div>
@@ -150,7 +152,7 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
               sublabel={analysis ? "Premium · cached signal" : "Premium · live tape"}
               disabled={intraday.aiLoading || intraday.pending}
               loading={intraday.aiLoading}
-              onClick={() => void intraday.run()}
+              onClick={() => void intraday.run(Boolean(analysis))}
               size="compact"
               className="w-full"
             />

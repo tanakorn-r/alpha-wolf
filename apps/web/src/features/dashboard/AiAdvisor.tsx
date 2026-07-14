@@ -13,11 +13,11 @@ export function AiAdvisor({ dash }: { dash: Dashboard }) {
             <h2 className="mt-1 text-[16px] font-semibold">Need a second opinion on this month?</h2>
             <p className="mt-1 text-[12px] text-[#8c8c95]">Your active Agent grades concentration, P/L, yield, and next actions from live portfolio data.</p>
           </div>
-          <PremiumAiButton label={dash.analyzing ? "Analyzing" : "Review portfolio"} sublabel="Portfolio AI" disabled={!dash.hasHoldings || dash.analyzing} loading={dash.analyzing} onClick={() => void dash.askAi()} size="compact" />
+          <PremiumAiButton label={dash.analyzing ? "Analyzing" : "Review portfolio"} sublabel="Portfolio AI" disabled={!dash.hasHoldings || dash.analyzing} loading={dash.analyzing} onClick={() => void dash.askAi(false)} size="compact" />
         </section>
       ) : null}
       {dash.analyzing ? <PremiumLoading title={agentLoadingTitle(dash.activeAgentId, "portfolio")} subject="AI" agentId={dash.activeAgentId} task="portfolio" /> : null}
-      {dash.analysis ? <PortfolioReviewCard review={dash.analysis} onRerun={() => void dash.askAi()} /> : null}
+      {!dash.analyzing && dash.analysis ? <PortfolioReviewCard review={dash.analysis} onRerun={() => void dash.askAi(true)} /> : null}
     </>
   );
 }

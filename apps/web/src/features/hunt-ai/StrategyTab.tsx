@@ -45,7 +45,7 @@ export function StrategyTab({ hunt }: { hunt: HuntAi }) {
               key={card.key}
               type="button"
               disabled={strategy.loading}
-              onClick={() => void strategy.run(card.key)}
+              onClick={() => void strategy.run(card.key, Boolean(strategy.analysis && strategy.mode === card.key))}
               className="grid min-h-[108px] grid-rows-[28px_auto_1fr] gap-1.5 rounded-[10px] border p-3 text-left transition-colors disabled:opacity-60"
               style={{ background: isSelected ? `${card.color}10` : "#0e0e10", borderColor: isSelected ? card.color : "#2a2a31", borderWidth: isSelected ? 1.5 : 1 }}
             >

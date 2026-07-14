@@ -118,14 +118,25 @@ class AnalystCacheFirstTests(unittest.TestCase):
 
     def test_failed_refresh_returns_last_saved_analyst_report(self) -> None:
         bundle = {"stock": {"symbol": "AAPL", "price": 100}, "history": [{"close": 100}] * 10}
-        saved = {"signal": "HOLD", "confidence": 52, "headline": "Saved report"}
+        saved = {
+            "signal": "HOLD",
+            "confidence": 52,
+            "headline": "Saved report",
+            "summary": "Saved summary",
+            "thesis": "Saved thesis",
+            "source": "openai",
+            "model": "gpt-test",
+            "agent": {"id": "vera"},
+            "generatedAt": "2026-07-15T00:00:00+00:00",
+        }
         with (
             patch.object(analysis, "require_ai_account"),
             patch.object(analysis, "user_id_from_request", return_value=1),
             patch.object(analysis, "account_cache_scope", return_value="user:1"),
             patch.object(analysis, "_position_context", return_value={}),
             patch.object(analysis, "_position_cache_key", return_value="none"),
-            patch.object(analysis, "cache_get", return_value=saved),
+            patch.object(analysis, "load_ai_result", return_value=saved),
+            patch.object(analysis, "cache_get", return_value=None),
             patch.object(analysis, "_fetch_analysis_data", return_value=(bundle, {}, {}, {})),
             patch.object(analysis, "build_analysis_context", return_value={}),
             patch.object(analysis, "claim_ai_run", return_value=(1, None)),
