@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Response, status
 
 from internal.auth_context import require_user_id
+from internal.fx import fx_payload
 from internal.market.portfolio import build_portfolio_dashboard, build_portfolio_quotes
 from internal.store.portfolio import add_watchlist_symbols, create_dca_order, delete_dca_order, delete_watchlist_symbol, list_transactions, list_watchlist, record_buy, record_sale, update_dca_order_amount, upsert_holding
 from models import BuyHoldingInput, DcaOrder, DcaOrderInput, Holding, HoldingInput, PortfolioDashboard, PortfolioTransaction, SellHoldingInput, SellHoldingResult
@@ -16,6 +17,12 @@ def portfolio(request: Request) -> PortfolioDashboard:
 @router.get("/quotes")
 def portfolio_quotes(request: Request) -> dict:
     return build_portfolio_quotes(require_user_id(request))
+
+
+@router.get("/fx")
+def portfolio_fx(request: Request) -> dict:
+    require_user_id(request)
+    return fx_payload()
 
 
 @router.put("/holdings", response_model=Holding)

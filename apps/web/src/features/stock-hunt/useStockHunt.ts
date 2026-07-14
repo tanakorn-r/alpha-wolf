@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StockRecord, StrategyKey } from "../../data/market";
-import { buyHolding, loadAuthUser, loadDiscoveries, summarizeStock, type StockAnalysisResponse } from "../../lib/api";
+import { buyHolding, loadAuthUser, loadDiscoveries, loadFxRates, summarizeStock, type StockAnalysisResponse } from "../../lib/api";
 import { formatCurrency, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
 import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useWolfStore } from "../../store/useWolfStore";
@@ -278,12 +278,13 @@ export function useStockHunt() {
       setApplyingTop5(true);
       setApplyTop5Error("");
       try {
+        const fx = await loadFxRates();
         for (const pick of top5) {
           if (!pick.item.price || pick.item.price <= 0) continue;
           // pick.amount is a USD-base budget; convert the native price so share count is right for THB.
-          const price = priceToUsdBase(pick.item.price, pick.item.currency ?? pick.item.symbol);
+          const price = priceToUsdBase(pick.item.price, pick.item.currency ?? pick.item.symbol, fx.rates);
           const boughtShares = pick.amount / price;
-          await buyHolding({ symbol: pick.item.symbol, shares: boughtShares, price, strategy: baseStrategy });
+          await buyHolding({ symbol: pick.item.symbol, shares: boughtShares, price: pick.item.price, currency: pick.item.currency ?? undefined, strategy: baseStrategy });
         }
         const amount = top5.reduce((sum, pick) => sum + pick.amount, 0);
         setTop5Applied({ count: top5.length, amount });

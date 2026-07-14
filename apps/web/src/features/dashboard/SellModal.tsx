@@ -12,8 +12,8 @@ export function SellModal({ dash }: { dash: Dashboard }) {
   const shares = Math.min(Number(form.value.shares || 0), holding.shares);
   const executionPrice = Number(form.value.price || 0);
   const feesNative = Number(form.value.fees || 0);
-  const proceeds = shares * priceToUsdBase(executionPrice, holding.currency ?? holding.symbol) - priceToUsdBase(feesNative, holding.currency ?? holding.symbol);
-  const estimatedBasis = fifoBasis(dash.portfolio?.transactions ?? [], holding.symbol, form.value.occurredAt, shares, holding.averageCost);
+  const proceeds = shares * priceToUsdBase(executionPrice, holding.currency ?? holding.symbol, dash.portfolio?.fxRates) - priceToUsdBase(feesNative, holding.currency ?? holding.symbol, dash.portfolio?.fxRates);
+  const estimatedBasis = fifoBasis(dash.portfolio?.transactions ?? [], holding.symbol, form.value.occurredAt, shares, holding.currency ?? holding.symbol, dash.portfolio?.fxRates, holding.shares > 0 ? holding.cost / holding.shares : holding.averageCost);
   const estimatedPnl = proceeds - estimatedBasis;
   return (
     <Modal title={`Record sale · ${holding.symbol}`} onClose={dash.cancelSell}>
@@ -64,21 +64,22 @@ function Row({ label, value, color }: { label: string; value: React.ReactNode; c
   );
 }
 
-function fifoBasis(transactions: NonNullable<Dashboard["portfolio"]>["transactions"], symbol: string, throughDate: string, requestedShares: number, fallbackUnitCost: number) {
+function fifoBasis(transactions: NonNullable<Dashboard["portfolio"]>["transactions"], symbol: string, throughDate: string, requestedShares: number, currencyOrSymbol: string, rates: Record<string, number> | undefined, fallbackUnitCost: number) {
   const lots: Array<[number, number]> = [];
   const ordered = transactions
     .filter((item) => item.symbol === symbol && item.occurredAt.slice(0, 10) <= throughDate)
     .sort((a, b) => a.occurredAt.localeCompare(b.occurredAt) || a.id - b.id);
   for (const transaction of ordered) {
     if (transaction.kind === "BUY" && transaction.shares > 0) {
-      lots.push([transaction.shares, (transaction.costBasis ?? transaction.amount) / transaction.shares]);
+      const nativeCost = transaction.shares * transaction.nativePrice + transaction.nativeFees;
+      lots.push([transaction.shares, nativeCost / transaction.shares]);
     } else if (transaction.kind === "SELL") {
       consume(lots, transaction.shares);
     }
   }
   const basis = consume(lots, requestedShares);
   const covered = Math.min(requestedShares, Math.max(0, ordered.reduce((sum, item) => sum + (item.kind === "BUY" ? item.shares : item.kind === "SELL" ? -item.shares : 0), 0)));
-  return basis + Math.max(0, requestedShares - covered) * fallbackUnitCost;
+  return priceToUsdBase(basis, currencyOrSymbol, rates) + Math.max(0, requestedShares - covered) * fallbackUnitCost;
 }
 
 function consume(lots: Array<[number, number]>, requestedShares: number) {

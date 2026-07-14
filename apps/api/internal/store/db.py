@@ -327,9 +327,33 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
             realized_pnl REAL,
             occurred_at TEXT NOT NULL,
             source TEXT NOT NULL,
-            created_at TEXT NOT NULL
+            created_at TEXT NOT NULL,
+            native_currency TEXT NOT NULL DEFAULT 'USD',
+            native_price REAL NOT NULL DEFAULT 0,
+            native_fees REAL NOT NULL DEFAULT 0,
+            fx_rate REAL NOT NULL DEFAULT 1
         )
         """
+    )
+    transaction_columns = _table_columns(db, "portfolio_transactions")
+    if "native_currency" not in transaction_columns:
+        db.execute("ALTER TABLE portfolio_transactions ADD COLUMN native_currency TEXT NOT NULL DEFAULT 'USD'")
+    if "native_price" not in transaction_columns:
+        db.execute("ALTER TABLE portfolio_transactions ADD COLUMN native_price REAL NOT NULL DEFAULT 0")
+        db.execute("UPDATE portfolio_transactions SET native_price = price")
+    if "native_fees" not in transaction_columns:
+        db.execute("ALTER TABLE portfolio_transactions ADD COLUMN native_fees REAL NOT NULL DEFAULT 0")
+        db.execute("UPDATE portfolio_transactions SET native_fees = fees")
+    if "fx_rate" not in transaction_columns:
+        db.execute("ALTER TABLE portfolio_transactions ADD COLUMN fx_rate REAL NOT NULL DEFAULT 1")
+    # Before native execution fields existed, .BK prices were divided by the app's former
+    # fixed 36.5 THB/USD rate in the browser. Recover the original THB execution so a Thai
+    # holding is compared price-to-price in THB rather than manufacturing an FX return.
+    db.execute(
+        """UPDATE portfolio_transactions
+           SET native_currency = 'THB', native_price = price * 36.5,
+               native_fees = fees * 36.5, fx_rate = 36.5
+           WHERE symbol LIKE '%.BK' AND native_currency = 'USD' AND fx_rate = 1"""
     )
     db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_user_time ON portfolio_transactions(user_id, occurred_at, id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_transactions_user_symbol ON portfolio_transactions(user_id, symbol, occurred_at, id)")
@@ -338,11 +362,16 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
     db.execute(
         """
         INSERT INTO portfolio_transactions(
-            user_id, symbol, kind, shares, price, amount, fees, cost_basis,
+            user_id, symbol, kind, shares, price, amount, fees,
+            native_currency, native_price, native_fees, fx_rate, cost_basis,
             realized_pnl, occurred_at, source, created_at
         )
         SELECT h.user_id, h.symbol, 'BUY', h.shares, h.average_cost,
-               h.shares * h.average_cost, 0, h.shares * h.average_cost,
+               h.shares * h.average_cost, 0,
+               CASE WHEN h.symbol LIKE '%.BK' THEN 'THB' ELSE 'USD' END,
+               CASE WHEN h.symbol LIKE '%.BK' THEN h.average_cost * 36.5 ELSE h.average_cost END,
+               0, CASE WHEN h.symbol LIKE '%.BK' THEN 36.5 ELSE 1 END,
+               h.shares * h.average_cost,
                NULL, h.created_at, 'OPENING_BALANCE', h.created_at
         FROM holdings h
         WHERE h.user_id > 0

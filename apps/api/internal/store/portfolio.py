@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta, timezone
 
+from internal.fx import normalize_currency, to_usd
 from internal.store.db import connect
 from models import BuyHoldingInput, DcaOrder, DcaOrderInput, Holding, HoldingInput, PortfolioTransaction, SellHoldingInput, SellHoldingResult
 
@@ -45,15 +46,24 @@ def record_buy(value: BuyHoldingInput, user_id: int) -> Holding:
     _require_account(user_id)
     symbol = value.symbol.strip().upper()
     occurred_at = _occurred_at(value.occurredAt)
+    transaction_date = datetime.fromisoformat(occurred_at).date()
+    fx_date = transaction_date if transaction_date < datetime.now(timezone.utc).date() else None
+    # A missing currency is the legacy API contract: price is already USD-base.
+    # New browser clients always send the instrument's native ISO currency.
+    native_currency = normalize_currency(value.currency, symbol if value.currency else None)
+    price, fx = to_usd(value.price, native_currency, symbol=symbol, on_date=fx_date)
+    fees, _ = to_usd(value.fees, native_currency, symbol=symbol, on_date=fx_date)
     created_at = datetime.now(timezone.utc).isoformat()
-    gross_cost = value.shares * value.price + value.fees
+    gross_cost = value.shares * price + fees
     with connect() as db:
         db.execute(
             """INSERT INTO portfolio_transactions(
                    user_id, symbol, kind, shares, price, amount, fees, cost_basis,
-                   realized_pnl, occurred_at, source, created_at
-               ) VALUES(?, ?, 'BUY', ?, ?, ?, ?, ?, NULL, ?, 'USER', ?)""",
-            (user_id, symbol, value.shares, value.price, gross_cost, value.fees, gross_cost, occurred_at, created_at),
+                   realized_pnl, occurred_at, source, created_at,
+                   native_currency, native_price, native_fees, fx_rate
+               ) VALUES(?, ?, 'BUY', ?, ?, ?, ?, ?, NULL, ?, 'USER', ?, ?, ?, ?, ?)""",
+            (user_id, symbol, value.shares, price, gross_cost, fees, gross_cost, occurred_at, created_at,
+             native_currency, value.price, value.fees, fx.rate),
         )
         result = _sync_holding_from_ledger(db, user_id, symbol, value.strategy, value.monthlyDca)
         if not result:
@@ -66,6 +76,11 @@ def record_sale(symbol: str, value: SellHoldingInput, user_id: int) -> SellHoldi
     _require_account(user_id)
     normalized = symbol.strip().upper()
     occurred_at = _occurred_at(value.occurredAt)
+    transaction_date = datetime.fromisoformat(occurred_at).date()
+    fx_date = transaction_date if transaction_date < datetime.now(timezone.utc).date() else None
+    native_currency = normalize_currency(value.currency, normalized if value.currency else None)
+    price, fx = to_usd(value.price, native_currency, symbol=normalized, on_date=fx_date)
+    fees, _ = to_usd(value.fees, native_currency, symbol=normalized, on_date=fx_date)
     created_at = datetime.now(timezone.utc).isoformat()
     with connect() as db:
         holding_row = db.execute("SELECT * FROM holdings WHERE user_id = ? AND symbol = ?", (user_id, normalized)).fetchone()
@@ -84,14 +99,16 @@ def record_sale(symbol: str, value: SellHoldingInput, user_id: int) -> SellHoldi
         if value.shares > available_at_sale + 1e-9:
             raise ValueError(f"Only {available_at_sale:g} shares were held on {occurred_at[:10]}")
         cost_basis = _consume_lots(lots, value.shares, fallback_unit_cost=holding.averageCost)
-        proceeds = value.shares * value.price - value.fees
+        proceeds = value.shares * price - fees
         realized_pnl = proceeds - cost_basis
         cursor = db.execute(
             """INSERT INTO portfolio_transactions(
                    user_id, symbol, kind, shares, price, amount, fees, cost_basis,
-                   realized_pnl, occurred_at, source, created_at
-               ) VALUES(?, ?, 'SELL', ?, ?, ?, ?, ?, ?, ?, 'USER', ?)""",
-            (user_id, normalized, value.shares, value.price, proceeds, value.fees, cost_basis, realized_pnl, occurred_at, created_at),
+                   realized_pnl, occurred_at, source, created_at,
+                   native_currency, native_price, native_fees, fx_rate
+               ) VALUES(?, ?, 'SELL', ?, ?, ?, ?, ?, ?, ?, 'USER', ?, ?, ?, ?, ?)""",
+            (user_id, normalized, value.shares, price, proceeds, fees, cost_basis, realized_pnl, occurred_at, created_at,
+             native_currency, value.price, value.fees, fx.rate),
         )
         updated = _sync_holding_from_ledger(db, user_id, normalized, holding.strategy, holding.monthlyDca)
         remaining_holding = _holding(updated) if updated else None
@@ -230,6 +247,10 @@ def _transaction(row) -> PortfolioTransaction:
         price=_row_value(row, "price", 5),
         amount=_row_value(row, "amount", 6),
         fees=_row_value(row, "fees", 7),
+        nativeCurrency=_row_value(row, "native_currency", 13) or "USD",
+        nativePrice=_row_value(row, "native_price", 14) or _row_value(row, "price", 5),
+        nativeFees=_row_value(row, "native_fees", 15) or 0,
+        fxRate=_row_value(row, "fx_rate", 16) or 1,
         costBasis=_row_value(row, "cost_basis", 8),
         realizedPnl=_row_value(row, "realized_pnl", 9),
         occurredAt=_row_value(row, "occurred_at", 10),

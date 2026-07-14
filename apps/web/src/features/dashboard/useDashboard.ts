@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { buyHolding, loadAuthUser, loadPortfolio, loadPortfolioQuotes, loadPortfolioReview, sellHolding, type PortfolioHolding, type PortfolioReviewResponse } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
-import { priceToUsdBase } from "../../lib/format";
+import { priceToUsdBase, setFxRates } from "../../lib/format";
 import { localDateKey } from "../../lib/date";
 
 export type Dashboard = ReturnType<typeof useDashboard>;
@@ -32,6 +32,7 @@ export function useDashboard() {
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
   const portfolioQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: Boolean(authQuery.data?.id) });
   const savedPortfolio = portfolioQuery.data;
+  setFxRates(savedPortfolio?.fxRates);
   const holdingSymbolsKey = (savedPortfolio?.holdings ?? []).map((holding) => holding.symbol).sort().join(",");
   const quoteRefreshStartedAt = useRef(0);
   const quotesQuery = useQuery({
@@ -63,7 +64,7 @@ export function useDashboard() {
     const holdings = savedPortfolio.holdings.map((holding) => {
       const quote = freshQuotes.get(holding.symbol);
       if (!quote?.price) return holding;
-      const value = holding.shares * priceToUsdBase(quote.price, holding.symbol);
+      const value = holding.shares * priceToUsdBase(quote.price, holding.currency ?? holding.symbol, quotesQuery.data?.fxRates ?? savedPortfolio.fxRates);
       const gainLoss = value - holding.cost;
       return {
         ...holding,
@@ -181,8 +182,10 @@ export function useDashboard() {
     async confirmSell() {
       if (!sellTarget) return;
       const shares = Number(sellValue.shares);
-      const price = priceToUsdBase(Number(sellValue.price), sellTarget.currency ?? sellTarget.symbol);
-      const fees = priceToUsdBase(Number(sellValue.fees || 0), sellTarget.currency ?? sellTarget.symbol);
+      const nativePrice = Number(sellValue.price);
+      const nativeFees = Number(sellValue.fees || 0);
+      const price = priceToUsdBase(nativePrice, sellTarget.currency ?? sellTarget.symbol, portfolio?.fxRates);
+      const fees = priceToUsdBase(nativeFees, sellTarget.currency ?? sellTarget.symbol, portfolio?.fxRates);
       const fullSaleTolerance = Math.max(1e-8, Math.abs(sellTarget.shares) * 1e-10);
       const normalizedShares = Math.abs(shares - sellTarget.shares) <= fullSaleTolerance ? sellTarget.shares : shares;
       if (!(normalizedShares > 0) || normalizedShares > sellTarget.shares + fullSaleTolerance || !(price > 0) || fees < 0) {
@@ -191,7 +194,7 @@ export function useDashboard() {
       }
       setSelling(true);
       try {
-        await sellHolding(sellTarget.symbol, { shares: normalizedShares, price, fees, occurredAt: sellValue.occurredAt });
+        await sellHolding(sellTarget.symbol, { shares: normalizedShares, price: nativePrice, fees: nativeFees, currency: sellTarget.currency ?? undefined, occurredAt: sellValue.occurredAt });
         setSellTarget(null);
         refresh();
       } catch (error) {
@@ -222,8 +225,8 @@ export function useDashboard() {
         const symbol = formValue.symbol.trim().toUpperCase();
         const boughtShares = Number(formValue.shares);
         // The user types the price in the stock's native currency (THB for .BK); the store is USD base.
-        const price = priceToUsdBase(Number(formValue.averageCost), symbol);
-        const fees = priceToUsdBase(Number(formValue.fees || 0), symbol);
+        const price = Number(formValue.averageCost);
+        const fees = Number(formValue.fees || 0);
         if (!symbol || !(boughtShares > 0) || !(price > 0) || fees < 0) return;
         setFormSaving(true);
         try {
@@ -233,6 +236,7 @@ export function useDashboard() {
             shares: boughtShares,
             price,
             fees,
+            currency: symbol.endsWith(".BK") ? "THB" : "USD",
             occurredAt: formValue.occurredAt,
             monthlyDca: existing?.monthlyDca ?? 0,
             strategy: existing?.strategy ?? "stable_dca",

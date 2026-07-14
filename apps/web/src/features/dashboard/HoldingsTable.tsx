@@ -27,7 +27,7 @@ export function HoldingsTable({ dash }: { dash: Dashboard }) {
               </div>
               <div className="hidden min-[760px]:block">
                 {/* Compare like units: averageCost is USD-base, holding.price is instrument-native. */}
-                <Sparkline values={[holding.averageCost, priceToUsdBase(holding.price, holding.currency ?? holding.symbol)]} color={good ? "#3ecf8e" : "#f2575c"} />
+                <Sparkline values={[holding.averageCost, priceToUsdBase(holding.price, holding.currency ?? holding.symbol, dash.portfolio?.fxRates)]} color={good ? "#3ecf8e" : "#f2575c"} />
               </div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-3 min-[480px]:grid-cols-4 min-[760px]:contents">
                 <Cell label="Since buy" value={formatPercent(holding.gainLossPct)} good={good} />

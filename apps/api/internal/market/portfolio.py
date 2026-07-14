@@ -7,58 +7,63 @@ from typing import Any
 import pandas as pd
 
 from internal.market.records import build_entry_from_info, fetch_record_from_ticker, merge_ticker_info
+from internal.fx import fx_payload
 from internal.store.portfolio import list_dca_orders, list_holdings, list_transactions
 from internal.store.utils import as_float, coerce_iso_date
 from internal.yahoo.client import fetch_dividends, fetch_history, load_ticker_modules, quote_snapshot_meta, ticker as make_ticker
 from models import IncomeEvent, PortfolioDashboard, PortfolioMarker, PortfolioPoint, PortfolioSummary
 
 
-# The app keeps all portfolio money in USD base; the web client stores holding cost basis
-# already converted (THB price / 36.5). Live prices/dividends come back in the stock's native
-# currency, so they must be converted the same way or a THB holding reads ~36.5x its real value.
-_FX_TO_USD = {"THB": 36.5}
-
-
-def _to_base(value: float, currency: str | None) -> float:
-    rate = _FX_TO_USD.get((currency or "").upper())
+def _to_base(value: float, currency: str | None, rates: dict[str, float]) -> float:
+    rate = rates.get((currency or "USD").upper())
     return value / rate if rate else value
 
 
-def _to_base_series(series: pd.Series, currency: str | None) -> pd.Series:
-    rate = _FX_TO_USD.get((currency or "").upper())
+def _to_base_series(series: pd.Series, currency: str | None, rates: dict[str, float]) -> pd.Series:
+    rate = rates.get((currency or "USD").upper())
     return series / rate if rate else series
 
 
 def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
+    fx = fx_payload()
+    rates = dict(fx["rates"])
+    thb_per_usd = float(rates["THB"])
     holdings = list_holdings(user_id)
     orders = list_dca_orders(user_id)
     transactions = list_transactions(user_id)
-    realized_gain_loss = sum(float(item.realizedPnl or 0) for item in transactions if item.kind == "SELL")
-    gross_invested = sum(float(item.amount or 0) for item in transactions if item.kind == "BUY")
-    ledger_cash, net_contributions = _cash_ledger(transactions)
     transactions_by_symbol: dict[str, list[Any]] = {}
     for transaction in transactions:
         transactions_by_symbol.setdefault(transaction.symbol, []).append(transaction)
+    cash_by_currency, contributions_by_currency, gross_by_currency = _native_cash_ledger(transactions)
+    ledger_cash_thb = _buckets_to_thb(cash_by_currency, thb_per_usd)
+    net_contributions_thb = _buckets_to_thb(contributions_by_currency, thb_per_usd)
+    gross_invested_thb = _buckets_to_thb(gross_by_currency, thb_per_usd)
+    realized_gain_loss_thb = sum(
+        _native_to_thb(_native_fifo_metrics(items)[1], _transaction_currency(items[0]), thb_per_usd)
+        for items in transactions_by_symbol.values()
+        if items
+    )
     active_symbols = {holding.symbol for holding in holdings}
-    closed_dividends_ytd = _closed_position_dividends(transactions_by_symbol, active_symbols)
+    closed_dividends_ytd_thb = _closed_position_dividends(transactions_by_symbol, active_symbols, thb_per_usd)
     if not holdings:
-        cash_balance = ledger_cash + closed_dividends_ytd
-        total_return = cash_balance - net_contributions
+        cash_balance_thb = ledger_cash_thb + closed_dividends_ytd_thb
+        total_return_thb = cash_balance_thb - net_contributions_thb
         return PortfolioDashboard(
             summary=PortfolioSummary(
-                totalValue=round(cash_balance, 2),
-                gainLoss=round(total_return, 2),
-                gainLossPct=round((total_return / net_contributions) * 100, 2) if net_contributions else 0,
-                dividendsYtd=round(closed_dividends_ytd, 2),
-                realizedGainLoss=round(realized_gain_loss, 2),
-                totalReturn=round(total_return, 2),
-                grossInvested=round(gross_invested, 2),
-                netContributions=round(net_contributions, 2),
-                cashBalance=round(cash_balance, 2),
+                totalValue=_transport_money(cash_balance_thb, thb_per_usd),
+                gainLoss=_transport_money(total_return_thb, thb_per_usd),
+                gainLossPct=round((total_return_thb / net_contributions_thb) * 100, 2) if net_contributions_thb else 0,
+                dividendsYtd=_transport_money(closed_dividends_ytd_thb, thb_per_usd),
+                realizedGainLoss=_transport_money(realized_gain_loss_thb, thb_per_usd),
+                totalReturn=_transport_money(total_return_thb, thb_per_usd),
+                grossInvested=_transport_money(gross_invested_thb, thb_per_usd),
+                netContributions=_transport_money(net_contributions_thb, thb_per_usd),
+                cashBalance=_transport_money(cash_balance_thb, thb_per_usd),
             ),
             dcaOrders=orders,
             markers=[PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
             transactions=transactions,
+            **_dashboard_fx(fx),
         )
 
     # Each holding's market data is an independent set of cache/yfinance round trips — a
@@ -69,73 +74,74 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
         live = list(pool.map(_load_holding_market_data, holdings))
 
     rows: list[dict[str, object]] = []
-    invested = 0.0
-    securities_value = 0.0
-    dividends_ytd = closed_dividends_ytd
-    annual_income = 0.0
-    histories: list[tuple[list[Any], pd.Series]] = []
+    invested_thb = 0.0
+    securities_value_thb = 0.0
+    dividends_ytd_thb = closed_dividends_ytd_thb
+    annual_income_thb = 0.0
+    histories: list[tuple[list[Any], pd.Series, str]] = []
     income_events: list[IncomeEvent] = []
     buy_markers: list[PortfolioMarker] = []
 
     for holding, data in zip(holdings, live, strict=True):
         record, history, info, paid_dividends = data
         symbol_transactions = transactions_by_symbol.get(holding.symbol, [])
-        currency = record.get("currency")
+        currency = str(record.get("currency") or (_transaction_currency(symbol_transactions[0]) if symbol_transactions else ("THB" if holding.symbol.endswith(".BK") else "USD"))).upper()
+        native_cost, _realized = _native_fifo_metrics(symbol_transactions)
         # A brand-new holding may render before its first quote snapshot arrives. Cost basis is the
         # honest non-live placeholder; zero would fabricate a -100% loss until the quote overlay.
-        price_base = _to_base(float(record["price"]), currency) if record.get("price") else holding.averageCost
-        value = holding.shares * price_base
-        cost = holding.shares * holding.averageCost
-        invested += cost
-        securities_value += value
-        dividends_ytd += _to_base(_dividends_for_transactions(paid_dividends, symbol_transactions), currency)
-        annual_income += holding.shares * _to_base(as_float(info.get("dividendRate")) or 0.0, currency)
+        native_price = float(record["price"]) if record.get("price") else (native_cost / holding.shares if holding.shares else 0.0)
+        value_thb = _native_to_thb(holding.shares * native_price, currency, thb_per_usd)
+        cost_thb = _native_to_thb(native_cost, currency, thb_per_usd)
+        invested_thb += cost_thb
+        securities_value_thb += value_thb
+        dividends_ytd_thb += _native_to_thb(_dividends_for_transactions(paid_dividends, symbol_transactions), currency, thb_per_usd)
+        annual_income_thb += _native_to_thb(holding.shares * (as_float(info.get("dividendRate")) or 0.0), currency, thb_per_usd)
         purchase_date = _first_buy_date(symbol_transactions) or _iso_date(holding.createdAt)
-        closes = _to_base_series(
-            _close_series(history, since=purchase_date, current_price=float(record["price"]) if record.get("price") else None),
-            currency,
-        )
+        closes = _close_series(history, since=purchase_date, current_price=float(record["price"]) if record.get("price") else None)
         if not closes.empty:
-            histories.append((symbol_transactions, closes))
-        rows.append({**holding.model_dump(), **record, "value": round(value, 2), "cost": round(cost, 2), "gainLoss": round(value - cost, 2), "gainLossPct": round(((value - cost) / cost) * 100, 2) if cost else 0})
+            histories.append((symbol_transactions, closes, currency))
+        rows.append({**holding.model_dump(), **record, "value": _transport_money(value_thb, thb_per_usd), "cost": _transport_money(cost_thb, thb_per_usd), "gainLoss": _transport_money(value_thb - cost_thb, thb_per_usd), "gainLossPct": round(((value_thb - cost_thb) / cost_thb) * 100, 2) if cost_thb else 0})
         income_events.extend(_income_events(holding.symbol, holding.shares, info))
         for transaction in symbol_transactions:
             if transaction.kind == "BUY":
-                buy_markers.append(PortfolioMarker(date=transaction.occurredAt[:10], symbol=holding.symbol, amount=round(transaction.amount, 2)))
+                marker_thb = _native_to_thb(_transaction_native_amount(transaction), _transaction_currency(transaction), thb_per_usd)
+                buy_markers.append(PortfolioMarker(date=transaction.occurredAt[:10], symbol=holding.symbol, amount=_transport_money(marker_thb, thb_per_usd)))
 
-    cash_balance = ledger_cash + dividends_ytd
-    total_value = securities_value + cash_balance
-    unrealized_gain_loss = securities_value - invested
-    total_return = unrealized_gain_loss + realized_gain_loss + dividends_ytd
+    cash_balance_thb = ledger_cash_thb + dividends_ytd_thb
+    total_value_thb = securities_value_thb + cash_balance_thb
+    unrealized_gain_loss_thb = securities_value_thb - invested_thb
+    total_return_thb = unrealized_gain_loss_thb + realized_gain_loss_thb + dividends_ytd_thb
     return PortfolioDashboard(
         summary=PortfolioSummary(
-            totalValue=round(total_value, 2),
-            invested=round(invested, 2),
-            gainLoss=round(total_return, 2),
-            gainLossPct=round((total_return / net_contributions) * 100, 2) if net_contributions else 0,
-            dividendsYtd=round(dividends_ytd, 2),
-            forwardYield=round((annual_income / securities_value) * 100, 2) if securities_value else 0,
-            unrealizedGainLoss=round(unrealized_gain_loss, 2),
-            realizedGainLoss=round(realized_gain_loss, 2),
-            totalReturn=round(total_return, 2),
-            grossInvested=round(gross_invested, 2),
-            netContributions=round(net_contributions, 2),
-            cashBalance=round(cash_balance, 2),
+            totalValue=_transport_money(total_value_thb, thb_per_usd),
+            invested=_transport_money(invested_thb, thb_per_usd),
+            gainLoss=_transport_money(total_return_thb, thb_per_usd),
+            gainLossPct=round((total_return_thb / net_contributions_thb) * 100, 2) if net_contributions_thb else 0,
+            dividendsYtd=_transport_money(dividends_ytd_thb, thb_per_usd),
+            forwardYield=round((annual_income_thb / securities_value_thb) * 100, 2) if securities_value_thb else 0,
+            unrealizedGainLoss=_transport_money(unrealized_gain_loss_thb, thb_per_usd),
+            realizedGainLoss=_transport_money(realized_gain_loss_thb, thb_per_usd),
+            totalReturn=_transport_money(total_return_thb, thb_per_usd),
+            grossInvested=_transport_money(gross_invested_thb, thb_per_usd),
+            netContributions=_transport_money(net_contributions_thb, thb_per_usd),
+            cashBalance=_transport_money(cash_balance_thb, thb_per_usd),
         ),
         holdings=rows,
         dcaOrders=orders,
-        chart=_portfolio_chart(histories),
+        chart=_portfolio_chart(histories, thb_per_usd),
         markers=buy_markers + [PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
         incomeEvents=sorted(income_events, key=lambda item: item.date),
         transactions=transactions,
+        **_dashboard_fx(fx),
     )
 
 
 def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
     """Latest quote overlay only; the browser merges this into the saved dashboard."""
+    fx = fx_payload()
     holdings = list_holdings(user_id)
     if not holdings:
-        return {"quotes": [], "pending": False, "updatedAt": None}
+        return {"quotes": [], "pending": False, "updatedAt": None, **_quote_fx(fx)}
 
     def load(holding) -> dict[str, Any]:
         modules = load_ticker_modules(make_ticker(holding.symbol), holding.symbol)
@@ -160,6 +166,7 @@ def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
         "quotes": quotes,
         "pending": any(not item.get("fresh") for item in quotes),
         "updatedAt": max(fresh_dates) if fresh_dates else None,
+        **_quote_fx(fx),
     }
 
 
@@ -201,7 +208,7 @@ def _dividends_for_transactions(dividends: pd.Series | None, transactions: list[
     return total
 
 
-def _closed_position_dividends(transactions_by_symbol: dict[str, list[Any]], active_symbols: set[str]) -> float:
+def _closed_position_dividends(transactions_by_symbol: dict[str, list[Any]], active_symbols: set[str], thb_per_usd: float) -> float:
     closed_symbols = [symbol for symbol in transactions_by_symbol if symbol not in active_symbols]
     if not closed_symbols:
         return 0.0
@@ -213,8 +220,121 @@ def _closed_position_dividends(transactions_by_symbol: dict[str, list[Any]], act
     with ThreadPoolExecutor(max_workers=min(6, len(closed_symbols))) as pool:
         for symbol, dividends in pool.map(load, closed_symbols):
             native_total = _dividends_for_transactions(dividends, transactions_by_symbol[symbol])
-            total += _to_base(native_total, "THB" if symbol.endswith(".BK") else "USD")
+            total += _native_to_thb(native_total, "THB" if symbol.endswith(".BK") else "USD", thb_per_usd)
     return total
+
+
+def _dashboard_fx(fx: dict[str, object]) -> dict[str, object]:
+    return {
+        "fxRates": fx["rates"],
+        "fxFetchedAt": fx["fetchedAt"],
+        "fxSource": fx["source"],
+        "fxStale": fx["stale"],
+        "reportingCurrency": "THB",
+    }
+
+
+def _quote_fx(fx: dict[str, object]) -> dict[str, object]:
+    return {
+        "fxRates": fx["rates"],
+        "fxFetchedAt": fx["fetchedAt"],
+        "fxSource": fx["source"],
+        "fxStale": fx["stale"],
+    }
+
+
+def _transaction_currency(transaction: Any) -> str:
+    currency = str(getattr(transaction, "nativeCurrency", "") or "").upper()
+    if currency:
+        return currency
+    return "THB" if str(getattr(transaction, "symbol", "")).upper().endswith(".BK") else "USD"
+
+
+def _transaction_native_amount(transaction: Any) -> float:
+    currency = _transaction_currency(transaction)
+    native_price = float(getattr(transaction, "nativePrice", 0) or 0)
+    native_fees = float(getattr(transaction, "nativeFees", 0) or 0)
+    if native_price <= 0:
+        fx_rate = float(getattr(transaction, "fxRate", 1) or 1)
+        native_price = float(getattr(transaction, "price", 0) or 0) * (fx_rate if currency != "USD" else 1)
+        native_fees = float(getattr(transaction, "fees", 0) or 0) * (fx_rate if currency != "USD" else 1)
+    gross = float(getattr(transaction, "shares", 0) or 0) * native_price
+    return gross - native_fees if transaction.kind == "SELL" else gross + native_fees
+
+
+def _native_fifo_details(transactions: list[Any]) -> tuple[float, float, dict[int, float]]:
+    lots: list[list[float]] = []
+    realized = 0.0
+    event_basis: dict[int, float] = {}
+    for transaction in sorted(transactions, key=lambda item: (item.occurredAt, item.id)):
+        shares = float(transaction.shares or 0)
+        if transaction.kind == "BUY" and shares > 0:
+            cost = _transaction_native_amount(transaction)
+            lots.append([shares, cost / shares])
+            event_basis[transaction.id] = cost
+        elif transaction.kind == "SELL" and shares > 0:
+            basis = _consume_lots(lots, shares)
+            event_basis[transaction.id] = basis
+            realized += _transaction_native_amount(transaction) - basis
+    remaining_cost = sum(shares * unit_cost for shares, unit_cost in lots)
+    return remaining_cost, realized, event_basis
+
+
+def _native_fifo_metrics(transactions: list[Any]) -> tuple[float, float]:
+    remaining, realized, _events = _native_fifo_details(transactions)
+    return remaining, realized
+
+
+def _consume_lots(lots: list[list[float]], requested_shares: float) -> float:
+    remaining = requested_shares
+    basis = 0.0
+    while remaining > 1e-9 and lots:
+        lot_shares, unit_cost = lots[0]
+        used = min(remaining, lot_shares)
+        basis += used * unit_cost
+        remaining -= used
+        lot_shares -= used
+        if lot_shares <= 1e-9:
+            lots.pop(0)
+        else:
+            lots[0][0] = lot_shares
+    return basis
+
+
+def _native_cash_ledger(transactions: list[Any]) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
+    cash: dict[str, float] = {}
+    contributions: dict[str, float] = {}
+    gross_invested: dict[str, float] = {}
+    for transaction in sorted(transactions, key=lambda item: (item.occurredAt, item.id)):
+        currency = _transaction_currency(transaction)
+        amount = _transaction_native_amount(transaction)
+        cash.setdefault(currency, 0.0)
+        contributions.setdefault(currency, 0.0)
+        gross_invested.setdefault(currency, 0.0)
+        if transaction.kind == "BUY":
+            gross_invested[currency] += amount
+            used_cash = min(cash[currency], amount)
+            cash[currency] -= used_cash
+            contributions[currency] += amount - used_cash
+        elif transaction.kind in {"SELL", "DIVIDEND"}:
+            cash[currency] += amount
+        elif transaction.kind == "FEE":
+            cash[currency] -= amount
+    return cash, contributions, gross_invested
+
+
+def _native_to_thb(value: float, currency: str, thb_per_usd: float) -> float:
+    return value if currency.upper() == "THB" else value * thb_per_usd
+
+
+def _buckets_to_thb(values: dict[str, float], thb_per_usd: float) -> float:
+    return sum(_native_to_thb(value, currency, thb_per_usd) for currency, value in values.items())
+
+
+def _transport_money(thb_value: float, thb_per_usd: float) -> float:
+    # API money remains USD-equivalent for compatibility. The web layer immediately renders
+    # the primary THB figure by applying this same live rate, so native THB totals round-trip.
+    return round(thb_value / thb_per_usd, 2) if thb_per_usd else 0.0
 
 
 def _cash_ledger(transactions: list[Any]) -> tuple[float, float]:
@@ -262,18 +382,22 @@ def _close_series(history: pd.DataFrame, since: str | None = None, current_price
     return closes
 
 
-def _portfolio_chart(histories: list[tuple[list[Any], pd.Series]]) -> list[PortfolioPoint]:
+def _portfolio_chart(histories: list[tuple], thb_per_usd: float = 1.0) -> list[PortfolioPoint]:
     if not histories:
         return []
-    all_index = pd.concat([series.rename(str(index)) for index, (_transactions, series) in enumerate(histories)], axis=1).sort_index().index
+    all_index = pd.concat([entry[1].rename(str(index)) for index, entry in enumerate(histories)], axis=1).sort_index().index
     if all_index.empty:
         return []
     value_series = pd.Series(0.0, index=all_index)
     cost_series = pd.Series(0.0, index=all_index)
-    for transactions, closes in histories:
-        aligned_closes = closes.reindex(all_index).ffill()
+    for entry in histories:
+        transactions, closes = entry[0], entry[1]
+        currency = str(entry[2] if len(entry) > 2 else "USD").upper()
+        transport_factor = (1 / thb_per_usd) if currency == "THB" and thb_per_usd else 1.0
+        aligned_closes = closes.reindex(all_index).ffill() * transport_factor
         shares_path = pd.Series(0.0, index=all_index)
         position_cost_path = pd.Series(0.0, index=all_index)
+        _remaining, _realized, event_basis = _native_fifo_details(transactions)
         for transaction in transactions:
             if transaction.kind not in {"BUY", "SELL"}:
                 continue
@@ -281,10 +405,10 @@ def _portfolio_chart(histories: list[tuple[list[Any], pd.Series]]) -> list[Portf
             mask = [timestamp.date() >= event_date for timestamp in all_index]
             if transaction.kind == "BUY":
                 shares_path[mask] += transaction.shares
-                position_cost_path[mask] += float(transaction.costBasis or transaction.amount or 0)
+                position_cost_path[mask] += event_basis.get(transaction.id, 0.0) * transport_factor
             else:
                 shares_path[mask] -= transaction.shares
-                position_cost_path[mask] -= float(transaction.costBasis or 0)
+                position_cost_path[mask] -= event_basis.get(transaction.id, 0.0) * transport_factor
         value_series += (aligned_closes * shares_path).fillna(0.0)
         cost_series += position_cost_path.clip(lower=0.0)
 

@@ -29,7 +29,7 @@ export function StatsRow({ dash }: { dash: Dashboard }) {
       />
       <MetricCard label="Open cost" value={<Money value={summary?.invested} />} detail={summary?.cashBalance ? `Cash ${signed(summary.cashBalance)}` : holdings.length ? `${holdings.length} position${holdings.length === 1 ? "" : "s"}` : undefined} compact />
       <MetricCard label="Total return" value={<Money value={gainLoss} />} detail={`${formatPercent(summary?.gainLossPct)} · realized ${signed(summary?.realizedGainLoss ?? 0)}`} tone={tone(gainLoss)} detailTone={tone(gainLoss)} compact />
-      <MetricCard label="Annual income" value={<Money value={annualIncome} />} detail={`${forwardYield}% forward yield`} compact />
+      <MetricCard label="Annual income" value={<Money value={annualIncome} />} detail={`${forwardYield.toFixed(2)}% forward yield`} compact />
     </section>
   );
 }

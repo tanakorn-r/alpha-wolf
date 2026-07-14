@@ -678,6 +678,10 @@ export type PortfolioTransaction = {
   price: number;
   amount: number;
   fees: number;
+  nativeCurrency: string;
+  nativePrice: number;
+  nativeFees: number;
+  fxRate: number;
   costBasis?: number | null;
   realizedPnl?: number | null;
   occurredAt: string;
@@ -705,12 +709,30 @@ export type PortfolioDashboard = {
   markers: Array<{ date: string; symbol: string; amount: number }>;
   incomeEvents: Array<{ date: string; symbol: string; kind: string; amount?: number | null }>;
   transactions: PortfolioTransaction[];
+  fxRates: Record<string, number>;
+  fxFetchedAt?: string | null;
+  fxSource?: string | null;
+  fxStale: boolean;
+  reportingCurrency: string;
 };
 
 export type PortfolioQuotesResponse = {
   quotes: Array<{ symbol: string; price?: number | null; currency?: string | null; changePct: number; fresh: boolean; fetchedAt?: string | null }>;
   pending: boolean;
   updatedAt?: string | null;
+  fxRates: Record<string, number>;
+  fxFetchedAt?: string | null;
+  fxSource?: string | null;
+  fxStale: boolean;
+};
+
+export type FxRatesResponse = {
+  base: string;
+  rates: Record<string, number>;
+  fetchedAt: string;
+  expiresAt: string;
+  source: string;
+  stale: boolean;
 };
 
 export type MarketCalendarEvent = {
@@ -1371,16 +1393,22 @@ export async function saveHolding(value: { symbol: string; shares: number; avera
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to save holding: ${response.status}`));
 }
 
-export async function buyHolding(value: { symbol: string; shares: number; price: number; fees?: number; occurredAt?: string; strategy?: string; monthlyDca?: number }) {
+export async function buyHolding(value: { symbol: string; shares: number; price: number; fees?: number; currency?: string; occurredAt?: string; strategy?: string; monthlyDca?: number }) {
   const response = await fetch(`${API_BASE}/portfolio/holdings/buy`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to record buy: ${response.status}`));
   return (await response.json()) as PortfolioHolding;
 }
 
-export async function sellHolding(symbol: string, value: { shares: number; price: number; fees?: number; occurredAt?: string }): Promise<{ transaction: PortfolioTransaction; holding?: PortfolioHolding | null }> {
+export async function sellHolding(symbol: string, value: { shares: number; price: number; fees?: number; currency?: string; occurredAt?: string }): Promise<{ transaction: PortfolioTransaction; holding?: PortfolioHolding | null }> {
   const response = await fetch(`${API_BASE}/portfolio/holdings/${encodeURIComponent(symbol)}/sell`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to record sale: ${response.status}`));
   return (await response.json()) as { transaction: PortfolioTransaction; holding?: PortfolioHolding | null };
+}
+
+export async function loadFxRates(): Promise<FxRatesResponse> {
+  const response = await fetch(`${API_BASE}/portfolio/fx`, { credentials: "include" });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load FX rates: ${response.status}`));
+  return (await response.json()) as FxRatesResponse;
 }
 
 export async function deleteHolding(symbol: string) {

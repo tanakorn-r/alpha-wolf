@@ -13,6 +13,7 @@ from models import BuyHoldingInput, DcaOrderInput, HoldingInput, SellHoldingInpu
 from routes.portfolio import (
     patch_dca_order,
     portfolio,
+    portfolio_fx,
     portfolio_quotes,
     buy_holding,
     remove_dca_order,
@@ -32,6 +33,7 @@ class PortfolioRouteAuthTests(unittest.TestCase):
         request = Request({"type": "http", "method": "GET", "path": "/", "headers": []})
         calls = (
             lambda: portfolio(request),
+            lambda: portfolio_fx(request),
             lambda: portfolio_quotes(request),
             lambda: save_holding(HoldingInput(symbol="AAPL", shares=1, averageCost=100), request),
             lambda: buy_holding(BuyHoldingInput(symbol="AAPL", shares=1, price=100), request),

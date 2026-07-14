@@ -11,7 +11,7 @@ import { Modal } from "../../components/ui/Modal";
 import { lockBodyScroll } from "../../lib/bodyScrollLock";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
-import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
+import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate } from "../../lib/format";
 import { buyHolding, loadAgents, loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
 import { negative, positive } from "../../lib/ui";
 import { useWolfStore } from "../../store/useWolfStore";
@@ -76,13 +76,12 @@ export function StockDetailDrawer() {
       const boughtShares = Number(addShares);
       if (!(boughtShares > 0)) throw new Error("Enter how many units you bought.");
       if (!(Number(addPrice) > 0)) throw new Error("Enter the price you paid.");
-      // The price is in the stock's native currency (THB for .BK); the store keeps USD base.
-      const price = priceToUsdBase(Number(addPrice), detail.stock.currency ?? detail.stock.symbol);
       const existing = planQuery.data?.holdings.find((holding) => holding.symbol === detail.stock.symbol);
       return buyHolding({
         symbol: detail.stock.symbol,
         shares: boughtShares,
-        price,
+        price: Number(addPrice),
+        currency: detail.stock.currency ?? undefined,
         strategy: existing?.strategy ?? selectedStrategy,
         monthlyDca: existing?.monthlyDca ?? 0,
       });

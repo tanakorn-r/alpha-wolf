@@ -24,6 +24,11 @@ export function DashboardPage() {
         <GoogleAccount />
       </div>
       {dash.signInOpen ? <GoogleAccountModal user={dash.accountUser} onClose={dash.closeSignIn} /> : null}
+      {dash.portfolio?.fxRates.THB ? (
+        <div className={`rounded-[9px] border px-3 py-2 font-mono text-[10.5px] ${dash.portfolio.fxStale ? "border-[#f5c451]/35 bg-[#f5c451]/8 text-[#f5c451]" : "border-[#2a2a31] bg-[#121214] text-[#6f6f78]"}`}>
+          Main currency {dash.portfolio.reportingCurrency} · USD/THB {dash.portfolio.fxRates.THB.toFixed(4)} · {dash.portfolio.fxSource ?? "FX cache"}{dash.portfolio.fxFetchedAt ? ` · updated ${new Date(dash.portfolio.fxFetchedAt).toLocaleString()}` : ""}{dash.portfolio.fxStale ? " · stale fallback—live refresh unavailable" : ""}
+        </div>
+      ) : null}
       {dash.isSkeleton ? <DashboardSkeleton /> : (
         <>
           {dash.isError || dash.actionError ? (

@@ -7,18 +7,27 @@ export function formatMoney(value?: number) {
   }).format(value);
 }
 
-const FX_RATES = { USD: 1, THB: 36.5 } as const;
+export type FxRates = Record<string, number>;
+const FX_RATES: FxRates = { USD: 1, THB: 36.5 };
 const CURRENCY_SYMBOL = { USD: "$", THB: "฿" } as const;
 
 /** THB per 1 USD — the app stores money in USD base and displays THB by default. */
-export const THB_PER_USD = FX_RATES.THB;
+export let THB_PER_USD = FX_RATES.THB;
+
+export function setFxRates(rates?: FxRates | null) {
+  if (!rates) return;
+  for (const [currency, rate] of Object.entries(rates)) {
+    if (Number.isFinite(rate) && rate > 0) FX_RATES[currency.toUpperCase()] = rate;
+  }
+  THB_PER_USD = FX_RATES.THB;
+}
 
 /** Convert an instrument-native per-share price (e.g. a THB price for a .BK stock)
  * into the USD base the portfolio store expects. A `.BK` symbol implies THB. */
-export function priceToUsdBase(price: number, currencyOrSymbol?: string | null): number {
+export function priceToUsdBase(price: number, currencyOrSymbol?: string | null, rates: FxRates = FX_RATES): number {
   const token = (currencyOrSymbol || "").toUpperCase();
   const currency = token === "THB" || token.endsWith(".BK") ? "THB" : "USD";
-  return price / FX_RATES[currency];
+  return price / (rates[currency] || FX_RATES[currency]);
 }
 
 /** value is always in USD; converts and formats for the selected display currency. */

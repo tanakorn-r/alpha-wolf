@@ -102,6 +102,7 @@ class BuyHoldingInput(BaseModel):
     shares: float = Field(gt=0)
     price: float = Field(gt=0)
     fees: float = Field(default=0, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
     occurredAt: str | None = None
     strategy: str = "stable_dca"
     monthlyDca: float = Field(default=0, ge=0)
@@ -111,6 +112,7 @@ class SellHoldingInput(BaseModel):
     shares: float = Field(gt=0)
     price: float = Field(gt=0)
     fees: float = Field(default=0, ge=0)
+    currency: str | None = Field(default=None, min_length=3, max_length=3)
     occurredAt: str | None = None
 
 
@@ -122,6 +124,10 @@ class PortfolioTransaction(BaseModel):
     price: float = 0
     amount: float = 0
     fees: float = 0
+    nativeCurrency: str = "USD"
+    nativePrice: float = 0
+    nativeFees: float = 0
+    fxRate: float = 1
     costBasis: float | None = None
     realizedPnl: float | None = None
     occurredAt: str
@@ -218,6 +224,11 @@ class PortfolioDashboard(BaseModel):
     markers: list[PortfolioMarker] = Field(default_factory=list)
     incomeEvents: list[IncomeEvent] = Field(default_factory=list)
     transactions: list[PortfolioTransaction] = Field(default_factory=list)
+    fxRates: dict[str, float] = Field(default_factory=lambda: {"USD": 1.0})
+    fxFetchedAt: str | None = None
+    fxSource: str | None = None
+    fxStale: bool = False
+    reportingCurrency: str = "THB"
 
 
 class MarketSnapshot(BaseModel):

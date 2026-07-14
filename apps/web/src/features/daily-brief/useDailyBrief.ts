@@ -14,6 +14,7 @@ import {
   type TodayPerformanceResponse,
 } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
+import { formatMoneyBaht, priceToUsdBase, setFxRates } from "../../lib/format";
 
 export type BriefStatus = "needs_you" | "watch" | "hold";
 export type BriefFilter = "all" | BriefStatus;
@@ -79,6 +80,7 @@ export function useDailyBrief() {
   const auth = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = auth.data?.id ? `user:${auth.data.id}` : "signed-out";
   const portfolio = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: Boolean(auth.data?.id) });
+  setFxRates(portfolio.data?.fxRates);
   const month = new Date().toISOString().slice(0, 7);
   const calendar = useQuery({
     queryKey: ["calendar", month, "holdings"],
@@ -100,7 +102,7 @@ export function useDailyBrief() {
     const holdingSymbols = new Set(holdings.map((holding) => holding.symbol));
     const dcaOrders = (portfolio.data?.dcaOrders ?? []).filter((order) => order.status !== "applied" && holdingSymbols.has(order.symbol));
     const events = (calendar.data?.events ?? []).filter((event) => event.isHolding && holdingSymbols.has(event.symbol) && daysUntil(event.date) >= 0);
-    const eventsBySymbol = groupEvents(events, holdings);
+    const eventsBySymbol = groupEvents(events, holdings, portfolio.data?.fxRates);
     const ordersBySymbol = groupOrders(dcaOrders);
 
     const rows = holdings
@@ -132,7 +134,7 @@ export function useDailyBrief() {
       totalPl: holdings.reduce((sum, holding) => sum + holding.gainLoss, 0),
       summary: buildSummary(rows, counts),
     };
-  }, [calendar.data?.events, calendar.isError, details.data, details.isFetching, details.isLoading, filter, holdings, portfolio.data?.dcaOrders, portfolio.data?.summary]);
+  }, [calendar.data?.events, calendar.isError, details.data, details.isFetching, details.isLoading, filter, holdings, portfolio.data?.dcaOrders, portfolio.data?.fxRates, portfolio.data?.summary]);
 
   const persistedRowAnalysis = Object.fromEntries(model.rows.flatMap((row) => {
     const cached = getHuntAiCache<TodayPerformanceResponse>(dailyBriefCacheKey(accountScope, row.symbol, row.strategy, activeAgentId));
@@ -305,7 +307,7 @@ function buildSellTrigger(sma50: number | undefined, price: number, currency?: s
   };
 }
 
-function groupEvents(events: MarketCalendarEvent[], holdings: PortfolioHolding[]) {
+function groupEvents(events: MarketCalendarEvent[], holdings: PortfolioHolding[], rates?: Record<string, number>) {
   const sharesBySymbol = new Map(holdings.map((holding) => [holding.symbol, holding.shares]));
   const grouped = new Map<string, HoldingEvent[]>();
   events
@@ -313,7 +315,7 @@ function groupEvents(events: MarketCalendarEvent[], holdings: PortfolioHolding[]
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .forEach((event) => {
       const shares = sharesBySymbol.get(event.symbol) ?? 0;
-      const perShareUsd = event.amount != null ? (event.symbol.endsWith(".BK") ? event.amount / 36.5 : event.amount) : null;
+      const perShareUsd = event.amount != null ? priceToUsdBase(event.amount, event.symbol, rates) : null;
       const row: HoldingEvent = {
         symbol: event.symbol,
         kind: event.kind === "payment" ? "PAYS" : "EX-DIV",
@@ -393,7 +395,7 @@ function shortDate(value: string) {
 }
 
 function money(usd: number) {
-  return `฿${Math.round(usd * 36.5).toLocaleString("en-US")}`;
+  return formatMoneyBaht(usd);
 }
 
 function formatNative(value: number, currency?: string | null) {
