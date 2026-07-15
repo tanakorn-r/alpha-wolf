@@ -3,13 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import {
   loadAuthUser,
   loadLatestAiResult,
-  loadMarketCalendar,
   loadPortfolio,
   loadStockDetailsBatch,
   loadTodayPerformance,
   type DcaOrder,
   type CanonicalDecisionState,
-  type MarketCalendarEvent,
   type PortfolioHolding,
   type StockDetailResponse,
   type StockNewsItem,
@@ -81,23 +79,27 @@ export function useDailyBrief() {
   const setHuntAiCache = useWolfStore((state) => state.setHuntAiCache);
   const [filter, setFilter] = useState<BriefFilter>("all");
   const [rowAnalysis, setRowAnalysis] = useState<Record<string, RowAnalysisState>>({});
+  const [enrichmentReady, setEnrichmentReady] = useState(false);
   const auth = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = auth.data?.id ? `user:${auth.data.id}` : "signed-out";
   const portfolio = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: Boolean(auth.data?.id) });
   setFxRates(portfolio.data?.fxRates);
-  const month = new Date().toISOString().slice(0, 7);
-  const calendar = useQuery({
-    queryKey: ["calendar", month, "holdings"],
-    queryFn: () => loadMarketCalendar({ month, region: "all" }),
-  });
 
   const holdings = portfolio.data?.holdings ?? [];
   const detailRequestKey = holdings.map((holding) => `${holding.symbol}:${holding.strategy}`).sort().join("|");
+  useEffect(() => {
+    setEnrichmentReady(false);
+    if (!detailRequestKey) return;
+    // Let the portfolio rows and durable DB reads paint first. Yahoo-backed detail is optional
+    // enrichment and must not compete with the content required to enter Daily Brief.
+    const timer = window.setTimeout(() => setEnrichmentReady(true), 250);
+    return () => window.clearTimeout(timer);
+  }, [detailRequestKey]);
   const details = useQuery({
     queryKey: ["stock-details-batch", detailRequestKey, "daily-brief"],
     queryFn: () => loadStockDetailsBatch(holdings.map((holding) => ({ symbol: holding.symbol, strategy: holding.strategy }))),
     staleTime: 180_000,
-    enabled: holdings.length > 0,
+    enabled: enrichmentReady && holdings.length > 0,
   });
 
   useEffect(() => setRowAnalysis({}), [activeAgentId, accountScope]);
@@ -105,15 +107,17 @@ export function useDailyBrief() {
   const model = useMemo(() => {
     const holdingSymbols = new Set(holdings.map((holding) => holding.symbol));
     const dcaOrders = (portfolio.data?.dcaOrders ?? []).filter((order) => order.status !== "applied" && holdingSymbols.has(order.symbol));
-    const events = (calendar.data?.events ?? []).filter((event) => event.isHolding && holdingSymbols.has(event.symbol) && daysUntil(event.date) >= 0);
-    const eventsBySymbol = groupEvents(events, holdings, portfolio.data?.fxRates);
+    // Portfolio already contains the holding-only ex-dividend/payment events. Calling the full
+    // market calendar here rebuilt unrelated market events and could fan out to Yahoo twice.
+    const events = (portfolio.data?.incomeEvents ?? []).filter((event) => holdingSymbols.has(event.symbol) && daysUntil(event.date) >= 0);
+    const eventsBySymbol = groupPortfolioEvents(events, holdings, portfolio.data?.fxRates);
     const ordersBySymbol = groupOrders(dcaOrders);
 
     const rows = holdings
       .map((holding) => buildHoldingRow({
         holding,
         detail: details.data?.[holding.symbol],
-        detailLoading: details.isLoading || details.isFetching,
+        detailLoading: Boolean(holdings.length) && (!enrichmentReady || details.isLoading || details.isFetching),
         events: eventsBySymbol.get(holding.symbol) ?? [],
         dcaOrders: ordersBySymbol.get(holding.symbol) ?? [],
       }))
@@ -132,14 +136,13 @@ export function useDailyBrief() {
       visibleRows,
       counts,
       stats: portfolio.data?.summary,
-      calendarFailed: calendar.isError,
       detailsLoading: details.isLoading,
       detailsFetching: details.isFetching,
       dataTrust: portfolio.data?.dataTrust,
       totalPl: holdings.reduce((sum, holding) => sum + holding.gainLoss, 0),
       summary: buildSummary(rows, counts),
     };
-  }, [calendar.data?.events, calendar.isError, details.data, details.isFetching, details.isLoading, filter, holdings, portfolio.data?.dcaOrders, portfolio.data?.fxRates, portfolio.data?.summary]);
+  }, [details.data, details.isFetching, details.isLoading, enrichmentReady, filter, holdings, portfolio.data?.dcaOrders, portfolio.data?.fxRates, portfolio.data?.incomeEvents, portfolio.data?.summary]);
 
   const persistedRowAnalysis = Object.fromEntries(model.rows.flatMap((row) => {
     const cached = getHuntAiCache<TodayPerformanceResponse>(dailyBriefCacheKey(accountScope, row.symbol, row.strategy, activeAgentId));
@@ -216,7 +219,6 @@ export function useDailyBrief() {
     },
     retry() {
       void portfolio.refetch();
-      void calendar.refetch();
       void details.refetch();
     },
     ...model,
@@ -362,7 +364,11 @@ function buildSellTrigger(sma50: number | undefined, price: number, currency?: s
   };
 }
 
-function groupEvents(events: MarketCalendarEvent[], holdings: PortfolioHolding[], rates?: Record<string, number>) {
+function groupPortfolioEvents(
+  events: Array<{ date: string; symbol: string; kind: string; amount?: number | null }>,
+  holdings: PortfolioHolding[],
+  rates?: Record<string, number>,
+) {
   const sharesBySymbol = new Map(holdings.map((holding) => [holding.symbol, holding.shares]));
   const grouped = new Map<string, HoldingEvent[]>();
   events
@@ -370,7 +376,10 @@ function groupEvents(events: MarketCalendarEvent[], holdings: PortfolioHolding[]
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
     .forEach((event) => {
       const shares = sharesBySymbol.get(event.symbol) ?? 0;
-      const perShareUsd = event.amount != null ? priceToUsdBase(event.amount, event.symbol, rates) : null;
+      // Portfolio income-event amounts are position totals, unlike market-calendar amounts,
+      // which are per-share. Keep that contract explicit so we never multiply the payout twice.
+      const totalUsd = event.amount != null ? priceToUsdBase(event.amount, event.symbol, rates) : null;
+      const perShareUsd = totalUsd != null && shares > 0 ? totalUsd / shares : null;
       const row: HoldingEvent = {
         symbol: event.symbol,
         kind: event.kind === "payment" ? "PAYS" : "EX-DIV",
@@ -378,7 +387,7 @@ function groupEvents(events: MarketCalendarEvent[], holdings: PortfolioHolding[]
         days: daysUntil(event.date),
         amount: event.amount,
         perShareUsd,
-        totalUsd: perShareUsd != null ? perShareUsd * shares : null,
+        totalUsd,
       };
       grouped.set(event.symbol, [...(grouped.get(event.symbol) ?? []), row]);
     });

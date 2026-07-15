@@ -2,11 +2,10 @@ import { useEffect, useId, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { LoadingSpinner } from "../LoadingSpinner";
-import { loadAuthUser, loadFxRates, saveLocaleSettings, type AuthUser, type LocaleSettings, type MarketPreference } from "../../lib/api";
+import { loadAuthUser, saveLocaleSettings, type AuthUser, type LocaleSettings, type MarketPreference } from "../../lib/api";
 import { configureLocale, COUNTRY_CHOICES, CURRENCY_CHOICES, defaultsForCountry, detectLocaleSettings, LANGUAGE_CHOICES, LOCALE_CHOICES, MARKET_CHOICES, TIMEZONE_CHOICES } from "../../lib/locale";
 import { lockBodyScroll } from "../../lib/bodyScrollLock";
 import { useDialogAccessibility } from "../../lib/useDialogAccessibility";
-import { setFxRates } from "../../lib/format";
 
 const control = "h-[54px] w-full rounded-[12px] border border-[#303039] bg-[#0e0e10] px-4 text-[16px] text-[#ececee] outline-none focus:border-[#3ecf8e] max-[640px]:h-12 max-[640px]:text-[14px]";
 const label = "mb-2 block text-[13px] font-bold text-[#9a9aa3]";
@@ -14,14 +13,12 @@ const primary = "rounded-[12px] bg-[#42d19a] px-8 py-3.5 text-[15px] font-black 
 
 export function LocaleGate({ children }: { children: ReactNode }) {
   const account = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
-  const fx = useQuery({ queryKey: ["portfolio-fx", account.data?.settings?.baseCurrency], queryFn: loadFxRates, enabled: Boolean(account.data?.settings), staleTime: 86_400_000, retry: 1 });
   if (account.isPending) {
     return <div className="grid min-h-screen place-items-center bg-[#0e0e10] text-[#3ecf8e]"><LoadingSpinner size={22} /></div>;
   }
   const user = account.data ?? null;
   if (user && !user.settings) return <LocaleWizard initial={detectLocaleSettings()} />;
   configureLocale(user?.settings);
-  setFxRates(fx.data?.rates);
   return children;
 }
 

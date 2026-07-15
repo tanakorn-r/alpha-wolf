@@ -168,7 +168,7 @@
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Fixed Daily Brief DB restoration being mistaken for a new AI run: passive saved-result reads now have a bounded/cancellable `restoring` state labeled Loading, restored reports open automatically, and reopening a closed saved report uses View without forcing a refresh; only the explicit Refresh action runs AI again.
+- Made authenticated pages progressively render instead of waiting on redundant data work: Daily Brief now reuses `portfolio.incomeEvents` (no separate full-market calendar request), restores saved DB AI first, defers optional batched Yahoo detail until after paint, and shows row-level skeletons; the locale gate no longer globally requests FX because Overview/Daily Brief already receive rates with portfolio data and Scanner loads them only for the user-triggered buy action.
 
 **Recent Context**
 - Fixed a live crash (`Uncaught RangeError: Invalid currency code : null` in `StockDetailDrawer`'s `DrawerHeader`, `formatCurrency`). Root cause: `formatCurrency(value, currency = "USD")`'s default parameter only covers `undefined`, not an explicit `null` — and `detail.stock.currency` can genuinely be `null` now that the backend's cache-first fallback (prior entries) returns empty fields immediately for a freshly-uncached symbol instead of blocking until real data arrives. Fixed `formatCurrency` (`apps/web/src/lib/format.ts`) to coalesce `currency || "USD"` so `null` and `undefined` both fall back correctly. Checked the file for the same gap elsewhere: `formatMoneyAs` requires a non-optional `"USD" | "THB"` literal union, so TypeScript already catches a stray `null` there at compile time — `formatCurrency` was the only vulnerable one. tsc clean.

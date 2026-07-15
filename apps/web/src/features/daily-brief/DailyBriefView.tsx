@@ -3,7 +3,7 @@ import { AgentCall } from "../../components/agents/AgentCall";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { DataTrustBadge } from "../../components/DataTrustBadge";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
-import { ErrorCard, LoadingPanel, RetryPanel } from "../../components/ui/panels";
+import { ErrorCard, RetryPanel } from "../../components/ui/panels";
 import { PillTabs } from "../../components/ui/PillTabs";
 import { TagPill } from "../../components/ui/Badge";
 import { Ring } from "../../lib/ring";
@@ -26,7 +26,7 @@ const filters: Array<{ key: BriefFilter; label: string }> = [
 ];
 
 export function DailyBriefView({ brief }: { brief: DailyBrief }) {
-  if (brief.loading) return <LoadingPanel title="Building your Daily Brief..." body="Reading your holdings, stored market snapshots, and dividend calendar." />;
+  if (brief.loading) return <DailyBriefLoadingShell />;
   if (brief.failed) return <RetryPanel label="Daily Brief could not load your portfolio." onRetry={brief.retry} />;
 
   return (
@@ -64,6 +64,29 @@ export function DailyBriefView({ brief }: { brief: DailyBrief }) {
           <div className="rounded-[10px] border border-[#2a2a31] bg-[#161619] px-5 py-8 text-center text-[13px] text-[#8c8c95]">No holdings in this filter.</div>
         )}
       </section>
+    </div>
+  );
+}
+
+function DailyBriefLoadingShell() {
+  return (
+    <div className="flex flex-col gap-3.5" role="status" aria-label="Loading Daily Brief portfolio">
+      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-5">
+        <div className="text-xs font-semibold uppercase tracking-[.14em] text-[#3ecf8e]">Your holdings today</div>
+        <div className="mt-3 h-5 w-72 max-w-full animate-pulse rounded-full bg-[#292930]" />
+        <div className="mt-2 h-3 w-[440px] max-w-full animate-pulse rounded-full bg-[#24242a]" />
+      </section>
+      <div className="flex items-center justify-between gap-3">
+        <div className="h-10 w-72 max-w-[65%] animate-pulse rounded-[9px] bg-[#202024]" />
+        <div className="h-10 w-44 max-w-[30%] animate-pulse rounded-[9px] bg-[#202024]" />
+      </div>
+      {[0, 1].map((row) => (
+        <section key={row} className="grid gap-3 rounded-[10px] border border-[#26262c] bg-[#151518] p-3.5 min-[820px]:grid-cols-[180px_minmax(0,1fr)_200px]">
+          <div className="grid gap-2"><div className="h-5 w-28 animate-pulse rounded-full bg-[#292930]" /><div className="h-3 w-36 animate-pulse rounded-full bg-[#24242a]" /><div className="h-8 w-full animate-pulse rounded-[7px] bg-[#202024]" /></div>
+          <div className="grid content-center gap-2"><div className="h-4 w-4/5 animate-pulse rounded-full bg-[#292930]" /><div className="h-3 w-full animate-pulse rounded-full bg-[#24242a]" /><div className="h-3 w-3/5 animate-pulse rounded-full bg-[#202024]" /></div>
+          <div className="flex items-center justify-end gap-3"><div className="h-12 w-12 animate-pulse rounded-full bg-[#24242a]" /><div className="h-9 w-24 animate-pulse rounded-[8px] bg-[#24242a]" /></div>
+        </section>
+      ))}
     </div>
   );
 }
@@ -127,7 +150,15 @@ function BriefQueueRow({
         </div>
         <div className="min-w-0">
           <div className="text-[14px] font-bold leading-tight text-[#ececee]">{row.actionLabel}: {row.headline}</div>
-          <p className="mt-1 line-clamp-2 text-[12.5px] leading-[1.45] text-[#9b9ba3]">{row.whatToDo}</p>
+          {row.detailLoading ? (
+            <div className="mt-2 grid gap-1.5" role="status" aria-label={`Loading market context for ${row.symbol}`}>
+              <div className="h-2.5 w-full animate-pulse rounded-full bg-[#292930]" />
+              <div className="h-2.5 w-3/5 animate-pulse rounded-full bg-[#24242a]" />
+              <span className="text-[9.5px] uppercase tracking-[0.08em] text-[#5f5f68]">Loading technicals and news</span>
+            </div>
+          ) : (
+            <p className="mt-1 line-clamp-2 text-[12.5px] leading-[1.45] text-[#9b9ba3]">{row.whatToDo}</p>
+          )}
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11.5px] text-[#777780]">
             <span>{formatShares(row.shares)} sh</span>
             <span className={row.gainLoss >= 0 ? "text-[#3ecf8e]" : "text-[#ff5f68]"}>{row.gainLoss >= 0 ? "+" : "-"}{formatMoneyBaht(Math.abs(row.gainLoss))}</span>
