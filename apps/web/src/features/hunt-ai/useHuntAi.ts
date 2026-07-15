@@ -85,6 +85,7 @@ export function useHuntAi() {
   const [timingForce, setTimingForce] = useState(false);
   const [timingRunTarget, setTimingRunTarget] = useState("");
   const [aiError, setAiError] = useState("");
+  const [activatedTabs, setActivatedTabs] = useState<ReadonlySet<HuntTab>>(() => new Set());
 
   const openDetail = useWolfStore((s) => s.openDetail);
   const setNext10ReportCache = useWolfStore((s) => s.setNext10ReportCache);
@@ -101,8 +102,8 @@ export function useHuntAi() {
   const strategyCached = getHuntAiCache<PersistedStrategy>(strategyCacheKey);
   const savedStrategyQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "strategy", activeAgentId],
-    queryFn: () => loadLatestAiResult<StrategyPlaybookResponse>({ feature: "strategy", subject: "universe", agent: activeAgentId, variantPrefix: "v7:" }),
-    enabled: authenticated,
+    queryFn: ({ signal }) => loadLatestAiResult<StrategyPlaybookResponse>({ feature: "strategy", subject: "universe", agent: activeAgentId, variantPrefix: "v7:", signal }),
+    enabled: authenticated && premium && tab === "strategy" && activatedTabs.has("strategy"),
     staleTime: 30_000,
     retry: 0,
   });
@@ -192,8 +193,8 @@ export function useHuntAi() {
   const addResults = (addQueryResult.data?.live ?? []).filter((item) => !symbols.includes(item.symbol));
   const savedValuationQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "valuation", activeTicker, activeAgentId],
-    queryFn: () => loadLatestAiResult<ValuationVerdictResponse>({ feature: "valuation", subject: activeTicker, agent: activeAgentId, variantPrefix: "v26:stable_dca" }),
-    enabled: authenticated && Boolean(activeTicker), staleTime: 30_000, retry: 0,
+    queryFn: ({ signal }) => loadLatestAiResult<ValuationVerdictResponse>({ feature: "valuation", subject: activeTicker, agent: activeAgentId, variantPrefix: "v26:stable_dca", signal }),
+    enabled: authenticated && tab === "signals" && activatedTabs.has("signals") && Boolean(activeTicker), staleTime: 30_000, retry: 0,
   });
   const valuationQuery = useQuery({
     queryKey: ["hunt-valuation-verdict", "character-quote-v6-today-tape", activeTicker, activeAgentId, valuationRunKey],
@@ -224,8 +225,8 @@ export function useHuntAi() {
 
   const savedTimingQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "buy-timing", activeTicker, activeAgentId],
-    queryFn: () => loadLatestAiResult<BuyTimingResponse>({ feature: "buy-timing", subject: activeTicker, agent: activeAgentId, variantPrefix: "v62:stable_dca" }),
-    enabled: authenticated && Boolean(activeTicker), staleTime: 30_000, retry: 0,
+    queryFn: ({ signal }) => loadLatestAiResult<BuyTimingResponse>({ feature: "buy-timing", subject: activeTicker, agent: activeAgentId, variantPrefix: "v62:stable_dca", signal }),
+    enabled: authenticated && premium && tab === "timing" && activatedTabs.has("timing") && Boolean(activeTicker), staleTime: 30_000, retry: 0,
   });
   const timingQuery = useQuery({
     queryKey: ["hunt-buy-timing", "live-current-month-v21", AGENT_REASONING_CACHE_VERSION, activeTicker, activeAgentId, timingRunKey],
@@ -267,23 +268,23 @@ export function useHuntAi() {
   });
   const savedIntradayQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "stock-analysis", activeTicker, activeAgentId, "momentum"],
-    queryFn: () => loadLatestAiResult<StockAnalysisResponse>({ feature: "stock-analysis", subject: activeTicker, agent: activeAgentId, variantPrefix: "v29:momentum:" }),
-    enabled: authenticated && Boolean(activeTicker), staleTime: 30_000, retry: 0,
+    queryFn: ({ signal }) => loadLatestAiResult<StockAnalysisResponse>({ feature: "stock-analysis", subject: activeTicker, agent: activeAgentId, variantPrefix: "v29:momentum:", signal }),
+    enabled: authenticated && premium && tab === "intraday" && activatedTabs.has("intraday") && Boolean(activeTicker), staleTime: 30_000, retry: 0,
   });
   const savedTechnicalQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "technical", activeTicker, activeAgentId],
-    queryFn: () => loadLatestAiResult<TechnicalAnalysisResponse>({ feature: "technical", subject: activeTicker, agent: activeAgentId, variantPrefix: "v12:" }),
-    enabled: authenticated && Boolean(activeTicker), staleTime: 30_000, retry: 0,
+    queryFn: ({ signal }) => loadLatestAiResult<TechnicalAnalysisResponse>({ feature: "technical", subject: activeTicker, agent: activeAgentId, variantPrefix: "v12:", signal }),
+    enabled: authenticated && premium && tab === "technical" && activatedTabs.has("technical") && Boolean(activeTicker), staleTime: 30_000, retry: 0,
   });
   const savedAnalystQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "analyst-report", activeTicker, activeAgentId],
-    queryFn: () => loadLatestAiResult<AnalystBriefResponse>({ feature: "analyst-report", subject: activeTicker, agent: activeAgentId, variantPrefix: "v13:capitalized:" }),
-    enabled: authenticated && Boolean(activeTicker), staleTime: 30_000, retry: 0,
+    queryFn: ({ signal }) => loadLatestAiResult<AnalystBriefResponse>({ feature: "analyst-report", subject: activeTicker, agent: activeAgentId, variantPrefix: "v13:capitalized:", signal }),
+    enabled: authenticated && premium && tab === "analyst" && activatedTabs.has("analyst") && Boolean(activeTicker), staleTime: 30_000, retry: 0,
   });
   const savedAnalystDetailQuery = useQuery({
     queryKey: ["saved-ai-detail", activeTicker, "capitalized"],
     queryFn: () => loadStockDetail(activeTicker, "capitalized"),
-    enabled: Boolean(savedAnalystQuery.data && activeTicker), staleTime: 180_000, retry: 0,
+    enabled: premium && tab === "analyst" && activatedTabs.has("analyst") && Boolean(savedAnalystQuery.data && activeTicker), staleTime: 180_000, retry: 0,
   });
 
   useEffect(() => setIntradayAnalysis(null), [activeTicker, activeAgentId]);
@@ -322,8 +323,8 @@ export function useHuntAi() {
   const n100Cached = useWolfStore((s) => s.getNext10ReportCache(n100CacheKey));
   const savedN100Query = useQuery({
     queryKey: ["saved-ai", accountScope, "next-10", activeTicker, activeAgentId, n100Timeframe],
-    queryFn: () => loadLatestAiResult<UpwardMovesResponse>({ feature: "next-10", subject: activeTicker, agent: activeAgentId, variantPrefix: `v20:${n100Timeframe}:capitalized` }),
-    enabled: authenticated && Boolean(activeTicker), staleTime: 30_000, retry: 0,
+    queryFn: ({ signal }) => loadLatestAiResult<UpwardMovesResponse>({ feature: "next-10", subject: activeTicker, agent: activeAgentId, variantPrefix: `v20:${n100Timeframe}:capitalized`, signal }),
+    enabled: authenticated && premium && tab === "n100" && activatedTabs.has("n100") && Boolean(activeTicker), staleTime: 30_000, retry: 0,
   });
   const n100Query = useQuery({
     queryKey: ["hunt-next-100", activeTicker, n100Timeframe, activeAgentId, n100SyncKey, n100RunKey],
@@ -361,6 +362,9 @@ export function useHuntAi() {
   const premiumTabs = new Set<HuntTab>(["brief", "timing", "technical", "replay", "analyst"]);
   function setTab(next: HuntTab) {
     setAiError("");
+    void queryClient.cancelQueries({ queryKey: ["saved-ai"] });
+    void queryClient.cancelQueries({ queryKey: ["saved-ai-detail"] });
+    setActivatedTabs((current) => current.has(next) ? current : new Set([...current, next]));
     setTabState(next);
     if (premiumTabs.has(next) && !premium) setTrialModalOpen(true);
   }
@@ -393,7 +397,7 @@ export function useHuntAi() {
       symbols,
       holdingSymbols,
       activeTicker,
-      loading: authQuery.isPending || (authenticated && (portfolioQuery.isPending || watchlistQuery.isPending)),
+      loading: authQuery.isPending || (authenticated && portfolioQuery.isPending && watchlistQuery.isPending),
       addOpen,
       addQuery,
       results: addResults,
@@ -433,11 +437,9 @@ export function useHuntAi() {
     signals: {
       ticker: activeTicker,
       symbols,
-      loading: authQuery.isPending || (authenticated && (
-        portfolioQuery.isPending
-        || watchlistQuery.isPending
-        || Boolean(activeTicker && savedValuationQuery.isFetching)
-      )),
+      // Portfolio and watchlist are independent. Render as soon as either source is ready;
+      // a slow holdings request must not block usable watchlist symbols or saved local cards.
+      loading: authQuery.isPending || (authenticated && portfolioQuery.isPending && watchlistQuery.isPending),
       openDetail,
       verdict: (valuationReport?.data ?? null) as ValuationVerdictResponse | null,
       analyzedAt: valuationReport?.analyzedAt ?? "",
@@ -466,11 +468,7 @@ export function useHuntAi() {
     },
 
     timing: {
-      loading: authQuery.isPending || (authenticated && (
-        portfolioQuery.isPending
-        || watchlistQuery.isPending
-        || Boolean(activeTicker && savedTimingQuery.isFetching)
-      )),
+      loading: authQuery.isPending || (authenticated && portfolioQuery.isPending && watchlistQuery.isPending),
       openDetail,
       rows: activeTicker
         ? [{
@@ -504,7 +502,7 @@ export function useHuntAi() {
       pending: Boolean(activeTicker && technicalDetailQuery.isPending),
       failed: technicalDetailQuery.isError,
       analysis: technicalReport,
-      aiLoading: Boolean(activeTicker && (technicalAiLoading || savedTechnicalQuery.isFetching)),
+      aiLoading: Boolean(activeTicker && technicalAiLoading),
       retry: () => void technicalDetailQuery.refetch(),
       async run(force = false) {
         if (!activeTicker) return;
@@ -533,7 +531,7 @@ export function useHuntAi() {
       retry: () => void intradayQuery.refetch(),
       analysis: intradayAnalysisReport?.data ?? null,
       analyzedAt: intradayAnalysisReport?.analyzedAt ?? "",
-      aiLoading: Boolean(activeTicker && (intradayAiLoading || savedIntradayQuery.isFetching)),
+      aiLoading: Boolean(activeTicker && intradayAiLoading),
       async run(force = false) {
         if (!activeTicker) return;
         setIntradayAiLoading(true);
@@ -555,7 +553,7 @@ export function useHuntAi() {
       quotaLeft: n100QuotaLeft,
       quotaLimit: (authQuery.data?.aiUsage?.used ?? 0) + (authQuery.data?.aiUsage?.tokens ?? 0),
       report: n100Report,
-      fetching: Boolean(activeTicker && (n100Query.isFetching || savedN100Query.isFetching)),
+      fetching: Boolean(activeTicker && n100Query.isFetching),
       error: n100Query.isError ? (n100Query.error as Error).message || "Could not load Next 10." : "",
       run: () => runN100(false),
       rerun: () => runN100(true),
@@ -571,7 +569,7 @@ export function useHuntAi() {
       prompt: stratPrompt,
       setPrompt: setStratPrompt,
       analysis: matchesAgent(stratAnalysis, activeAgentId) ? stratAnalysis : null,
-      loading: stratLoading || savedStrategyQuery.isFetching,
+      loading: stratLoading,
       async run(mode: StratMode, force = false) {
         setStratMode(mode);
         setStratAnalysis(null);
@@ -608,14 +606,9 @@ export function useHuntAi() {
       detail: analystReport?.data.detail ?? null,
       analysis: analystReport?.data.analysis ?? null,
       analyzedAt: analystReport?.analyzedAt ?? "",
-      // A disabled TanStack query remains `isPending`, so that flag made Analyst show an
-      // endless loader when the account had no selected/held/watched ticker. Only surface
-      // restore loading when a real ticker exists and a request is actually fetching.
-      loading: Boolean(activeTicker && (
-        analystLoading
-        || savedAnalystQuery.isFetching
-        || Boolean(savedAnalystQuery.data && savedAnalystDetailQuery.isFetching)
-      )),
+      // Restoring a saved card is passive data hydration, not an active Agent run. Only an
+      // explicit Analyze/Refresh action may show the Agent thinking state.
+      loading: Boolean(activeTicker && analystLoading),
       stage: analystStage,
       async run(ticker?: string, force = false) {
         const sym = (ticker || activeTicker).trim().toUpperCase();

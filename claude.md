@@ -168,7 +168,7 @@
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Standardized every Hunt AI no-ticker state (Signals, Buy Timing, Technical, Intraday, Next 10, Analyst, and AI Replay) on one shared-UI `TickerEmptyPanel`: identical card, icon, title, spacing, and typography with only the feature-specific guidance changing; the single Add asset control stays in the watchlist bar, and Analyst's meaningless dash toolbar remains removed until an asset exists.
+- Fixed Overview portfolio review restoration being presented as a new forced AI run: the passive `/ai/results/latest?feature=portfolio` DB read no longer contributes to `analyzing`, is abortable, and stays fresh/in-memory for the browser session, while only explicit Review (`force=false`) or Re-run (`force=true`) actions show Agent thinking.
 
 **Recent Context**
 - Fixed a live crash (`Uncaught RangeError: Invalid currency code : null` in `StockDetailDrawer`'s `DrawerHeader`, `formatCurrency`). Root cause: `formatCurrency(value, currency = "USD")`'s default parameter only covers `undefined`, not an explicit `null` — and `detail.stock.currency` can genuinely be `null` now that the backend's cache-first fallback (prior entries) returns empty fields immediately for a freshly-uncached symbol instead of blocking until real data arrives. Fixed `formatCurrency` (`apps/web/src/lib/format.ts`) to coalesce `currency || "USD"` so `null` and `undefined` both fall back correctly. Checked the file for the same gap elsewhere: `formatMoneyAs` requires a non-optional `"USD" | "THB"` literal union, so TypeScript already catches a stray `null` there at compile time — `formatCurrency` was the only vulnerable one. tsc clean.

@@ -1287,10 +1287,11 @@ export async function loadLatestAiResult<T>(params: {
   subject: string;
   agent: string;
   variantPrefix?: string;
+  signal?: AbortSignal;
 }): Promise<T | null> {
   const query = new URLSearchParams({ feature: params.feature, subject: params.subject, agent: params.agent });
   if (params.variantPrefix) query.set("variantPrefix", params.variantPrefix);
-  const response = await fetch(`${API_BASE}/ai/results/latest?${query}`, { credentials: "include" });
+  const response = await fetch(`${API_BASE}/ai/results/latest?${query}`, { credentials: "include", signal: params.signal });
   if (response.status === 204) return null;
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to restore saved AI result: ${response.status}`));
   return (await response.json()) as T;

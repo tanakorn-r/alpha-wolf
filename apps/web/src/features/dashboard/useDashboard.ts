@@ -121,9 +121,12 @@ export function useDashboard() {
   const reviewCached = getHuntAiCache<PortfolioReviewResponse>(reviewCacheKey);
   const savedReviewQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "portfolio", activeAgentId],
-    queryFn: () => loadLatestAiResult<PortfolioReviewResponse>({ feature: "portfolio", subject: "portfolio", agent: activeAgentId, variantPrefix: "v5" }),
+    queryFn: ({ signal }) => loadLatestAiResult<PortfolioReviewResponse>({ feature: "portfolio", subject: "portfolio", agent: activeAgentId, variantPrefix: "v5", signal }),
     enabled: Boolean(authQuery.data?.id && hasHoldings),
-    staleTime: 30_000,
+    // This is a passive DB restore, not a regeneration. Keep it for the browser session so
+    // navigating away from Overview and back never replays the request or Agent animation.
+    staleTime: Infinity,
+    gcTime: Infinity,
     retry: 0,
   });
   // Re-key on the active Agent: a review for a different Agent (in local state or
@@ -172,7 +175,9 @@ export function useDashboard() {
     closeSignIn: () => setSignInOpen(false),
     activeAgentId,
     analysis: review,
-    analyzing: analyzing || savedReviewQuery.isPending,
+    // Only the explicit Review/Re-run button owns the Agent thinking state. A DB restore may
+    // hydrate the card in the background, but must never pretend the Agent is generating it.
+    analyzing,
     sellTarget,
     selling,
     openDetail,
