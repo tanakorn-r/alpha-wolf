@@ -1,6 +1,6 @@
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ArrowUpIcon } from "../../components/ui/icons";
-import { EmptyPanel, RetryPanel } from "../../components/ui/panels";
+import { RetryPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { PaywallGate } from "../../components/ui/PaywallGate";
 import { realTimeframes, timeframes, type N100Timeframe } from "./lib";
 import { Next100Result } from "./Next100Result";
@@ -9,7 +9,7 @@ import type { HuntAi } from "./useHuntAi";
 
 export function Next100Tab({ hunt }: { hunt: HuntAi }) {
   const n100 = hunt.next100;
-  if (!n100.ticker) return <EmptyPanel title="Pick a stock first" body="Next 10 uses the shared Hunt watchlist. Add a stock above to unlock the prediction controls." />;
+  if (!n100.ticker) return <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to open Next 10." />;
 
   if (!hunt.premium) {
     return (

@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from internal.market import catalog as market_catalog
 from internal.store.presets import list_market_presets
 from models import DiscoveryKind, LookupResponse
 from routes.discover import discover
@@ -62,6 +63,48 @@ class CommodityPresetTests(unittest.TestCase):
             result = discover(q="FAKE", kind=DiscoveryKind.all, page=1, limit=12)
 
         self.assertEqual(result.live, [])
+
+    def test_discover_scopes_all_to_configured_markets(self) -> None:
+        with (
+            patch("routes.discover.cache_get", return_value=None),
+            patch("routes.discover.cache_set"),
+            patch("routes.discover.build_market_page", return_value=([], 1, 0)) as build,
+        ):
+            discover(
+                q=None,
+                kind=DiscoveryKind.all,
+                strategy="stable_dca",
+                mode=None,
+                sort="score",
+                region="all",
+                markets="japan,us,japan",
+                sector=None,
+                page=1,
+                limit=12,
+            )
+
+        self.assertEqual(build.call_args.kwargs["region"], "all")
+        self.assertEqual(build.call_args.kwargs["markets"], ("japan", "us"))
+
+    def test_additional_market_catalog_is_built_with_its_filter_key(self) -> None:
+        quote = {
+            "symbol": "7203.T",
+            "longName": "Toyota Motor Corporation",
+            "regularMarketPrice": 3000,
+            "regularMarketPreviousClose": 2970,
+            "marketCap": 40_000_000_000_000,
+            "currency": "JPY",
+        }
+        with (
+            patch.object(market_catalog.yf, "screen", return_value={"quotes": [quote]}) as screen,
+            patch.object(market_catalog, "save_market_universe") as save,
+        ):
+            result = market_catalog._refresh_region("japan")
+
+        self.assertEqual(screen.call_count, 1)
+        self.assertEqual(result.region, "japan")
+        self.assertEqual(result.records[0]["indexes"], ["stock", "japan"])
+        save.assert_called_once()
 
 
 if __name__ == "__main__":

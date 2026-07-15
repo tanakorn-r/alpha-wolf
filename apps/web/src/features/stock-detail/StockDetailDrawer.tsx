@@ -14,7 +14,8 @@ import { useDialogAccessibility } from "../../lib/useDialogAccessibility";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
 import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate } from "../../lib/format";
-import { buyHolding, loadAgents, loadAuthUser, loadLatestAiResult, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
+import { formatLocalDateTime } from "../../lib/locale";
+import { buyHolding, loadAgents, loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
 import { negative, positive } from "../../lib/ui";
 import { useWolfStore } from "../../store/useWolfStore";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
@@ -22,9 +23,7 @@ import { AdvancedInsightCard, type AdvancedInsightTone } from "./AdvancedInsight
 import { DrawerMetric, type DrawerMetricTone } from "./DrawerMetric";
 
 const panel = "rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-3.5";
-const DETAIL_PENDING_POLL_MS = 3_000;
-const DETAIL_PENDING_TIMEOUT_MS = 60_000;
-
+const DETAIL_PENDING_RETRY_DELAYS_MS = [3_000, 5_000, 8_000, 13_000, 21_000, 30_000] as const;
 const returnWindows = ["ytd", "1y", "2y", "3y", "4y"] as const;
 type ResearchTab = "overview" | "consensus" | "financials" | "calendar" | "market" | "news";
 type ReturnWindow = (typeof returnWindows)[number];
@@ -44,15 +43,12 @@ export function StockDetailDrawer() {
   const [huntLoading, setHuntLoading] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<ResearchTab>("overview");
-  const [research, setResearch] = useState<StockResearchResponse | null>(null);
-  const [researchLoading, setResearchLoading] = useState(false);
-  const [market, setMarket] = useState<MarketComparisonResponse | null>(null);
   const [addStatus, setAddStatus] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [signInOpen, setSignInOpen] = useState(false);
   const [addShares, setAddShares] = useState("");
   const [addPrice, setAddPrice] = useState("");
-  const [pendingTimedOut, setPendingTimedOut] = useState(false);
+  const [pendingRetryAttempt, setPendingRetryAttempt] = useState(0);
   const drawerRef = useRef<HTMLElement>(null);
   const dialogRef = useDialogAccessibility(closeDetail, detailOpen);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -61,7 +57,10 @@ export function StockDetailDrawer() {
     queryKey: ["stock-detail", selectedSymbol, selectedStrategy, selectedMode],
     queryFn: () => loadStockDetail(selectedSymbol, selectedStrategy, selectedMode ?? undefined),
     enabled: detailOpen && Boolean(selectedSymbol),
-    refetchInterval: (query) => query.state.data?.dataPending && !pendingTimedOut ? DETAIL_PENDING_POLL_MS : false,
+    staleTime: 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   const detail = detailQuery.data ?? null;
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
@@ -69,23 +68,25 @@ export function StockDetailDrawer() {
   const loading = detailQuery.isPending && detailOpen;
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
-  const savedAnalysisQuery = useQuery({
-    queryKey: ["saved-ai", accountScope, "stock-analysis", selectedSymbol, activeAgentId, selectedStrategy],
-    queryFn: () => loadLatestAiResult<StockAnalysisResponse>({ feature: "stock-analysis", subject: selectedSymbol, agent: activeAgentId, variantPrefix: `v29:${selectedStrategy}:` }),
-    enabled: detailOpen && Boolean(authQuery.data?.id && selectedSymbol),
-    staleTime: 30_000,
-    retry: 0,
-  });
-  const savedQuantQuery = useQuery({
-    queryKey: ["saved-ai", accountScope, "quant", selectedSymbol, activeAgentId, selectedStrategy, selectedMode],
-    queryFn: () => loadLatestAiResult<QuantPerspectiveResponse>({ feature: "quant", subject: selectedSymbol, agent: activeAgentId, variantPrefix: `v24:${selectedStrategy}:${selectedMode ?? "default"}` }),
-    enabled: detailOpen && Boolean(authQuery.data?.id && selectedSymbol),
-    staleTime: 30_000,
-    retry: 0,
-  });
   const analysisCacheKey = `${accountScope}:persona-v23-score-action-consistency:stock-detail:${selectedSymbol}:${selectedStrategy}:${selectedMode ?? "default"}:${activeAgentId}`;
   const quantCacheKey = `${accountScope}:persona-v23-score-action-consistency:stock-quant:${selectedSymbol}:${selectedStrategy}:${selectedMode ?? "default"}:${activeAgentId}`;
-  const planQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: detailOpen && Boolean(authQuery.data?.id) });
+  const researchQuery = useQuery({
+    queryKey: ["stock-research", selectedSymbol],
+    queryFn: () => loadStockResearch(selectedSymbol),
+    enabled: detailOpen && Boolean(selectedSymbol) && (tab === "consensus" || tab === "financials" || tab === "calendar" || tab === "news"),
+    staleTime: 300_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const marketQuery = useQuery({
+    queryKey: ["market-comparison", selectedSymbol],
+    queryFn: () => loadMarketComparison(selectedSymbol),
+    enabled: detailOpen && Boolean(selectedSymbol) && tab === "market",
+    staleTime: 300_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const planQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: addOpen && Boolean(authQuery.data?.id) });
   const portfolioHolding = planQuery.data?.holdings.find((item) => item.symbol === selectedSymbol);
   const addHoldingMutation = useMutation({
     mutationFn: async () => {
@@ -135,35 +136,23 @@ export function StockDetailDrawer() {
     const savedQuant = getHuntAiCache<QuantPerspectiveResponse>(quantCacheKey)?.data;
     setAnalysis(savedAnalysis?.agent?.id === activeAgentId ? savedAnalysis : null);
     setHuntAdvice(savedQuant?.agent?.id === activeAgentId ? savedQuant : null);
-    setResearch(null);
     setTab("overview");
-    setMarket(null);
+    setAddOpen(false);
     setAddStatus("");
-    setPendingTimedOut(false);
+    setPendingRetryAttempt(0);
   }, [detailOpen, selectedSymbol, activeAgentId, analysisCacheKey, quantCacheKey, getHuntAiCache]);
 
   useEffect(() => {
-    const saved = savedAnalysisQuery.data;
-    if (detailOpen && saved?.agent?.id === activeAgentId) setAnalysis(saved);
-  }, [activeAgentId, detailOpen, savedAnalysisQuery.data]);
-
-  useEffect(() => {
-    const saved = savedQuantQuery.data;
-    if (detailOpen && saved?.agent?.id === activeAgentId) setHuntAdvice(saved);
-  }, [activeAgentId, detailOpen, savedQuantQuery.data]);
-
-  useEffect(() => {
-    if (!detailOpen || !detail?.dataPending) {
-      setPendingTimedOut(false);
-      return;
-    }
-    const timeout = window.setTimeout(() => setPendingTimedOut(true), DETAIL_PENDING_TIMEOUT_MS);
+    if (!detailOpen || !detail?.dataPending || pendingRetryAttempt >= DETAIL_PENDING_RETRY_DELAYS_MS.length) return;
+    const timeout = window.setTimeout(() => {
+      void detailQuery.refetch().finally(() => setPendingRetryAttempt((attempt) => attempt + 1));
+    }, DETAIL_PENDING_RETRY_DELAYS_MS[pendingRetryAttempt]);
     return () => window.clearTimeout(timeout);
-  }, [detailOpen, detail?.dataPending, selectedSymbol]);
+  }, [detail?.dataPending, detailOpen, detailQuery.refetch, pendingRetryAttempt]);
 
-  function retryPendingDetail() {
-    setPendingTimedOut(false);
-    void detailQuery.refetch();
+  async function retryPendingDetail() {
+    const result = await detailQuery.refetch();
+    if (result.data?.dataPending) setPendingRetryAttempt(0);
   }
 
   useEffect(() => {
@@ -204,18 +193,9 @@ export function StockDetailDrawer() {
     }
   }
 
-  async function selectTab(nextTab: ResearchTab) {
+  function selectTab(nextTab: ResearchTab) {
     setTab(nextTab);
     requestAnimationFrame(() => tabsRef.current?.scrollIntoView({ block: "start", behavior: "smooth" }));
-    if (nextTab === "overview" || !selectedSymbol) return;
-    setResearchLoading(true);
-    try {
-      if (nextTab === "market") {
-        if (!market) setMarket(await loadMarketComparison(selectedSymbol));
-      } else if (!research) {
-        setResearch(await loadStockResearch(selectedSymbol));
-      }
-    } catch { setError("The extended yfinance research feed is unavailable."); } finally { setResearchLoading(false); }
   }
 
   return (
@@ -247,9 +227,10 @@ export function StockDetailDrawer() {
                   <input required type="number" min="0" step="any" value={addPrice} onChange={(event) => setAddPrice(event.target.value)} placeholder="Your buy price" className="h-10 rounded-[var(--aw-radius-control)] border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]" />
                 </label>
                 <p className="text-[11px] leading-[1.5] text-[#5a5a62]">Prefilled with the latest available price ({formatCurrency(detail.stock.price, detail.stock.currency)}) — change it to what you actually paid. Adding more averages into your existing position.</p>
+                {planQuery.isError ? <p className="text-[11px] text-[#f2575c]">Could not load your portfolio. Close this form and try again.</p> : null}
                 {addHoldingMutation.isError ? <p className="text-[11px] text-[#f2575c]">{addStatus}</p> : null}
-                <button disabled={addHoldingMutation.isPending} className="mt-1 flex items-center justify-center gap-2 rounded-[var(--aw-radius-control)] bg-[#3ecf8e] py-3 text-sm font-bold text-[#06120c] disabled:opacity-60">
-                  {addHoldingMutation.isPending ? <LoadingSpinner size={14} /> : null}Add to portfolio
+                <button disabled={planQuery.isPending || planQuery.isError || addHoldingMutation.isPending} className="mt-1 flex items-center justify-center gap-2 rounded-[var(--aw-radius-control)] bg-[#3ecf8e] py-3 text-sm font-bold text-[#06120c] disabled:opacity-60">
+                  {planQuery.isPending || addHoldingMutation.isPending ? <LoadingSpinner size={14} /> : null}{planQuery.isPending ? "Loading portfolio" : "Add to portfolio"}
                 </button>
               </form>
             </Modal>
@@ -259,38 +240,46 @@ export function StockDetailDrawer() {
             {detailQuery.isError ? <div className={`${panel} flex items-center justify-between text-sm text-[#f2575c]`}>Unable to load live stock detail.<button type="button" disabled={detailQuery.isFetching} onClick={() => detailQuery.refetch()} className="flex items-center gap-2 rounded border border-[#f2575c] px-3 py-1.5 text-xs disabled:opacity-60">{detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}Retry</button></div> : null}
             {error ? <div className={`${panel} text-sm text-rose-600`}>{error}</div> : null}
             {addStatus ? <div className={`${panel} text-sm ${addHoldingMutation.isError ? "text-[#f2575c]" : "text-[#3ecf8e]"}`}>{addStatus}</div> : null}
-            {detail && !loading && detail.dataPending && !pendingTimedOut ? (
+            {detail && !loading && detail.dataPending ? (
               <div className={`${panel} flex flex-col items-center gap-3 px-6 py-10 text-center`}>
-                <LoadingSpinner size={22} className="text-[#3ecf8e]" />
-                <div className="text-[14px] font-semibold text-[#ececee]">Loading market data for {detail.stock.symbol}</div>
-                <p className="max-w-[420px] text-[12.5px] leading-[1.6] text-[#8c8c95]">The first request is updating the database in the background. This panel checks automatically and will show the stock as soon as the update finishes.</p>
-                <button
-                  type="button"
-                  onClick={retryPendingDetail}
-                  disabled={detailQuery.isFetching}
-                  className="mt-1 flex items-center gap-2 rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#161619] px-4 py-2 text-[12px] font-semibold text-[#ececee] hover:border-[#3ecf8e] disabled:opacity-60"
-                >
-                  {detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}
-                  Refresh
-                </button>
-              </div>
-            ) : null}
-            {detail && !loading && detail.dataPending && pendingTimedOut ? (
-              <div className={`${panel} flex flex-col items-center gap-3 px-6 py-10 text-center`}>
-                <div className="text-[14px] font-semibold text-[#f5c451]">Market data is taking longer than expected</div>
-                <p className="max-w-[420px] text-[12.5px] leading-[1.6] text-[#8c8c95]">The database update did not finish within one minute. You can retry now; the page will not stay in a loading loop.</p>
-                <button type="button" onClick={retryPendingDetail} disabled={detailQuery.isFetching} className="mt-1 flex items-center gap-2 rounded-[var(--aw-radius-control)] border border-[#f5c451]/45 bg-[#f5c451]/10 px-4 py-2 text-[12px] font-semibold text-[#f5c451] disabled:opacity-60">
-                  {detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}
-                  Retry update
-                </button>
+                {pendingRetryAttempt < DETAIL_PENDING_RETRY_DELAYS_MS.length ? <LoadingSpinner size={22} className="text-[#3ecf8e]" /> : null}
+                <div className="text-[14px] font-semibold text-[#ececee]">Market data is being prepared for {detail.stock.symbol}</div>
+                <p className="max-w-[420px] text-[12.5px] leading-[1.6] text-[#8c8c95]">
+                  {pendingRetryAttempt < DETAIL_PENDING_RETRY_DELAYS_MS.length
+                    ? "The database is updating in the background. This drawer will check the same stock-detail service with a bounded backoff and open automatically when ready."
+                    : "The background update is taking longer than expected. Retry when you want to check again."}
+                </p>
+                {pendingRetryAttempt >= DETAIL_PENDING_RETRY_DELAYS_MS.length ? (
+                  <button
+                    type="button"
+                    onClick={() => void retryPendingDetail()}
+                    disabled={detailQuery.isFetching}
+                    className="mt-1 flex items-center gap-2 rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#161619] px-4 py-2 text-[12px] font-semibold text-[#ececee] hover:border-[#3ecf8e] disabled:opacity-60"
+                  >
+                    {detailQuery.isFetching ? <LoadingSpinner size={12} /> : null}
+                    Retry
+                  </button>
+                ) : null}
               </div>
             ) : null}
             {detail && !loading && !detail.dataPending ? <>
               <DataTrustBadge trust={detail.dataTrust} />
-              {analyzing || savedAnalysisQuery.isPending ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing || savedAnalysisQuery.isPending} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
+              {analyzing ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
               <QuickReadCard detail={detail} analysis={analysis} agent={activeAgent} />
               <ResearchTabs ref={tabsRef} active={tab} onSelect={selectTab} />
-              {tab === "overview" ? <DetailContent detail={detail} huntAdvice={huntAdvice} huntLoading={huntLoading || savedQuantQuery.isPending} onHunt={runAlphaHunt} activeAgentId={activeAgentId} /> : tab === "news" ? <NewsSection detail={detail} research={research} researchLoading={researchLoading} /> : researchLoading ? <DetailSkeleton symbol={selectedSymbol} /> : tab === "market" ? <MarketResearch market={market} analyzing={analyzing || savedAnalysisQuery.isPending} onAnalyze={() => analyze(Boolean(analysis))} /> : <ResearchContent tab={tab} research={research} detail={detail} />}
+              {tab === "overview" ? (
+                <DetailContent detail={detail} huntAdvice={huntAdvice} huntLoading={huntLoading} onHunt={runAlphaHunt} activeAgentId={activeAgentId} />
+              ) : tab === "news" ? (
+                <NewsSection detail={detail} research={researchQuery.data ?? null} researchLoading={researchQuery.isPending} />
+              ) : tab === "market" ? (
+                marketQuery.isPending ? <DetailSkeleton symbol={selectedSymbol} /> : marketQuery.isError ? <LazyTabError label="Market comparison" onRetry={() => void marketQuery.refetch()} /> : <MarketResearch market={marketQuery.data ?? null} analyzing={analyzing} onAnalyze={() => analyze(Boolean(analysis))} />
+              ) : researchQuery.isPending ? (
+                <DetailSkeleton symbol={selectedSymbol} />
+              ) : researchQuery.isError ? (
+                <LazyTabError label="Research data" onRetry={() => void researchQuery.refetch()} />
+              ) : (
+                <ResearchContent tab={tab} research={researchQuery.data ?? null} detail={detail} />
+              )}
             </> : null}
           </div>
         </div>
@@ -323,6 +312,15 @@ function ResearchTabs({ ref, active, onSelect }: { ref: React.Ref<HTMLDivElement
           </button>
         );
       })}
+    </div>
+  );
+}
+
+function LazyTabError({ label, onRetry }: { label: string; onRetry: () => void }) {
+  return (
+    <div className={`${panel} flex items-center justify-between gap-3 text-sm text-[#f2575c]`}>
+      <span>{label} is unavailable.</span>
+      <button type="button" onClick={onRetry} className="rounded-[var(--aw-radius-control)] border border-[#f2575c]/45 px-3 py-1.5 text-xs">Retry</button>
     </div>
   );
 }
@@ -915,7 +913,7 @@ function AlphaHuntDecisionDesk({ advice, loading, onHunt, activeAgentId }: { adv
         </div>
         <AgentRecap agent={advice.agent} recap={advice.recap} fit={advice.agentFit} reason={advice.agentFitReason} className="mt-3" />
         <div className="mt-3 flex items-center justify-between gap-3 border-t border-[#242429] pt-3">
-          <span className="text-[11px] text-[#8c8c95]">Swing investor read{advice.generatedAt ? ` · generated ${new Date(advice.generatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ", generated on request."}</span>
+          <span className="text-[11px] text-[#8c8c95]">Swing investor read{advice.generatedAt ? ` · generated ${formatLocalDateTime(advice.generatedAt, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}` : ", generated on request."}</span>
           <button type="button" onClick={() => onHunt(true)} className="rounded-lg border border-[#2a2a31] bg-[#161619] px-3 py-2 text-xs font-semibold text-[#bcbcc2] hover:border-[#3ecf8e] hover:text-[#3ecf8e]">Re-hunt</button>
         </div>
       </div>

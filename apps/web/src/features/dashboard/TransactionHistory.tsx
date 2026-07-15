@@ -1,4 +1,4 @@
-import { formatCurrency, formatShortDate } from "../../lib/format";
+import { formatCurrency, formatNumber, formatShortDate } from "../../lib/format";
 import type { Dashboard } from "./useDashboard";
 
 export function TransactionHistory({ dash }: { dash: Dashboard }) {
@@ -19,7 +19,7 @@ export function TransactionHistory({ dash }: { dash: Dashboard }) {
           return (
             <div key={item.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-3">
               <span className={`rounded-[5px] border px-2 py-1 font-mono text-[9px] font-bold ${sell ? "border-[#f2575c]/35 bg-[#f2575c]/10 text-[#f2575c]" : "border-[#3ecf8e]/35 bg-[#3ecf8e]/10 text-[#3ecf8e]"}`}>{item.kind}</span>
-              <div className="min-w-0"><div className="font-mono text-[12px] font-semibold">{item.symbol} · {item.shares.toLocaleString("en-US", { maximumFractionDigits: 6 })} units</div><div className="mt-0.5 text-[10px] text-[#6f6f78]">{formatShortDate(item.occurredAt)} · {formatCurrency(item.nativePrice, item.nativeCurrency)} / unit{item.nativeCurrency !== "USD" ? ` · FX ${item.fxRate.toFixed(4)} ${item.nativeCurrency}/USD` : ""}{item.fees ? ` · fees included` : ""}{item.source === "OPENING_BALANCE" ? " · migrated opening lot" : ""}</div></div>
+              <div className="min-w-0"><div className="font-mono text-[12px] font-semibold">{item.symbol} · {formatNumber(item.shares)} units</div><div className="mt-0.5 text-[10px] text-[#6f6f78]">{formatShortDate(item.occurredAt)} · {formatCurrency(item.nativePrice, item.nativeCurrency)} / unit{item.nativeCurrency !== "USD" ? ` · FX ${item.fxRate.toFixed(4)} ${item.nativeCurrency}/USD` : ""}{item.fees ? ` · fees included` : ""}{item.source === "OPENING_BALANCE" ? " · migrated opening lot" : ""}</div></div>
               <div className="text-right"><div className="font-mono text-[12px]">{formatCurrency(nativeAmount, item.nativeCurrency)}</div>{sell && realized != null ? <div className={`mt-0.5 font-mono text-[10px] ${realized >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>P/L {formatCurrency(realized, item.nativeCurrency)}</div> : null}</div>
             </div>
           );

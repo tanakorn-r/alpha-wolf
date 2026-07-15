@@ -14,6 +14,7 @@ router = APIRouter()
 
 DISCOVERY_TTL_SECONDS = 180
 DISCOVERY_RESPONSE_TTL_SECONDS = 30
+MARKET_REGIONS = ("us", "th", "europe", "japan", "hong-kong-china")
 
 COMMODITY_SEARCH_ALIASES = {
     "gold": ["XAUUSD=X", "GC=F", "GLD"],
@@ -45,19 +46,22 @@ def discover(
     strategy: StrategyKey = Query(default="stable_dca"),
     mode: str | None = Query(default=None, pattern="^(swing|day|long|value|fomo)$"),
     sort: str = Query(default="score", pattern="^(score|yield|change|name)$"),
-    region: str = Query(default="all", pattern="^(all|us|th)$"),
+    region: str = Query(default="all", pattern="^(all|us|th|europe|japan|hong-kong-china)$"),
+    markets: str | None = Query(default=None, pattern="^(us|th|europe|japan|hong-kong-china)(,(us|th|europe|japan|hong-kong-china))*$"),
     sector: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=12, ge=1, le=50),
 ) -> DiscoverResponse:
     query = (q or "").strip()
-    cache_key = f"v3:{query.lower()}:{kind.value}:{strategy}:{mode or ''}:{sort}:{region}:{sector or ''}:{page}:{limit}"
+    market_list = markets if isinstance(markets, str) else ""
+    configured_markets = tuple(dict.fromkeys(value for value in market_list.split(",") if value in MARKET_REGIONS))
+    cache_key = f"v4:{query.lower()}:{kind.value}:{strategy}:{mode or ''}:{sort}:{region}:{','.join(configured_markets)}:{sector or ''}:{page}:{limit}"
     cached = cache_get("discover_response", cache_key)
     if cached is not None:
         return DiscoverResponse.model_validate(cached)
 
     lookup = lookup_discovery(query, kind, limit, DISCOVERY_TTL_SECONDS, None if region == "all" else region) if query else LookupResponse(query=query, kind=kind)
-    live, total_pages, total = build_market_page(page=page, limit=limit, strategy=strategy, mode=mode, sort=sort, region=region, query=query, sector=sector)
+    live, total_pages, total = build_market_page(page=page, limit=limit, strategy=strategy, mode=mode, sort=sort, region=region, query=query, sector=sector, markets=configured_markets or None)
     normalized = query.upper()
     alias_live = _resolve_commodity_alias(query, limit) if query else []
     if alias_live:

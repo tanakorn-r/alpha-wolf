@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { confirmAiCreditCheckout, createAiCreditCheckout } from "../../lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirmAiCreditCheckout, createAiCreditCheckout, loadAuthUser } from "../../lib/api";
 import { Modal } from "../ui/Modal";
 import { Link } from "react-router-dom";
 
@@ -30,9 +30,17 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
   const [selected, setSelected] = useState<25 | 75 | 200>(75);
   const [buying, setBuying] = useState(false);
   const [error, setError] = useState("");
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
+  const [legalRequired, setLegalRequired] = useState(false);
+  const account = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const pack = PACKS.find((item) => item.credits === selected)!;
+  const needsLegalAcceptance = legalRequired || account.data?.legalAccepted === false;
 
   const confirm = async () => {
+    if (needsLegalAcceptance && !acceptedLegal) {
+      setError("Accept the current Terms and Privacy Policy to continue.");
+      return;
+    }
     setBuying(true);
     setError("");
     try {
@@ -40,10 +48,17 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
       returnUrl.searchParams.delete("credit_purchase");
       returnUrl.searchParams.delete("session_id");
       const returnPath = `${returnUrl.pathname}${returnUrl.search}${returnUrl.hash}`;
-      const checkoutUrl = await createAiCreditCheckout(selected, returnPath);
+      const checkoutUrl = await createAiCreditCheckout(selected, returnPath, needsLegalAcceptance && acceptedLegal);
       window.location.assign(checkoutUrl);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not refill AI tokens");
+      const message = reason instanceof Error ? reason.message : "Could not refill AI tokens";
+      if (message.includes("Accept the current Terms and Privacy Policy")) {
+        setLegalRequired(true);
+        setAcceptedLegal(false);
+        setError("Review and accept the current Terms and Privacy Policy, then continue.");
+      } else {
+        setError(message);
+      }
     } finally {
       setBuying(false);
     }
@@ -74,9 +89,15 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
               </button>
             ))}
           </div>
+          {needsLegalAcceptance ? (
+            <label className="mt-3 flex items-start gap-2.5 rounded-[var(--aw-radius-control)] border border-[#f5c451]/35 bg-[#f5c451]/[0.07] px-3 py-3 text-[10.5px] leading-[1.5] text-[#d5c28c]">
+              <input type="checkbox" checked={acceptedLegal} onChange={(event) => { setAcceptedLegal(event.target.checked); setError(""); }} className="mt-0.5 h-4 w-4 accent-[#3ecf8e]" />
+              <span>I agree to the current <Link to="/terms" className="font-bold text-[#f5c451] underline underline-offset-2">Terms</Link> and acknowledge the current <Link to="/privacy" className="font-bold text-[#f5c451] underline underline-offset-2">Privacy Policy</Link>.</span>
+            </label>
+          ) : null}
           {error ? <div className="mt-3 rounded-[8px] border border-[#f2575c]/30 bg-[#f2575c]/10 px-3 py-2 text-[10.5px] text-[#f2575c]">{error}</div> : null}
-          <button type="button" disabled={buying} onClick={confirm} className="mt-4 w-full rounded-[var(--aw-radius-control)] bg-[#3ecf8e] px-4 py-2.5 text-[12px] font-bold text-[#07120d] disabled:opacity-50">
-            {buying ? "Opening Stripe…" : `Continue to Stripe · ${pack.price}`}
+          <button type="button" disabled={buying || account.isPending || (needsLegalAcceptance && !acceptedLegal)} onClick={confirm} className="mt-4 w-full rounded-[var(--aw-radius-control)] bg-[#3ecf8e] px-4 py-2.5 text-[12px] font-bold text-[#07120d] disabled:opacity-50">
+            {buying ? "Opening Stripe…" : account.isPending ? "Checking account…" : `Continue to Stripe · ${pack.price}`}
           </button>
           <div className="mt-3 text-center text-[9.5px] leading-[1.5] text-[#696972]">By continuing, you agree to the <Link to="/terms" className="text-[#8c8c95]">Terms</Link>. See the <Link to="/refunds" className="text-[#8c8c95]">Refund Policy</Link>. AlphaWolf does not store your card details.</div>
       </>

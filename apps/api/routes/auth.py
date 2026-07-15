@@ -30,6 +30,7 @@ class GoogleCredential(BaseModel):
 class CreditCheckout(BaseModel):
     credits: int
     returnPath: str = Field(default="/hunt-ai", min_length=1, max_length=2048)
+    acceptCurrentLegal: bool = False
 
 
 class CreditCheckoutConfirmation(BaseModel):
@@ -73,7 +74,10 @@ def create_credit_checkout(payload: CreditCheckout, request: Request) -> dict[st
     if not user:
         raise HTTPException(status_code=401, detail="Sign in before adding AI credits")
     if not user.get("legalAccepted"):
-        raise HTTPException(status_code=409, detail="Accept the current Terms and Privacy Policy before purchasing AI tokens")
+        if not payload.acceptCurrentLegal:
+            raise HTTPException(status_code=409, detail="Accept the current Terms and Privacy Policy before purchasing AI tokens")
+        record_current_legal_acceptance(int(user["id"]), source="credit_checkout")
+        user = {**user, "legalAccepted": True}
     pack = CREDIT_PACKS.get(payload.credits)
     if not pack:
         raise HTTPException(status_code=400, detail="Unknown credit pack")
@@ -261,7 +265,7 @@ def google_login(payload: GoogleCredential, request: Request, response: Response
         name=str(claims.get("name") or email.split("@", 1)[0]),
         picture_url=str(claims.get("picture") or "").strip() or None,
     )
-    record_current_legal_acceptance(int(user["id"]))
+    record_current_legal_acceptance(int(user["id"]), source="google_signup")
     user = {**user, **legal_acceptance_status(int(user["id"]))}
     raw_session, expires_at = create_session(user["id"], ttl_days=SESSION_TTL_DAYS)
     response.set_cookie(
@@ -283,7 +287,7 @@ def accept_current_legal(request: Request) -> dict[str, Any]:
     user = user_for_session(request.cookies.get(SESSION_COOKIE))
     if not user:
         raise HTTPException(status_code=401, detail="Sign in before accepting account terms")
-    record_current_legal_acceptance(int(user["id"]))
+    record_current_legal_acceptance(int(user["id"]), source="account_settings")
     return {"user": user_for_session(request.cookies.get(SESSION_COOKIE))}
 
 

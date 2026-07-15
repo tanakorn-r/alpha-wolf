@@ -4,6 +4,7 @@ from internal.auth_context import require_user_id
 from internal.fx import fx_payload
 from internal.market.portfolio import build_portfolio_dashboard, build_portfolio_quotes
 from internal.store.portfolio import add_watchlist_symbols, create_dca_order, delete_dca_order, delete_watchlist_symbol, list_transactions, list_watchlist, record_buy, record_sale, update_dca_order_amount, upsert_holding
+from internal.store.settings import load_user_settings
 from models import BuyHoldingInput, DcaOrder, DcaOrderInput, Holding, HoldingInput, PortfolioDashboard, PortfolioTransaction, SellHoldingInput, SellHoldingResult
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
@@ -21,8 +22,9 @@ def portfolio_quotes(request: Request) -> dict:
 
 @router.get("/fx")
 def portfolio_fx(request: Request) -> dict:
-    require_user_id(request)
-    return fx_payload()
+    user_id = require_user_id(request)
+    settings = load_user_settings(user_id)
+    return fx_payload([str((settings or {}).get("baseCurrency") or "THB")])
 
 
 @router.put("/holdings", response_model=Holding)

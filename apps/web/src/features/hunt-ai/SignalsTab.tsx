@@ -1,4 +1,4 @@
-import { EmptyPanel, LoadingPanel } from "../../components/ui/panels";
+import { LoadingPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { AgentCall } from "../../components/agents/AgentCall";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import type { ValuationVerdictResponse } from "../../lib/api";
@@ -6,13 +6,14 @@ import { formatCurrency } from "../../lib/format";
 import { clamp, formatAnalyzedAt } from "./lib";
 import { agentLoadingTitle, PremiumLoading } from "./ui";
 import type { HuntAi } from "./useHuntAi";
+import { getLocaleSettings } from "../../lib/locale";
 
 export function SignalsTab({ hunt }: { hunt: HuntAi }) {
   const signals = hunt.signals;
 
   if (signals.loading) return <LoadingPanel title="Loading your holdings..." body="Preparing the Hunt AI watchlist." />;
   if (!signals.symbols.length || !signals.ticker) {
-    return <EmptyPanel title="No Hunt AI watchlist yet" body="Add a holding or use Add stock above. Daily Signals will stay empty until there is real data to analyze." />;
+    return <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to generate Daily Signals." />;
   }
   if (signals.pending) return <ValuationState ticker={signals.ticker} state="loading" fetching={signals.fetching} agentId={hunt.activeAgentId} onRun={signals.run} onOpen={() => signals.openDetail(signals.ticker)} />;
   if (signals.failed) return <ValuationState ticker={signals.ticker} state="error" fetching={signals.fetching} agentId={hunt.activeAgentId} onRun={signals.retry} onOpen={() => signals.openDetail(signals.ticker)} />;
@@ -721,7 +722,7 @@ function volumeTone(ratio: number | null | undefined) {
 }
 
 function compactNumber(value: number) {
-  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat(getLocaleSettings().numberLocale, { notation: "compact", maximumFractionDigits: 1 }).format(value);
 }
 
 function signed(value: number) {
@@ -805,14 +806,5 @@ function addBackSub(verdict: ValuationVerdictResponse) {
 
 function moneyLabel(value: number, currency: string) {
   if (!Number.isFinite(value)) return "—";
-  const abs = Math.abs(value);
-  const decimals = Number.isInteger(value) ? 0 : 2;
-  const fixed = abs.toLocaleString("en-US", {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  });
-  const sign = value < 0 ? "-" : "";
-  if (currency === "THB") return `${sign}฿${fixed}`;
-  if (currency === "USD") return `${sign}$${fixed}`;
   return formatCurrency(value, currency);
 }

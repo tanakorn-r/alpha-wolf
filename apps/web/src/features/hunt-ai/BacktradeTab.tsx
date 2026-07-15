@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
-import { ErrorCard } from "../../components/ui/panels";
+import { ErrorCard, TickerEmptyPanel } from "../../components/ui/panels";
 import { loadBacktradeJob, startBacktrade, type BacktradeDecision, type BacktradeJob, type BacktradeResult } from "../../lib/api";
 import type { HuntAi } from "./useHuntAi";
 
@@ -38,7 +38,7 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
     }
   }
 
-  if (!symbol) return <div className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] px-5 py-8 text-center text-[13px] text-[#8c8c95]">Pick a stock from the Hunt watchlist first.</div>;
+  if (!symbol) return <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to run AI Replay." />;
 
   return (
     <div className="flex flex-col gap-3">

@@ -6,6 +6,7 @@ import { loadAgents, loadNotifications, markNotificationRead } from "../../lib/a
 import { Modal } from "../ui/Modal";
 import { useWolfStore } from "../../store/useWolfStore";
 import { GoogleAccount } from "../auth/GoogleAccount";
+import { formatLocalDate, formatLocalDateTime } from "../../lib/locale";
 
 export function AppHeader() {
   const location = useLocation();
@@ -57,7 +58,7 @@ export function AppHeader() {
           </button>
         ) : null}
         <GoogleAccount />
-        <span className="font-mono text-[11px] text-[#5a5a62] max-[719px]:hidden">{new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
+        <span className="font-mono text-[11px] text-[#5a5a62] max-[719px]:hidden">{formatLocalDate(new Date(), { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
       </div>
       {agentOpen ? (
         <AgentPickerModal
@@ -76,7 +77,7 @@ export function AppHeader() {
               <button key={item.id} type="button" onClick={() => { void markNotificationRead(item.id).then(() => notifications.refetch()); }} className={`rounded-[9px] border p-3 text-left ${item.readAt ? "border-white/[0.06] opacity-60" : "border-[#4d96ff]/30 bg-[#4d96ff]/[0.04]"}`}>
                 <span className="block text-[12px] font-bold text-[#ececee]">{item.title}</span>
                 <span className="mt-1 block text-[11px] leading-[1.5] text-[#8c8c95]">{item.message}</span>
-                <span className="mt-1 block font-mono text-[9px] text-[#5a5a62]">{new Date(item.createdAt).toLocaleString()}</span>
+                <span className="mt-1 block font-mono text-[9px] text-[#5a5a62]">{formatLocalDateTime(item.createdAt)}</span>
               </button>
             )) : <p className="text-[12px] text-[#8c8c95]">No research reminders yet.</p>}
           </div>

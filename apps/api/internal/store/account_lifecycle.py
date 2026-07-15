@@ -7,13 +7,14 @@ from internal.legal import PRIVACY_VERSION, TERMS_VERSION
 from internal.store.db import connect
 
 
-def record_current_legal_acceptance(user_id: int) -> None:
+def record_current_legal_acceptance(user_id: int, *, source: str = "account_settings") -> None:
+    """Append immutable stamps for both current legal documents; repeated calls are idempotent."""
     now = datetime.now(timezone.utc).isoformat()
     with connect() as db:
         for document, version in (("terms", TERMS_VERSION), ("privacy", PRIVACY_VERSION)):
             db.execute(
-                "INSERT OR IGNORE INTO legal_acceptances(user_id, document, version, accepted_at) VALUES(?, ?, ?, ?)",
-                (user_id, document, version, now),
+                "INSERT OR IGNORE INTO legal_acceptances(user_id, document, version, accepted_at, source) VALUES(?, ?, ?, ?, ?)",
+                (user_id, document, version, now, source),
             )
         db.commit()
 
@@ -54,7 +55,8 @@ def export_account_data(user_id: int) -> dict[str, Any]:
         return {
             "exportedAt": datetime.now(timezone.utc).isoformat(),
             "profile": _row(user),
-            "legalAcceptances": _rows(db, "SELECT document, version, accepted_at FROM legal_acceptances WHERE user_id = ? ORDER BY accepted_at", (user_id,)),
+            "legalAcceptances": _rows(db, "SELECT document, version, accepted_at, source FROM legal_acceptances WHERE user_id = ? ORDER BY accepted_at", (user_id,)),
+            "settings": _row(_one(db, "SELECT country_code, display_language, base_currency, timezone, date_locale, number_locale, preferred_markets, completed_at, updated_at FROM user_settings WHERE user_id = ?", (user_id,))),
             "aiCredits": _row(_one(db, "SELECT balance, used_total, updated_at FROM ai_credit_balances WHERE user_id = ?", (user_id,))),
             "holdings": _rows(db, "SELECT symbol, shares, average_cost, strategy, monthly_dca, created_at FROM holdings WHERE user_id = ? ORDER BY symbol", (user_id,)),
             "transactions": _rows(db, "SELECT symbol, kind, shares, native_currency, native_price, native_fees, amount, cost_basis, realized_pnl, occurred_at, source, created_at FROM portfolio_transactions WHERE user_id = ? ORDER BY occurred_at, id", (user_id,)),
@@ -75,13 +77,15 @@ def delete_account_data(user_id: int) -> None:
         # Account-owned content is removed explicitly because remote libsql deployments do not
         # guarantee that SQLite foreign-key cascades are enabled on every connection.
         for table in (
-            "auth_sessions", "legal_acceptances", "ai_credit_balances", "stripe_credit_fulfillments",
+            "auth_sessions", "user_settings", "ai_credit_balances", "stripe_credit_fulfillments",
             "holdings", "portfolio_transactions", "dca_orders", "portfolio_watchlist", "ai_results", "ai_run_audit", "notifications", "support_requests",
         ):
             db.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         db.execute("DELETE FROM backtrade_jobs WHERE account_scope = ?", (scope,))
         db.execute("DELETE FROM ai_response_cache WHERE cache_key LIKE ?", (f"{scope}:%",))
         db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        # The immutability trigger permits this only after the owning account is gone.
+        db.execute("DELETE FROM legal_acceptances WHERE user_id = ?", (user_id,))
         db.commit()
 
 

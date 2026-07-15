@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { loadMarketCalendar } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 import { calendarCells, type RegionFilter } from "./calendarModel";
+import { formatLocalDate } from "../../lib/locale";
 
 export type DividendHunt = ReturnType<typeof useDividendHunt>;
 
@@ -50,8 +51,8 @@ export function useDividendHunt() {
 
   return {
     month,
-    monthLabel: month.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
-    monthShortLabel: month.toLocaleDateString(undefined, { month: "short" }),
+    monthLabel: formatLocalDate(month, { month: "long", year: "numeric" }),
+    monthShortLabel: formatLocalDate(month, { month: "short" }),
     region,
     regionLabel: region === "all" ? "All regions" : region === "us" ? "USA only" : "Thai only",
     cells,

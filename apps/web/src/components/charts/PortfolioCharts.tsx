@@ -1,15 +1,12 @@
 import { Area, AreaChart, CartesianGrid, Cell, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { PortfolioDashboard } from "../../lib/api";
-import { formatMoneyBaht, THB_PER_USD } from "../../lib/format";
+import { formatCompactMoney, formatMoneyBaht } from "../../lib/format";
 import { ChartState } from "./ChartState";
 
 const tooltipStyle = { background: "#1c1c20", border: "1px solid #34343c", borderRadius: 8, color: "#ececee", fontFamily: "IBM Plex Mono" };
 
-// Chart values are USD base; display them in the app's default currency (THB).
 function tickMoney(value: number) {
-  const baht = value * THB_PER_USD;
-  if (Math.abs(baht) >= 1000) return `฿${Math.round(baht / 1000)}k`;
-  return `฿${Math.round(baht)}`;
+  return formatCompactMoney(value);
 }
 
 export function PortfolioPerformanceChart({ data, loading, error, onRetry, children }: { data?: PortfolioDashboard; loading: boolean; error: boolean; onRetry: () => void; children?: React.ReactNode }) {

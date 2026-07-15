@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { EmptyPanel, LoadingPanel, RetryPanel } from "../../components/ui/panels";
+import { LoadingPanel, RetryPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { AgentCall } from "../../components/agents/AgentCall";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import type { BuyTimingResponse } from "../../lib/api";
@@ -36,7 +36,7 @@ export function BuyTimingTab({ hunt }: { hunt: HuntAi }) {
   };
 
   if (timing.loading) return <LoadingPanel title="Loading buy timing..." body="Reading dividend rhythm and price windows." />;
-  if (!timing.rows.length || !row) return <EmptyPanel title="Pick a stock first" body="Buy Timing follows the selected Hunt watchlist ticker." />;
+  if (!timing.rows.length || !row) return <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to open Buy Timing." />;
   if (requestLoading || forcedLoadingMatches) return <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "timing", row.symbol)} subject={row.symbol} agentId={hunt.activeAgentId} task="timing" />;
   if (row.failed) return <RetryPanel label={row.error || `Could not load ${row.symbol} timing data.`} onRetry={() => runWithLoading(row.retry)} />;
   if (!row.timing) return <TimingStart symbol={row.symbol} fetching={row.fetching} onRun={() => runWithLoading(row.run)} />;

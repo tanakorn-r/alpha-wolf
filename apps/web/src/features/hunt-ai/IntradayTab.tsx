@@ -11,7 +11,7 @@ import {
 } from "recharts";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { AgentCall } from "../../components/agents/AgentCall";
-import { EmptyPanel, RetryPanel } from "../../components/ui/panels";
+import { RetryPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
 import { PremiumChartTooltip } from "./ChartTooltip";
@@ -21,7 +21,7 @@ import type { HuntAi } from "./useHuntAi";
 
 export function IntradayTab({ hunt }: { hunt: HuntAi }) {
   const intraday = hunt.intraday;
-  if (!intraday.ticker) return <EmptyPanel title="No stock selected" body="Add a stock to the shared watchlist, then Live Intraday can read the tape for it." />;
+  if (!intraday.ticker) return <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to open Live Intraday." />;
 
   const detail = intraday.detail;
   const analysis = intraday.analysis;

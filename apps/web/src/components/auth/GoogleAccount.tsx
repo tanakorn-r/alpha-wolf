@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { Modal } from "../ui/Modal";
 import { acceptCurrentLegal, connectGoogleAccount, deleteAccount, disconnectAccount, downloadAccountExport, loadAuthUser, loadGoogleAuthBootstrap, type AuthUser } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
+import { LocaleSettingsDialog } from "../settings/LocalePreferences";
 
 type GoogleCredentialResponse = { credential?: string };
 type GoogleIdentity = {
@@ -48,6 +49,7 @@ export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; o
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");
   const [forfeit, setForfeit] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const logout = useMutation({
     mutationFn: disconnectAccount,
     onSuccess: async () => {
@@ -72,6 +74,10 @@ export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; o
     },
   });
 
+  if (user?.settings && settingsOpen) {
+    return <LocaleSettingsDialog settings={user.settings} onClose={() => setSettingsOpen(false)} />;
+  }
+
   return (
     <Modal title={user ? "Your account" : "Sign in"} onClose={onClose}>
       {user ? (
@@ -83,7 +89,8 @@ export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; o
             Your Google identity is connected to AlphaWolf. AlphaWolf stores research notes and portfolio records; it does not hold assets or execute trades.
           </div>
           {!user.legalAccepted ? <div className="mt-3 rounded-[9px] border border-[#f5c451]/35 bg-[#f5c451]/10 p-3 text-left text-[11px] leading-[1.5] text-[#d5c28c]">Review the current <Link className="text-[#74a4ff]" to="/terms" onClick={onClose}>Terms</Link> and <Link className="text-[#74a4ff]" to="/privacy" onClick={onClose}>Privacy Policy</Link>.<button type="button" disabled={accept.isPending} onClick={() => accept.mutate()} className="mt-2 block font-bold text-[#f5c451]">{accept.isPending ? "Saving…" : "Accept current versions"}</button></div> : null}
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => setSettingsOpen(true)} className="mt-3 flex w-full items-center justify-between rounded-[9px] border border-[#34343c] bg-[#0e0e10] px-3 py-2.5 text-left text-[11px] font-bold text-[#bcbcc2]"><span>Region &amp; currency</span><span className="text-[#6f6f78]">Settings →</span></button>
+          <div className="mt-2 grid grid-cols-2 gap-2">
             <button type="button" onClick={() => exportData.mutate()} disabled={exportData.isPending} className="rounded-[9px] border border-[#34343c] px-3 py-2.5 text-[11px] font-bold text-[#bcbcc2] disabled:opacity-50">{exportData.isPending ? "Preparing…" : "Export my data"}</button>
             <button type="button" onClick={() => setDeleteOpen((value) => !value)} className="rounded-[9px] border border-[#f2575c]/35 px-3 py-2.5 text-[11px] font-bold text-[#f2575c]">Delete account</button>
           </div>

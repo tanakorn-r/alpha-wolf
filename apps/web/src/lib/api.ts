@@ -2,6 +2,20 @@ import type { StockRecord } from "../data/market";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
+export type MarketPreference = "us" | "europe" | "japan" | "hong-kong-china" | "thailand";
+
+export type LocaleSettings = {
+  countryCode: string;
+  displayLanguage: string;
+  baseCurrency: "USD" | "THB" | "EUR" | "GBP" | "JPY" | "HKD" | "CNY";
+  timezone: string;
+  dateLocale: string;
+  numberLocale: string;
+  preferredMarkets: MarketPreference[];
+  completedAt?: string;
+  updatedAt?: string;
+};
+
 export type AuthUser = {
   id: number;
   googleSub: string;
@@ -18,6 +32,7 @@ export type AuthUser = {
   legalAcceptedAt?: string | null;
   termsVersion?: string;
   privacyVersion?: string;
+  settings?: LocaleSettings | null;
 };
 
 export type AiDecisionHistoryItem = {
@@ -65,6 +80,17 @@ export async function loadAuthUser(): Promise<AuthUser | null> {
   return payload.user ?? null;
 }
 
+export async function saveLocaleSettings(settings: LocaleSettings): Promise<LocaleSettings> {
+  const response = await fetch(`${API_BASE}/settings`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Could not save locale settings (${response.status})`));
+  return ((await response.json()) as { settings: LocaleSettings }).settings;
+}
+
 export async function loadPremiumPromoActive(): Promise<boolean> {
   const response = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
   if (!response.ok) return true;
@@ -83,12 +109,12 @@ export async function redeemPremiumPromo(): Promise<AuthUser | null> {
   return payload.user;
 }
 
-export async function createAiCreditCheckout(credits: 25 | 75 | 200, returnPath: string): Promise<string> {
+export async function createAiCreditCheckout(credits: 25 | 75 | 200, returnPath: string, acceptCurrentLegal = false): Promise<string> {
   const response = await fetch(`${API_BASE}/auth/credit-checkout`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ credits, returnPath }),
+    body: JSON.stringify({ credits, returnPath, acceptCurrentLegal }),
   });
   if (!response.ok) {
     let message = `Could not add credits (${response.status})`;
@@ -1625,7 +1651,8 @@ export async function loadDiscoveries(params?: {
   strategy?: string;
   mode?: string;
   sort?: string;
-  region?: "all" | "us" | "th";
+  region?: "all" | "us" | "th" | "europe" | "japan" | "hong-kong-china";
+  markets?: Array<"us" | "th" | "europe" | "japan" | "hong-kong-china">;
   sector?: string;
   page?: number;
   limit?: number;
@@ -1642,6 +1669,7 @@ export async function loadDiscoveries(params?: {
   if (params?.mode) query.set("mode", params.mode);
   if (params?.sort) query.set("sort", params.sort);
   if (params?.region) query.set("region", params.region);
+  if (params?.markets?.length) query.set("markets", params.markets.join(","));
   if (params?.sector && params.sector !== "all") query.set("sector", params.sector);
   if (typeof params?.page === "number") query.set("page", String(params.page));
   if (typeof params?.limit === "number") {

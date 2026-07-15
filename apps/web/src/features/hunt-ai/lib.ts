@@ -1,5 +1,6 @@
 import type { StockDetailResponse, UpwardMove } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
+import { formatLocalDate, formatLocalDateTime, getLocaleSettings } from "../../lib/locale";
 
 export type HuntTab = "signals" | "brief" | "timing" | "technical" | "replay" | "intraday" | "n100" | "strategy" | "analyst";
 export type N100Timeframe = "1D" | "1W";
@@ -136,13 +137,13 @@ export function stopFromEntry(entry: number | null | undefined) {
 export function formatAnalyzedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "from cache";
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return formatLocalDateTime(date, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export function formatBacktradeDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatLocalDate(date, { month: "short", day: "numeric" });
 }
 
 export function formatCompact(value: number, currency: string): string {
@@ -150,5 +151,5 @@ export function formatCompact(value: number, currency: string): string {
   if (value >= 1e12) return `${prefix}${(value / 1e12).toFixed(1)}T`;
   if (value >= 1e9) return `${prefix}${(value / 1e9).toFixed(1)}B`;
   if (value >= 1e6) return `${prefix}${(value / 1e6).toFixed(1)}M`;
-  return `${prefix}${value.toLocaleString()}`;
+  return `${prefix}${value.toLocaleString(getLocaleSettings().numberLocale)}`;
 }

@@ -14,9 +14,12 @@ import { StatsRow } from "../features/dashboard/StatsRow";
 import { TransactionHistory } from "../features/dashboard/TransactionHistory";
 import { useDashboard } from "../features/dashboard/useDashboard";
 import { DataTrustBadge } from "../components/DataTrustBadge";
+import { formatLocalDateTime } from "../lib/locale";
 
 export function DashboardPage() {
   const dash = useDashboard();
+  const reportingCurrency = dash.portfolio?.reportingCurrency ?? "USD";
+  const reportingRate = dash.portfolio?.fxRates[reportingCurrency];
 
   return (
     <div className="mx-auto flex w-full max-w-[980px] flex-col gap-[14px] text-[#ececee]">
@@ -27,7 +30,7 @@ export function DashboardPage() {
       {dash.signInOpen ? <GoogleAccountModal user={dash.accountUser} onClose={dash.closeSignIn} /> : null}
       {dash.portfolio?.fxRates.THB ? (
         <div className={`rounded-[9px] border px-3 py-2 font-mono text-[10.5px] ${dash.portfolio.fxStale ? "border-[#f5c451]/35 bg-[#f5c451]/8 text-[#f5c451]" : "border-[#2a2a31] bg-[#121214] text-[#6f6f78]"}`}>
-          Main currency {dash.portfolio.reportingCurrency} · USD/THB {dash.portfolio.fxRates.THB.toFixed(4)} · {dash.portfolio.fxSource ?? "FX cache"}{dash.portfolio.fxFetchedAt ? ` · updated ${new Date(dash.portfolio.fxFetchedAt).toLocaleString()}` : ""}{dash.portfolio.fxStale ? " · stale fallback—live refresh unavailable" : ""}
+          Main currency {reportingCurrency}{reportingCurrency !== "USD" && reportingRate ? ` · USD/${reportingCurrency} ${reportingRate.toFixed(4)}` : ""} · {dash.portfolio.fxSource ?? "FX cache"}{dash.portfolio.fxFetchedAt ? ` · updated ${formatLocalDateTime(dash.portfolio.fxFetchedAt)}` : ""}{dash.portfolio.fxStale ? " · stale fallback—live refresh unavailable" : ""}
         </div>
       ) : null}
       {dash.portfolio?.holdings.length ? <DataTrustBadge trust={dash.portfolio.dataTrust} /> : null}

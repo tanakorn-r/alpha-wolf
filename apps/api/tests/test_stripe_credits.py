@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 
@@ -186,6 +186,28 @@ class StripeCreditsTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as raised:
             auth._checkout_return_url("http://localhost:4200", "//attacker.example/receipt", status="success")
         self.assertEqual(raised.exception.status_code, 400)
+
+    def test_checkout_requires_current_legal_acceptance(self) -> None:
+        request = Mock(cookies={auth.SESSION_COOKIE: "session"})
+        user = {"id": 7, "email": "wolf@example.com", "legalAccepted": False}
+        with patch.object(auth, "user_for_session", return_value=user), patch.object(auth, "record_current_legal_acceptance") as accept:
+            with self.assertRaises(HTTPException) as raised:
+                auth.create_credit_checkout(auth.CreditCheckout(credits=25), request)
+        self.assertEqual(raised.exception.status_code, 409)
+        accept.assert_not_called()
+
+    def test_checkout_can_accept_current_legal_versions_in_the_same_request(self) -> None:
+        request = Mock(cookies={auth.SESSION_COOKIE: "session"})
+        user = {"id": 7, "email": "wolf@example.com", "legalAccepted": False}
+        with (
+            patch.object(auth, "user_for_session", return_value=user),
+            patch.object(auth, "record_current_legal_acceptance") as accept,
+            patch.dict("os.environ", {"STRIPE_SECRET_KEY": ""}),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                auth.create_credit_checkout(auth.CreditCheckout(credits=25, acceptCurrentLegal=True), request)
+        self.assertEqual(raised.exception.status_code, 503)
+        accept.assert_called_once_with(7, source="credit_checkout")
 
 
 if __name__ == "__main__":

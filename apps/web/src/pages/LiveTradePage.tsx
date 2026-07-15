@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { loadLiveTradeQuote, summarizeStock, type LiveTradeRow, type StockAnalysisResponse } from "../lib/api";
-import { formatPercent } from "../lib/format";
+import { formatCurrency, formatPercent } from "../lib/format";
+import { getLocaleSettings } from "../lib/locale";
 import { useWolfStore } from "../store/useWolfStore";
 
 declare global {
@@ -45,6 +46,7 @@ type TradeLogEntry = {
 };
 
 export function LiveTradePage() {
+  const localeSettings = getLocaleSettings();
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
   const [selected, setSelected] = useState("NVDA");
   const [watch, setWatch] = useState(seedWatch);
@@ -119,10 +121,10 @@ export function LiveTradePage() {
         autosize: true,
         symbol: tvSymbolFor(selected),
         interval: "1",
-        timezone: "Etc/UTC",
+        timezone: localeSettings.timezone,
         theme: "dark",
         style: "1",
-        locale: "en",
+        locale: localeSettings.displayLanguage.split("-")[0],
         enable_publishing: false,
         allow_symbol_change: true,
         hide_side_toolbar: false,
@@ -135,7 +137,7 @@ export function LiveTradePage() {
       cancelled = true;
       if (chartRef.current) chartRef.current.innerHTML = "";
     };
-  }, [selected, widgetId]);
+  }, [localeSettings.displayLanguage, localeSettings.timezone, selected, widgetId]);
 
   useEffect(() => {
     setForecastAt(Date.now());
@@ -899,7 +901,7 @@ function seedSeries(price: number) {
 }
 
 function formatLivePrice(value: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+  return formatCurrency(value, "USD");
 }
 
 function ensureTradingViewScript() {

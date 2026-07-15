@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException, Request, Response
 
 from internal.store import db as store_db
-from routes import auth
+from routes import auth, settings
 
 
 class GoogleAuthTests(unittest.TestCase):
@@ -58,6 +58,15 @@ class GoogleAuthTests(unittest.TestCase):
 
         self.assertEqual(login["user"]["googleSub"], "google-user-123")
         self.assertTrue(login["user"]["legalAccepted"])
+        with store_db.connect() as db:
+            acceptance_rows = db.execute(
+                "SELECT document, source FROM legal_acceptances WHERE user_id = ? ORDER BY document",
+                (login["user"]["id"],),
+            ).fetchall()
+        self.assertEqual(
+            [(str(row[0]), str(row[1])) for row in acceptance_rows],
+            [("privacy", "google_signup"), ("terms", "google_signup")],
+        )
         set_cookie_headers = [value.decode() for key, value in login_response.raw_headers if key == b"set-cookie"]
         self.assertTrue(any("HttpOnly" in value for value in set_cookie_headers))
         session = _cookie_value(set_cookie_headers, auth.SESSION_COOKIE)
@@ -94,6 +103,26 @@ class GoogleAuthTests(unittest.TestCase):
         with patch.dict("os.environ", {"AUTH_COOKIE_SECURE": "", "AUTH_COOKIE_SAMESITE": ""}):
             self.assertTrue(auth._secure_cookie(request))
             self.assertEqual(auth._cookie_samesite(request), "none")
+
+    def test_authenticated_settings_round_trip_through_auth_me(self) -> None:
+        user = auth.upsert_google_user(google_sub="settings-user", email="locale@example.com", name="Locale", picture_url=None)
+        token, _expires_at = auth.create_session(user["id"])
+        request = _request({auth.SESSION_COOKIE: token})
+        result = settings.put_settings(
+            settings.LocaleSettingsInput(
+                countryCode="JP",
+                displayLanguage="ja",
+                baseCurrency="JPY",
+                timezone="Asia/Tokyo",
+                dateLocale="ja-JP",
+                numberLocale="ja-JP",
+                preferredMarkets=["japan", "us", "japan"],
+            ),
+            request,
+        )
+        self.assertEqual(result["settings"]["preferredMarkets"], ["japan", "us"])
+        restored = auth.auth_me(request)["user"]
+        self.assertEqual(restored["settings"]["baseCurrency"], "JPY")
 
 
 def _request(cookies: dict[str, str] | None = None, headers: dict[str, str] | None = None) -> Request:

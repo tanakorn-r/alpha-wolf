@@ -433,11 +433,15 @@ export function useHuntAi() {
     signals: {
       ticker: activeTicker,
       symbols,
-      loading: authQuery.isPending || (authenticated && (portfolioQuery.isPending || watchlistQuery.isPending || savedValuationQuery.isPending)),
+      loading: authQuery.isPending || (authenticated && (
+        portfolioQuery.isPending
+        || watchlistQuery.isPending
+        || Boolean(activeTicker && savedValuationQuery.isFetching)
+      )),
       openDetail,
       verdict: (valuationReport?.data ?? null) as ValuationVerdictResponse | null,
       analyzedAt: valuationReport?.analyzedAt ?? "",
-      pending: !valuationReport?.data && valuationQuery.isPending && valuationRunKey > 0 && valuationSyncTicker === activeTicker,
+      pending: !valuationReport?.data && valuationQuery.isFetching && valuationRunKey > 0 && valuationSyncTicker === activeTicker,
       fetching: valuationQuery.isFetching,
       failed: Boolean(valuationQuery.isError) && !valuationReport?.data,
       hasRun: Boolean(valuationReport?.data),
@@ -462,7 +466,11 @@ export function useHuntAi() {
     },
 
     timing: {
-      loading: authQuery.isPending || (authenticated && (portfolioQuery.isPending || watchlistQuery.isPending || savedTimingQuery.isPending)),
+      loading: authQuery.isPending || (authenticated && (
+        portfolioQuery.isPending
+        || watchlistQuery.isPending
+        || Boolean(activeTicker && savedTimingQuery.isFetching)
+      )),
       openDetail,
       rows: activeTicker
         ? [{
@@ -493,10 +501,10 @@ export function useHuntAi() {
     technical: {
       ticker: activeTicker,
       detail: technicalDetailQuery.data ?? null,
-      pending: technicalDetailQuery.isPending,
+      pending: Boolean(activeTicker && technicalDetailQuery.isPending),
       failed: technicalDetailQuery.isError,
       analysis: technicalReport,
-      aiLoading: technicalAiLoading || savedTechnicalQuery.isPending,
+      aiLoading: Boolean(activeTicker && (technicalAiLoading || savedTechnicalQuery.isFetching)),
       retry: () => void technicalDetailQuery.refetch(),
       async run(force = false) {
         if (!activeTicker) return;
@@ -520,12 +528,12 @@ export function useHuntAi() {
       symbols,
       select: setSelectedTicker,
       detail: intradayQuery.data,
-      pending: intradayQuery.isPending,
+      pending: Boolean(activeTicker && intradayQuery.isPending),
       failed: intradayQuery.isError,
       retry: () => void intradayQuery.refetch(),
       analysis: intradayAnalysisReport?.data ?? null,
       analyzedAt: intradayAnalysisReport?.analyzedAt ?? "",
-      aiLoading: intradayAiLoading || savedIntradayQuery.isPending,
+      aiLoading: Boolean(activeTicker && (intradayAiLoading || savedIntradayQuery.isFetching)),
       async run(force = false) {
         if (!activeTicker) return;
         setIntradayAiLoading(true);
@@ -547,7 +555,7 @@ export function useHuntAi() {
       quotaLeft: n100QuotaLeft,
       quotaLimit: (authQuery.data?.aiUsage?.used ?? 0) + (authQuery.data?.aiUsage?.tokens ?? 0),
       report: n100Report,
-      fetching: n100Query.isFetching || savedN100Query.isPending,
+      fetching: Boolean(activeTicker && (n100Query.isFetching || savedN100Query.isFetching)),
       error: n100Query.isError ? (n100Query.error as Error).message || "Could not load Next 10." : "",
       run: () => runN100(false),
       rerun: () => runN100(true),
@@ -563,7 +571,7 @@ export function useHuntAi() {
       prompt: stratPrompt,
       setPrompt: setStratPrompt,
       analysis: matchesAgent(stratAnalysis, activeAgentId) ? stratAnalysis : null,
-      loading: stratLoading || savedStrategyQuery.isPending,
+      loading: stratLoading || savedStrategyQuery.isFetching,
       async run(mode: StratMode, force = false) {
         setStratMode(mode);
         setStratAnalysis(null);
@@ -600,7 +608,14 @@ export function useHuntAi() {
       detail: analystReport?.data.detail ?? null,
       analysis: analystReport?.data.analysis ?? null,
       analyzedAt: analystReport?.analyzedAt ?? "",
-      loading: analystLoading || savedAnalystQuery.isPending || Boolean(savedAnalystQuery.data && savedAnalystDetailQuery.isPending),
+      // A disabled TanStack query remains `isPending`, so that flag made Analyst show an
+      // endless loader when the account had no selected/held/watched ticker. Only surface
+      // restore loading when a real ticker exists and a request is actually fetching.
+      loading: Boolean(activeTicker && (
+        analystLoading
+        || savedAnalystQuery.isFetching
+        || Boolean(savedAnalystQuery.data && savedAnalystDetailQuery.isFetching)
+      )),
       stage: analystStage,
       async run(ticker?: string, force = false) {
         const sym = (ticker || activeTicker).trim().toUpperCase();

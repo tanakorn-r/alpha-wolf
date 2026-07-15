@@ -5,7 +5,7 @@ import { useDialogAccessibility } from "../../lib/useDialogAccessibility";
 
 export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   const titleId = useId();
-  const dialogRef = useDialogAccessibility(onClose);
+  const dialogRef = useDialogAccessibility<HTMLDivElement>(onClose);
   useEffect(() => {
     const unlockBodyScroll = lockBodyScroll();
     return unlockBodyScroll;

@@ -47,9 +47,10 @@ export function FooPage() {
 | `features/stock-detail/` | `StockDetailDrawer.tsx` + `DrawerMetric.tsx` + `AdvancedInsightCard.tsx`: compact 1040px research drawer, Agent Quick Read, equal six-tab navigation, reusable metric and advanced-analysis cards |
 | `components/ui/` | Shared atoms: `Surface.tsx` (tokenized card/inset/frame shells), `panels.tsx` (LoadingPanel/LoadingStrip/EmptyPanel/RetryPanel/ErrorBanner/ErrorCard), `Badge.tsx` (Badge/SignalChip/TagPill), `PillTabs.tsx`, `icons.tsx` (Spark/Search/ArrowUp), `Modal.tsx` |
 | `components/agents/` | Shared agent presentation: `AgentCall` canonical verdict anatomy, `AgentThinking` canonical progress state, plus `AgentCard`, `AgentByline`, and `AgentRecap` |
+| `components/settings/` | Authenticated locale gate, three-step first-login wizard, and consolidated region/currency reconfiguration dialog |
 | `components/` | Cross-feature: DeepAnalysisPanel, AiVerdictCard, PremiumAiButton, Money, Sparkline, LoadingSpinner, `charts/`, `layout/` (AppLayout/Sidebar/Header) |
 | `lib/api.ts` | ALL backend calls + response types (loadPortfolio, loadStockDetail, loadDeepAnalysis, loadUpwardMoves, summarizeStock, loadStrategyPlaybook, loadDiscoveries…) |
-| `lib/` | `format.ts` (formatCurrency/Percent), `chart.ts` (paddedDomain), `cn.ts`, `symbolColor.ts` |
+| `lib/` | `locale.ts` (detected/persisted locale choices + date helpers), `format.ts` (locale-aware portfolio/native money and numbers), `chart.ts`, `cn.ts`, `symbolColor.ts` |
 | `store/useWolfStore.ts` | Zustand + localStorage: holdings UI state, deepExtras watchlist, premium flag, n100 quota + report cache, openDetail drawer |
 | `data/market.ts` | StockRecord/StrategyKey types, strategy descriptions |
 | `theme.ts`, `styles.css` | Dark Cadence theme; `aw-rainbow-*` classes in styles.css |
@@ -59,17 +60,17 @@ export function FooPage() {
 | Path | What's inside |
 |---|---|
 | `main.py` / `routes/router.py` | App entry / route registration |
-| `routes/` | One file per endpoint group: portfolio, details (incl. `/deep`, `/buy-timing`, `/upward-moves`), discover, analysis (AI), calendar, dashboard, market, quote, presets… |
+| `routes/` | One file per endpoint group: portfolio, settings, auth, details (incl. `/deep`, `/buy-timing`, `/upward-moves`), discover, analysis (AI), calendar, dashboard, market, quote, presets… |
 | `models.py` | Pydantic response models (mirror `lib/api.ts` types) |
 | `internal/market/` | Business logic: detail.py, deep.py (rule-based deep read), buy_timing.py (dividend-cycle timing), patterns.py (upward-moves), discovery, portfolio, scoring, technicals, universe, calendar |
 | `internal/ai/` | openai_client.py, heuristics.py, context.py |
-| `internal/store/` | SQLite/Turso persistence: portfolio, durable AI response cache, replay jobs, Yahoo/cache tables |
+| `internal/store/` | SQLite/Turso persistence: portfolio, user locale settings, durable AI response cache, replay jobs, Yahoo/cache tables |
 | `internal/yahoo/client.py` | yfinance wrapper (per-ticker quotes, history, news) |
 | `internal/news/kaohoon.py` | Kaohoon International SET feed (WordPress REST); `market_news()` cached, merged into `.BK` detail news by `detail.py::merge_thai_market_news` |
 
 ## Conventions that save tokens
 
-- Money: `formatCurrency(value, currency)` — THB uses ฿. USD primary, THB secondary.
+- Money: portfolio values remain USD-base internally and render in the signed-in account's selected base currency; `formatCurrency(value, currency)` keeps instrument prices in their native trading currency.
 - Colors: green `#3ecf8e`, red `#f2575c`, amber `#f5c451`, blue `#74a4ff`, purple `#c77dff`; panel = `rounded-xl border border-[#2a2a31] bg-[#161619]`.
 - No mock data anywhere — empty/error states instead.
 - AI endpoints run only on explicit user action (button), never on mount.

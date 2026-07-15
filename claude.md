@@ -70,15 +70,12 @@
   (header/sidebar), `features/<name>/` = feature-scoped components (e.g.
   `features/stock-detail/`), `pages/` = one file per route, composes the
   above + stores.
-- Money/currency: money is stored in **USD base** everywhere, but the app
-  DISPLAYS **THB as the primary, bold figure**; USD is the small muted
-  secondary "≈$X". Use the shared `<Money>` component (`components/Money.tsx`)
-  and `formatMoneyDual` (`lib/format.ts`) for prominent money; `formatMoneyBaht`
-  for single-value app money (DCA/cash/chart). Any user money *input* is entered
-  in THB and divided by `THB_PER_USD` before hitting the USD-base store. Never
-  reintroduce a currency *toggle*. Instrument-native prices (stock quote/target,
-  per-share dividends) use `formatCurrency(value, currency)` and stay in the
-  stock's own trading currency — do NOT convert those.
+- Money/currency: money is stored in **USD base** everywhere and portfolio totals
+  render in the authenticated account's persisted `settings.baseCurrency`; USD
+  remains a muted secondary only when it differs from the selected currency.
+  Use the shared `<Money>` component and locale-aware helpers in `lib/format.ts`.
+  Instrument-native prices (stock quote/target, per-share dividends) use
+  `formatCurrency(value, currency)` and stay in the stock's own trading currency.
 - Charts: Recharts. `PortfolioPerformanceChart` accepts a `children` prop for
   injecting `ReferenceLine`/`ReferenceDot` markers (e.g. "first buy" dots).
 - Styling: Tailwind v4, utility classes inline; dark theme (`#0c0c0e`-ish
@@ -143,7 +140,7 @@
   (`HoldingFormModal` + `useDashboard.holdingForm`: ticker + units + price →
   `holdings`, averages into an existing position), sell modal. No DCA/budget flow.
 - DCA Scanner (`pages/StockHuntPage.tsx` + `features/stock-hunt/*`, `/scanner`):
-  search/market/sector/sort filters, "In my plan" chip, AI top-5 rank + buy.
+  search/market/sector/sort filters, "In my plan" chip, AI top-5 rank + buy; discovery fetching pauses while Stock Detail is open so it cannot compete with the drawer request.
 - Income Calendar (`pages/DividendHuntPage.tsx` + `features/dividend-hunt/*`,
   `/calendar`): ex-date/payment-date month grid + side list.
 - Hunt AI (`pages/HuntAiPage.tsx` + `features/hunt-ai/*`, `/hunt-ai`; `/deep-ai`
@@ -166,12 +163,12 @@
   All tab state lives in `features/hunt-ai/useHuntAi.ts` (grouped return:
   `watchlist/signals/timing/intraday/next100/strategy/analyst`); pure helpers in
   `features/hunt-ai/lib.ts`. Analyst uses one `/analysis/{symbol}/report` endpoint: database-first quote/research reads, `202` polling for cold quotes, 15-minute report reuse, explicit-refresh regeneration, and a one-minute UI deadline.
-- Stock detail drawer uses the reference 22/16/10 radius hierarchy in a compact 1040px frame, active-Agent Quick Read, equal six-tab navigation, reusable `DrawerMetric`, and grounded peer/Dow/Wyckoff/Elliott/Fibonacci/multi-timeframe cards via `AdvancedInsightCard`; cache-miss placeholders auto-poll the database and stop with a retry state after one minute instead of loading forever.
+- Stock detail drawer uses the reference 22/16/10 radius hierarchy in a compact 1040px frame, active-Agent Quick Read, equal six-tab navigation, reusable `DrawerMetric`, and grounded peer/Dow/Wyckoff/Elliott/Fibonacci/multi-timeframe cards via `AdvancedInsightCard`; opening uses only the detail service, cold-cache pending data gets six bounded backoff checks, and AI, portfolio, and research/market tabs remain local-cache or explicit-click work.
 - Mobile: `apps/web` is wrapped with Capacitor v8 (native projects `apps/web/ios`+`apps/web/android`, config `apps/web/capacitor.config.ts`, appId `com.alphawolf.app`, webDir `dist`). Scripts `cap:sync`/`cap:ios`/`cap:android`/`cap:add:*`. Native build needs `apps/web/.env.production` with absolute `VITE_API_BASE` (no dev proxy on device). Full workflow in `apps/web/MOBILE.md`.
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Replaced mock AI-credit grants with Stripe-hosted Checkout sandbox payments: fixed server-priced 25/75/200-run packs create authenticated Checkout Sessions, signed raw-body webhooks and the success-return confirmation share idempotent fulfillment keyed by Checkout Session, and paid monthly bonus credits flow through the existing entitlement guard. Configuration is API-only via `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `APP_URL`; no key is committed or exposed to the browser.
+- Standardized every Hunt AI no-ticker state (Signals, Buy Timing, Technical, Intraday, Next 10, Analyst, and AI Replay) on one shared-UI `TickerEmptyPanel`: identical card, icon, title, spacing, and typography with only the feature-specific guidance changing; the single Add asset control stays in the watchlist bar, and Analyst's meaningless dash toolbar remains removed until an asset exists.
 
 **Recent Context**
 - Fixed a live crash (`Uncaught RangeError: Invalid currency code : null` in `StockDetailDrawer`'s `DrawerHeader`, `formatCurrency`). Root cause: `formatCurrency(value, currency = "USD")`'s default parameter only covers `undefined`, not an explicit `null` — and `detail.stock.currency` can genuinely be `null` now that the backend's cache-first fallback (prior entries) returns empty fields immediately for a freshly-uncached symbol instead of blocking until real data arrives. Fixed `formatCurrency` (`apps/web/src/lib/format.ts`) to coalesce `currency || "USD"` so `null` and `undefined` both fall back correctly. Checked the file for the same gap elsewhere: `formatMoneyAs` requires a non-optional `"USD" | "THB"` literal union, so TypeScript already catches a stray `null` there at compile time — `formatCurrency` was the only vulnerable one. tsc clean.

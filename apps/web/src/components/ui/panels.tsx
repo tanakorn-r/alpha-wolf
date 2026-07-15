@@ -36,6 +36,10 @@ export function EmptyPanel({ title, body }: { title: string; body: string }) {
   );
 }
 
+export function TickerEmptyPanel({ body }: { body: string }) {
+  return <EmptyPanel title="No stock selected" body={body} />;
+}
+
 export function RetryPanel({ label, busy, onRetry }: { label: string; busy?: boolean; onRetry: () => void }) {
   const creditLimit = /monthly ai limit|credits? used/i.test(label);
   useEffect(() => {

@@ -316,6 +316,23 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
         db.execute("ALTER TABLE users ADD COLUMN premium_expires_at TEXT")
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS user_settings (
+            user_id INTEGER PRIMARY KEY,
+            country_code TEXT NOT NULL,
+            display_language TEXT NOT NULL,
+            base_currency TEXT NOT NULL,
+            timezone TEXT NOT NULL,
+            date_locale TEXT NOT NULL,
+            number_locale TEXT NOT NULL,
+            preferred_markets TEXT NOT NULL,
+            completed_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+        """
+    )
+    db.execute(
+        """
         CREATE TABLE IF NOT EXISTS ai_credit_balances (
             user_id INTEGER PRIMARY KEY,
             balance INTEGER NOT NULL DEFAULT 0,
@@ -362,8 +379,34 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
             document TEXT NOT NULL,
             version TEXT NOT NULL,
             accepted_at TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT 'legacy',
             PRIMARY KEY(user_id, document, version)
         )
+        """
+    )
+    legal_acceptance_columns = _table_columns(db, "legal_acceptances")
+    if "source" not in legal_acceptance_columns:
+        db.execute("ALTER TABLE legal_acceptances ADD COLUMN source TEXT NOT NULL DEFAULT 'legacy'")
+    # Acceptance rows are append-only evidence. UPDATE is always forbidden, and an
+    # acceptance cannot be deleted while its owning account still exists. The account
+    # erasure workflow removes the user first and then clears these now-orphaned stamps.
+    db.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS legal_acceptances_no_update
+        BEFORE UPDATE ON legal_acceptances
+        BEGIN
+            SELECT RAISE(ABORT, 'legal acceptance records are immutable');
+        END
+        """
+    )
+    db.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS legal_acceptances_no_delete_active_user
+        BEFORE DELETE ON legal_acceptances
+        WHEN EXISTS (SELECT 1 FROM users WHERE id = OLD.user_id)
+        BEGIN
+            SELECT RAISE(ABORT, 'legal acceptance records are immutable while the account exists');
+        END
         """
     )
     db.execute("CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user ON legal_acceptances(user_id, accepted_at)")

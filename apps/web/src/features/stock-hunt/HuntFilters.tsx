@@ -1,6 +1,6 @@
 import { PillTabs } from "../../components/ui/PillTabs";
 import { SearchIcon, StrategyIcon, type StrategyIconKind } from "../../components/ui/icons";
-import { marketOptions, sortLabels, type SortKey, type StockHunt } from "./useStockHunt";
+import { sortLabels, type Market, type SortKey, type StockHunt } from "./useStockHunt";
 
 const select = "min-w-0 rounded-[8px] border border-[#2a2a31] bg-[#161619] px-2.5 py-[7px] text-[12px] text-[#ececee] outline-none focus:border-[#3ecf8e]";
 
@@ -29,7 +29,12 @@ export function HuntFilters({ hunt }: { hunt: StockHunt }) {
             className="w-full rounded-[8px] border border-[#2a2a31] bg-[#161619] py-[8px] pl-9 pr-3 text-[12px] text-[#ececee] outline-none focus:border-[#3ecf8e]"
           />
         </label>
-        <PillTabs value={hunt.market} options={marketOptions} onChange={hunt.setMarket} className="w-full rounded-[8px] p-0.5 min-[640px]:w-auto [&>button]:flex-1 [&>button]:px-2.5 [&>button]:py-1.5 [&>button]:text-[11.5px] min-[640px]:[&>button]:flex-none" />
+        <label className="w-full min-[640px]:w-auto">
+          <span className="sr-only">Market</span>
+          <select value={hunt.market} onChange={(event) => hunt.setMarket(event.target.value as Market)} className={`${select} w-full min-[640px]:min-w-[245px]`}>
+            {hunt.marketOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">

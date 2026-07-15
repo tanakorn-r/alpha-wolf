@@ -16,7 +16,18 @@ from models import MarketCatalogStatus, MarketUniverseCache, UniverseEntry
 
 CATALOG_TTL_SECONDS = 86_400
 CATALOG_PAGE_SIZE = 250
+# US and Thailand remain the eagerly warmed default catalog. Additional account
+# markets are built lazily when the user selects them in Stock Hunt.
 CATALOG_REGIONS = ("us", "th")
+SUPPORTED_CATALOG_REGIONS = ("us", "th", "europe", "japan", "hong-kong-china")
+CATALOG_YAHOO_REGIONS = {
+    "us": ("us",),
+    "th": ("th",),
+    "europe": ("gb", "fr", "nl", "be", "de"),
+    "japan": ("jp",),
+    "hong-kong-china": ("hk", "cn"),
+}
+CATALOG_REGIONAL_SIZE = 80
 # yfinance's screener never returns a `sector` field on quotes, so we screen one
 # sector at a time and tag every result with the sector we queried for. These are
 # the valid EquityQuery sector values (GICS-style).
@@ -69,19 +80,26 @@ def _canonical_industry_name(industry: str) -> str:
     return industry
 
 
-def get_market_catalog() -> list[dict[str, Any]]:
+def get_market_catalog(regions: tuple[str, ...] | None = None) -> list[dict[str, Any]]:
+    requested = _normalized_regions(regions)
     now = datetime.now(timezone.utc)
-    cached = [load_market_universe(region) for region in CATALOG_REGIONS]
+    cached = [load_market_universe(region) for region in requested]
     if all(_catalog_fresh(value, now) for value in cached):
         return [record for value in cached if value for record in _sanitize_cached_records(value)]
 
     with _REFRESH_LOCK:
-        cached = [load_market_universe(region) for region in CATALOG_REGIONS]
+        cached = [load_market_universe(region) for region in requested]
         now = datetime.now(timezone.utc)
         if all(_catalog_fresh(value, now) for value in cached):
             return [record for value in cached if value for record in _sanitize_cached_records(value)]
-        refreshed = [_refresh_region(region) for region in CATALOG_REGIONS]
+        refreshed = [value if _catalog_fresh(value, now) else _refresh_region(region) for region, value in zip(requested, cached)]
         return [record for value in refreshed for record in value.records]
+
+
+def _normalized_regions(regions: tuple[str, ...] | None) -> tuple[str, ...]:
+    requested = regions or CATALOG_REGIONS
+    normalized = tuple(dict.fromkeys(region for region in requested if region in SUPPORTED_CATALOG_REGIONS))
+    return normalized or CATALOG_REGIONS
 
 
 def _catalog_fresh(value: MarketUniverseCache | None, now: datetime) -> bool:
@@ -89,6 +107,8 @@ def _catalog_fresh(value: MarketUniverseCache | None, now: datetime) -> bool:
     screening have every record at sector 'Unknown', so force those to rebuild."""
     if not value or datetime.fromisoformat(value.expiresAt) <= now:
         return False
+    if value.region not in CATALOG_REGIONS:
+        return bool(value.records)
     return any(str(record.get("sector") or "Unknown") != "Unknown" for record in value.records)
 
 
@@ -110,13 +130,24 @@ def ensure_market_catalog() -> MarketCatalogStatus:
 def _refresh_region(region: str) -> MarketUniverseCache:
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for sector in CATALOG_SECTORS:
-        query = yf.EquityQuery("and", [
-            yf.EquityQuery("eq", ["region", region]),
-            yf.EquityQuery("eq", ["sector", sector]),
-        ])
+    if region in CATALOG_REGIONS:
+        queries = [
+            (yf.EquityQuery("and", [
+                yf.EquityQuery("eq", ["region", region]),
+                yf.EquityQuery("eq", ["sector", sector]),
+            ]), CATALOG_SECTOR_SIZE, sector)
+            for sector in CATALOG_SECTORS
+        ]
+    else:
+        # New configured markets use a compact top-cap screen per Yahoo region.
+        # This avoids multiplying a first selection into dozens of sector calls.
+        queries = [
+            (yf.EquityQuery("eq", ["region", yahoo_region]), CATALOG_REGIONAL_SIZE, None)
+            for yahoo_region in CATALOG_YAHOO_REGIONS[region]
+        ]
+    for query, size, sector in queries:
         try:
-            payload = yf.screen(query, size=CATALOG_SECTOR_SIZE, sortField="intradaymarketcap", sortAsc=False)
+            payload = yf.screen(query, size=size, sortField="intradaymarketcap", sortAsc=False)
         except Exception as exc:
             print(f"Warning: sector screen failed for {region}/{sector}: {exc}")
             continue

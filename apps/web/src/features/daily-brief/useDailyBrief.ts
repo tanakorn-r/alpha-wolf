@@ -16,7 +16,8 @@ import {
   type TodayPerformanceResponse,
 } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
-import { formatMoneyBaht, priceToUsdBase, setFxRates } from "../../lib/format";
+import { formatCurrency, formatMoneyBaht, priceToUsdBase, setFxRates } from "../../lib/format";
+import { formatLocalDate } from "../../lib/locale";
 
 export type BriefStatus = "needs_you" | "watch" | "hold";
 export type BriefFilter = "all" | BriefStatus;
@@ -436,7 +437,7 @@ function relativeDate(days: number) {
 }
 
 function shortDate(value: string) {
-  return new Date(`${value}T00:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatLocalDate(new Date(`${value}T00:00:00`), { month: "short", day: "numeric" });
 }
 
 function money(usd: number) {
@@ -444,7 +445,7 @@ function money(usd: number) {
 }
 
 function formatNative(value: number, currency?: string | null) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
+  return formatCurrency(value, currency);
 }
 
 function formatSigned(value: number) {

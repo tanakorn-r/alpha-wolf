@@ -5,8 +5,8 @@ const FOCUSABLE = [
   "textarea:not([disabled])", "[tabindex]:not([tabindex='-1'])",
 ].join(",");
 
-export function useDialogAccessibility(onClose: () => void, active = true) {
-  const dialogRef = useRef<HTMLElement>(null);
+export function useDialogAccessibility<T extends HTMLElement = HTMLElement>(onClose: () => void, active = true) {
+  const dialogRef = useRef<T>(null);
 
   useEffect(() => {
     if (!active) return;

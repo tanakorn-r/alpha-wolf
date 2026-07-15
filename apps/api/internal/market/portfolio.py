@@ -10,6 +10,7 @@ from internal.market.records import build_entry_from_info, fetch_record_from_tic
 from internal.market.data_trust import aggregate_data_trust, build_yahoo_data_trust
 from internal.fx import fx_payload
 from internal.store.portfolio import list_dca_orders, list_holdings, list_transactions
+from internal.store.settings import load_user_settings
 from internal.store.utils import as_float, coerce_iso_date
 from internal.yahoo.client import fetch_dividends, fetch_history, load_ticker_modules, quote_snapshot_meta, ticker as make_ticker
 from models import IncomeEvent, PortfolioDashboard, PortfolioMarker, PortfolioPoint, PortfolioSummary
@@ -26,7 +27,9 @@ def _to_base_series(series: pd.Series, currency: str | None, rates: dict[str, fl
 
 
 def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
-    fx = fx_payload()
+    settings = load_user_settings(user_id) if user_id else None
+    reporting_currency = str((settings or {}).get("baseCurrency") or "THB")
+    fx = fx_payload([reporting_currency])
     rates = dict(fx["rates"])
     thb_per_usd = float(rates["THB"])
     holdings = list_holdings(user_id)
@@ -64,7 +67,7 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
             dcaOrders=orders,
             markers=[PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
             transactions=transactions,
-            **_dashboard_fx(fx),
+            **_dashboard_fx(fx, reporting_currency),
         )
 
     # Each holding's market data is an independent set of cache/yfinance round trips — a
@@ -136,13 +139,14 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
         incomeEvents=sorted(income_events, key=lambda item: item.date),
         transactions=transactions,
         dataTrust=aggregate_data_trust(holding_trust),
-        **_dashboard_fx(fx),
+        **_dashboard_fx(fx, reporting_currency),
     )
 
 
 def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
     """Latest quote overlay only; the browser merges this into the saved dashboard."""
-    fx = fx_payload()
+    settings = load_user_settings(user_id) if user_id else None
+    fx = fx_payload([str((settings or {}).get("baseCurrency") or "THB")])
     holdings = list_holdings(user_id)
     if not holdings:
         return {"quotes": [], "pending": False, "updatedAt": None, **_quote_fx(fx)}
@@ -261,13 +265,13 @@ def _closed_position_dividends(transactions_by_symbol: dict[str, list[Any]], act
     return total
 
 
-def _dashboard_fx(fx: dict[str, object]) -> dict[str, object]:
+def _dashboard_fx(fx: dict[str, object], reporting_currency: str) -> dict[str, object]:
     return {
         "fxRates": fx["rates"],
         "fxFetchedAt": fx["fetchedAt"],
         "fxSource": fx["source"],
         "fxStale": fx["stale"],
-        "reportingCurrency": "THB",
+        "reportingCurrency": reporting_currency,
     }
 
 

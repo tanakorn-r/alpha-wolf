@@ -8,7 +8,7 @@ import { PillTabs } from "../../components/ui/PillTabs";
 import { TagPill } from "../../components/ui/Badge";
 import { Ring } from "../../lib/ring";
 import type { TodayPerformanceResponse } from "../../lib/api";
-import { formatCurrency, formatMoneyBaht, formatPercent } from "../../lib/format";
+import { formatCurrency, formatMoneyBaht, formatNumber, formatPercent } from "../../lib/format";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
 import type { BriefFilter, BriefStatus, BriefTone, DailyBrief, HoldingBriefRow } from "./useDailyBrief";
 
@@ -264,5 +264,5 @@ function Meta({ label, value, color = "#ececee" }: { label: string; value: strin
 }
 
 function formatShares(value: number) {
-  return Number.isInteger(value) ? value.toLocaleString("en-US") : value.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  return formatNumber(value);
 }

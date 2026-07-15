@@ -7,6 +7,8 @@ import { formatAnalyzedAt, signalLevel } from "./lib";
 import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 import { loadAiDecisionHistory } from "../../lib/api";
+import { formatLocalDateTime } from "../../lib/locale";
+import { TickerEmptyPanel } from "../../components/ui/panels";
 
 export function AnalystTab({ hunt }: { hunt: HuntAi }) {
   const analyst = hunt.analyst;
@@ -32,6 +34,12 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
     queryFn: () => loadAiDecisionHistory(selectedTicker, hunt.activeAgentId),
     enabled: hunt.signedIn && Boolean(selectedTicker && analysis),
   });
+
+  if (!selectedTicker) {
+    return (
+      <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to run Analyst." />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -91,7 +99,7 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
               <ol className="mt-3 grid gap-3">
                 {history.data.slice(0, 8).map((item) => (
                   <li key={item.runId} className="border-l-2 border-white/10 pl-3 text-[11px] leading-[1.5] text-[#bcbcc2]">
-                    <div className="font-mono text-[10px] text-[#8c8c95]">{new Date(item.createdAt).toLocaleString()} · {item.feature} · {item.decision.action}</div>
+                    <div className="font-mono text-[10px] text-[#8c8c95]">{formatLocalDateTime(item.createdAt)} · {item.feature} · {item.decision.action}</div>
                     <div className="mt-1">{item.whyChanged}</div>
                     <div className="mt-1 font-mono text-[9px] text-[#5a5a62]">{item.model} · prompt {item.promptVersion}</div>
                   </li>
@@ -100,10 +108,6 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
             </details>
           ) : null}
         </AgentCall>
-      ) : null}
-
-      {!analyst.loading && !selectedTicker ? (
-        <div className={`${panel} px-6 py-6 text-center text-[12.5px] text-[#8c8c95]`}>Pick a stock from the Hunt watchlist to run Analyst.</div>
       ) : null}
     </div>
   );

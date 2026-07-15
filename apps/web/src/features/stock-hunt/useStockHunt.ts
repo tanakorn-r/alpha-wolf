@@ -1,22 +1,32 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StockRecord, StrategyKey } from "../../data/market";
-import { buyHolding, loadAuthUser, loadDiscoveries, loadFxRates, summarizeStock, type StockAnalysisResponse } from "../../lib/api";
+import { buyHolding, loadAuthUser, loadDiscoveries, loadFxRates, summarizeStock, type MarketPreference, type StockAnalysisResponse } from "../../lib/api";
 import { formatCurrency, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
 import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useWolfStore } from "../../store/useWolfStore";
 import type { StrategyIconKind } from "../../components/ui/icons";
+import { getLocaleSettings } from "../../lib/locale";
 
-export type Market = "all" | "us" | "th";
+export type Market = "all" | "us" | "th" | "europe" | "japan" | "hong-kong-china";
 export type SortKey = "score" | "yield" | "change" | "name";
 export type StrategyMode = StrategyIconKind;
 export type Top5State = "idle" | "loading" | "open";
 
-export const marketOptions: Array<{ value: Market; label: string }> = [
-  { value: "all", label: "All markets" },
-  { value: "us", label: "US" },
-  { value: "th", label: "Thai SET" },
-];
+const marketPreferenceFilters: Record<MarketPreference, Exclude<Market, "all">> = {
+  us: "us",
+  europe: "europe",
+  japan: "japan",
+  "hong-kong-china": "hong-kong-china",
+  thailand: "th",
+};
+const marketLabels: Record<Exclude<Market, "all">, string> = {
+  us: "United States · NYSE / Nasdaq",
+  europe: "Europe · Euronext / LSE",
+  japan: "Japan · Tokyo Stock Exchange",
+  "hong-kong-china": "Hong Kong / China · HKEX / SSE / SZSE",
+  th: "Thailand · SET",
+};
 export const chipLabels: Record<StrategyMode, string> = {
   swing: "Swing Trade",
   day: "Day Trade",
@@ -95,6 +105,7 @@ export function useStockHunt() {
   const setStrategy = useWolfStore((state) => state.setStrategy);
   const setSelectedMode = useWolfStore((state) => state.setSelectedMode);
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
+  const detailOpen = useWolfStore((state) => state.detailOpen);
   const [strategyMode, setStrategyMode] = useState<StrategyMode>("swing");
   const baseStrategy = modeToBaseStrategy[strategyMode];
 
@@ -105,7 +116,11 @@ export function useStockHunt() {
       void queryClient.cancelQueries({ queryKey: ["discoveries"] });
     }
   }, [query, queryClient, searchQuery]);
-  const [market, setMarketState] = useState<Market>("all");
+
+  useEffect(() => {
+    if (detailOpen) void queryClient.cancelQueries({ queryKey: ["discoveries"] });
+  }, [detailOpen, queryClient]);
+  const [market, setMarketState] = useState<Market>(() => preferredScannerMarket());
   const [sector, setSectorState] = useState("all");
   const [sortBy, setSortByState] = useState<SortKey>("score");
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
@@ -118,6 +133,25 @@ export function useStockHunt() {
   const [signInOpen, setSignInOpen] = useState(false);
   const [discoveryReady, setDiscoveryReady] = useState(false);
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
+  const preferredMarketKey = (authQuery.data?.settings?.preferredMarkets ?? getLocaleSettings().preferredMarkets).join(",");
+  const configuredMarkets = useMemo(
+    () => preferredMarketKey.split(",").filter(Boolean).map((value) => marketPreferenceFilters[value as MarketPreference]),
+    [preferredMarketKey],
+  );
+  const marketOptions = useMemo<Array<{ value: Market; label: string }>>(
+    () => [
+      { value: "all", label: "All preferred markets" },
+      ...configuredMarkets.map((value) => ({ value, label: marketLabels[value] })),
+    ],
+    [configuredMarkets],
+  );
+
+  useEffect(() => {
+    if (market !== "all" && !configuredMarkets.includes(market)) {
+      setMarketState(preferredScannerMarket(configuredMarkets));
+      resetTop5();
+    }
+  }, [configuredMarkets, market]);
 
   useEffect(() => {
     // React Strict Mode intentionally performs a throwaway mount in development. Defer the
@@ -133,14 +167,14 @@ export function useStockHunt() {
 
   const loadMoreRef = useRef<HTMLDivElement>(null);
   const discoveryQuery = useInfiniteQuery({
-    queryKey: ["discoveries", query, market, baseStrategy, strategyMode, sortBy, sector],
-    queryFn: ({ pageParam, signal }) => loadDiscoveries({ q: query || undefined, kind: "stock", region: market, strategy: baseStrategy, mode: strategyMode, sort: sortBy, sector, page: pageParam, limit: 40, signal }),
+    queryKey: ["discoveries", query, market, preferredMarketKey, baseStrategy, strategyMode, sortBy, sector],
+    queryFn: ({ pageParam, signal }) => loadDiscoveries({ q: query || undefined, kind: "stock", region: market, markets: configuredMarkets, strategy: baseStrategy, mode: strategyMode, sort: sortBy, sector, page: pageParam, limit: 40, signal }),
     initialPageParam: 1,
     getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined),
     staleTime: 60_000,
     refetchOnMount: false,
     retry: 1,
-    enabled: discoveryReady,
+    enabled: discoveryReady && !detailOpen,
   });
   const items = useMemo(() => discoveryQuery.data?.pages.flatMap((page) => page.live) ?? [], [discoveryQuery.data]);
   const total = discoveryQuery.data?.pages[0]?.total ?? 0;
@@ -193,7 +227,7 @@ export function useStockHunt() {
         rank: index + 1,
         score,
         scoreColor,
-        marketBadge: item.symbol.endsWith(".BK") ? "Thai SET" : "US",
+        marketBadge: marketBadgeFor(item),
         sectorBadge: item.sector && item.sector !== "Unknown" ? item.sector : item.exchange ?? "Equity",
         story: catalogStory(item.story ?? ""),
         signals,
@@ -222,6 +256,7 @@ export function useStockHunt() {
   return {
     searchQuery,
     market,
+    marketOptions,
     sector,
     sectors,
     sortBy,
@@ -308,6 +343,19 @@ export function useStockHunt() {
     },
     retry() { void discoveryQuery.refetch(); },
   };
+}
+
+function preferredScannerMarket(configured = getLocaleSettings().preferredMarkets.map((value) => marketPreferenceFilters[value])): Market {
+  if (configured.length === 1) return configured[0];
+  return "all";
+}
+
+function marketBadgeFor(item: StockRecord): string {
+  if (item.indexes.includes("th")) return "Thai SET";
+  if (item.indexes.includes("japan")) return "Japan";
+  if (item.indexes.includes("hong-kong-china")) return "Hong Kong / China";
+  if (item.indexes.includes("europe")) return "Europe";
+  return "US";
 }
 
 function exDivLabel(date?: string | null): string | null {

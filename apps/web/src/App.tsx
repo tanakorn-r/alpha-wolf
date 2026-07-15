@@ -14,6 +14,7 @@ import { DividendHuntPage } from "./pages/DividendHuntPage";
 import { LiveTradePage } from "./pages/LiveTradePage";
 import { PrivacyPage, RefundPage, SupportPage, TermsPage } from "./pages/LegalPages";
 import { ensureMarketCatalog, loadAuthUser } from "./lib/api";
+import { LocaleGate } from "./components/settings/LocalePreferences";
 
 const VISITED_STORAGE_KEY = "aw_visited_app";
 
@@ -96,8 +97,8 @@ export default function App() {
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/refunds" element={<RefundPage />} />
       <Route path="/support" element={<SupportPage />} />
-      <Route path="/" element={<HomeRoute />} />
-      <Route element={<AppShell />}>
+      <Route path="/" element={<LocaleGate><HomeRoute /></LocaleGate>} />
+      <Route element={<LocaleGate><AppShell /></LocaleGate>}>
         <Route path="/daily-brief" element={<Navigate to="/hunt-ai?tab=brief" replace />} />
         <Route path="/live-trade" element={<LiveTradePage />} />
         <Route path="/scanner" element={<StockHuntPage />} />

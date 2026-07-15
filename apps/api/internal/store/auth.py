@@ -8,6 +8,7 @@ from typing import Any
 from internal.store.db import connect
 from internal.store.entitlements import entitlement_status
 from internal.store.account_lifecycle import legal_acceptance_status
+from internal.store.settings import load_user_settings
 
 
 def upsert_google_user(*, google_sub: str, email: str, name: str, picture_url: str | None) -> dict[str, Any]:
@@ -110,6 +111,7 @@ def _user(row: Any) -> dict[str, Any]:
         "createdAt": str(row[5]),
         "premiumRedeemedAt": str(row[6]) if row[6] else None,
         "premiumExpiresAt": str(row[7]) if len(row) > 7 and row[7] else None,
+        "settings": load_user_settings(user_id),
         **legal_acceptance_status(user_id),
         **entitlement_status(user_id),
     }

@@ -2,6 +2,8 @@ import type { StockAnalysisResponse } from "../lib/api";
 import { Ring } from "../lib/ring";
 import { AgentCall, type AgentCallMetric } from "./agents/AgentCall";
 import { AgentRecap } from "./agents/AgentRecap";
+import { formatLocalDateTime } from "../lib/locale";
+import { formatCurrency, formatPercent } from "../lib/format";
 
 const scoreColor = (score: number) => (score >= 75 ? "#3ecf8e" : score >= 55 ? "#f5c451" : "#f2575c");
 
@@ -9,7 +11,7 @@ function generatedText(value?: string | null) {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return ` · generated ${date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
+  return ` · generated ${formatLocalDateTime(date, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
 }
 
 export function AiVerdictCard({
@@ -86,12 +88,12 @@ export function AiVerdictCard({
 
 function formatPrice(value?: number | null, currency = "USD") {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
+  return formatCurrency(value, currency);
 }
 
 function formatMove(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return formatPercent(value);
 }
 
 function moveColor(value?: number | null) {

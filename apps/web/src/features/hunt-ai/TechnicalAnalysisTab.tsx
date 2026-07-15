@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CartesianGrid, ComposedChart, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AgentCall } from "../../components/agents/AgentCall";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
-import { EmptyPanel, LoadingPanel, RetryPanel } from "../../components/ui/panels";
+import { LoadingPanel, RetryPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { formatCurrency } from "../../lib/format";
 import type { StockDetailResponse, TechnicalAnalysisResponse } from "../../lib/api";
 import { agentLoadingTitle, PremiumLoading } from "./ui";
@@ -13,7 +13,7 @@ type Overlay = "dow" | "wyckoff" | "elliott" | "fibonacci" | "levels" | "timefra
 
 export function TechnicalAnalysisTab({ hunt }: { hunt: HuntAi }) {
   const technical = hunt.technical;
-  if (!technical.ticker) return <EmptyPanel title="No ticker selected" body="Add or select a ticker to open Technical Analysis." />;
+  if (!technical.ticker) return <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to open Technical Analysis." />;
   if (technical.pending) return <LoadingPanel title={`Loading ${technical.ticker} chart...`} body="Reading cached price history and market structure." />;
   if (technical.failed || !technical.detail) return <RetryPanel label="Technical chart data is unavailable." onRetry={technical.retry} />;
 

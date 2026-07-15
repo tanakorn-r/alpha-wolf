@@ -12,7 +12,15 @@ from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 
 FX_TTL_SECONDS = 86_400
 _FX_REFRESH_LOCK = threading.Lock()
-_FALLBACK_USD_QUOTES = {"USD": 1.0, "THB": float(os.getenv("FALLBACK_USD_THB", "36.5"))}
+_FALLBACK_USD_QUOTES = {
+    "USD": 1.0,
+    "THB": float(os.getenv("FALLBACK_USD_THB", "36.5")),
+    "EUR": float(os.getenv("FALLBACK_USD_EUR", "0.86")),
+    "GBP": float(os.getenv("FALLBACK_USD_GBP", "0.74")),
+    "JPY": float(os.getenv("FALLBACK_USD_JPY", "159")),
+    "HKD": float(os.getenv("FALLBACK_USD_HKD", "7.85")),
+    "CNY": float(os.getenv("FALLBACK_USD_CNY", "7.18")),
+}
 
 
 @dataclass(frozen=True)
@@ -80,15 +88,18 @@ def to_usd(value: float, currency: str | None, *, symbol: str | None = None, on_
     return value / fx.rate, fx
 
 
-def fx_payload() -> dict[str, object]:
-    thb = usd_quote_rate("THB")
+def fx_payload(currencies: list[str] | tuple[str, ...] | set[str] | None = None) -> dict[str, object]:
+    requested = {"THB", *(str(value).upper() for value in (currencies or []))}
+    requested.discard("USD")
+    quotes = [usd_quote_rate(currency) for currency in sorted(requested)]
+    freshest = max(quotes, key=lambda item: item.fetched_at)
     return {
         "base": "USD",
-        "rates": {"USD": 1.0, "THB": thb.rate},
-        "fetchedAt": thb.fetched_at.isoformat(),
-        "expiresAt": thb.expires_at.isoformat(),
-        "source": thb.source,
-        "stale": thb.stale,
+        "rates": {"USD": 1.0, **{quote.quote: quote.rate for quote in quotes}},
+        "fetchedAt": freshest.fetched_at.isoformat(),
+        "expiresAt": min(quote.expires_at for quote in quotes).isoformat(),
+        "source": ", ".join(sorted({quote.source for quote in quotes})),
+        "stale": any(quote.stale for quote in quotes),
     }
 
 

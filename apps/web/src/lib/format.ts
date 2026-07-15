@@ -1,15 +1,12 @@
+import { getLocaleSettings } from "./locale";
+
 export function formatMoney(value?: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: value >= 100 ? 0 : 2
-  }).format(value);
+  return formatMoneyAs(value, getLocaleSettings().baseCurrency);
 }
 
 export type FxRates = Record<string, number>;
-const FX_RATES: FxRates = { USD: 1, THB: 36.5 };
-const CURRENCY_SYMBOL = { USD: "$", THB: "฿" } as const;
+const FX_RATES: FxRates = { USD: 1, THB: 36.5, EUR: 0.86, GBP: 0.74, JPY: 159, HKD: 7.85, CNY: 7.18 };
 
 /** THB per 1 USD — the app stores money in USD base and displays THB by default. */
 export let THB_PER_USD = FX_RATES.THB;
@@ -31,23 +28,26 @@ export function priceToUsdBase(price: number, currencyOrSymbol?: string | null, 
 }
 
 /** value is always in USD; converts and formats for the selected display currency. */
-export function formatMoneyAs(value: number | undefined, currency: "USD" | "THB") {
+export function formatMoneyAs(value: number | undefined, currency: string) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  const converted = value * FX_RATES[currency];
-  const sign = converted < 0 ? "-" : "";
-  // A thin space keeps the ฿ glyph from visually colliding with a leading digit
-  // (some fonts give it a wide right sidebearing that overlaps a following "0").
-  return `${sign}${CURRENCY_SYMBOL[currency]} ${Math.abs(Math.round(converted)).toLocaleString("en-US")}`;
+  const token = currency.toUpperCase();
+  const converted = value * (FX_RATES[token] || 1);
+  return new Intl.NumberFormat(getLocaleSettings().numberLocale, {
+    style: "currency",
+    currency: token,
+    maximumFractionDigits: Math.abs(converted) >= 100 ? 0 : 2,
+  }).format(converted);
 }
 
-/** value is always in USD base; formats it as the app's default display currency (THB). */
+/** Backward-compatible name; formats USD-base app money in the account's selected currency. */
 export function formatMoneyBaht(value?: number) {
-  return formatMoneyAs(value, "THB");
+  return formatMoneyAs(value, getLocaleSettings().baseCurrency);
 }
 
-/** Primary figure in THB (the site's default display currency) plus a USD equivalent for reference. */
+/** Primary figure in the selected portfolio currency, with USD as a reference when different. */
 export function formatMoneyDual(value?: number) {
-  return { primary: formatMoneyAs(value, "THB"), secondary: formatMoneyAs(value, "USD") };
+  const currency = getLocaleSettings().baseCurrency;
+  return { primary: formatMoneyAs(value, currency), secondary: currency === "USD" ? null : formatMoneyAs(value, "USD") };
 }
 
 export function formatCurrency(value?: number, currency?: string | null) {
@@ -55,37 +55,44 @@ export function formatCurrency(value?: number, currency?: string | null) {
   // A default parameter only covers `undefined` — the API can genuinely send `currency: null`
   // (e.g. a freshly-uncached symbol whose backend cache-first fallback hasn't populated yet),
   // which bypasses the default and crashes Intl.NumberFormat with "Invalid currency code".
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: currency || "USD", maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
+  return new Intl.NumberFormat(getLocaleSettings().numberLocale, { style: "currency", currency: currency || "USD", maximumFractionDigits: value >= 100 ? 0 : 2 }).format(value);
 }
 
 export function formatPercent(value?: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return `${value > 0 ? "+" : ""}${new Intl.NumberFormat(getLocaleSettings().numberLocale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}%`;
 }
 
 export function formatNumber(value?: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+  return new Intl.NumberFormat(getLocaleSettings().numberLocale, { maximumFractionDigits: 2 }).format(value);
 }
 
 export function formatMultiple(value?: number) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  return `${value.toFixed(2)}x`;
+  return `${new Intl.NumberFormat(getLocaleSettings().numberLocale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}x`;
 }
 
 export function formatBig(value?: number | null) {
   if (typeof value !== "number" || Number.isNaN(value)) return "—";
-  const sign = value < 0 ? "-" : "";
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000_000_000) return `${sign}$${(abs / 1_000_000_000_000).toFixed(2)}T`;
-  if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(1)}B`;
-  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
-  return formatMoney(value);
+  return new Intl.NumberFormat(getLocaleSettings().numberLocale, {
+    style: "currency",
+    currency: "USD",
+    notation: Math.abs(value) >= 1_000_000 ? "compact" : "standard",
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 export function formatShortDate(value?: string | null) {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  const settings = getLocaleSettings();
+  return date.toLocaleDateString(settings.dateLocale, { timeZone: settings.timezone, month: "short", day: "numeric", year: "numeric" });
+}
+
+export function formatCompactMoney(value: number) {
+  const settings = getLocaleSettings();
+  const converted = value * (FX_RATES[settings.baseCurrency] || 1);
+  return new Intl.NumberFormat(settings.numberLocale, { style: "currency", currency: settings.baseCurrency, notation: "compact", maximumFractionDigits: 0 }).format(converted);
 }

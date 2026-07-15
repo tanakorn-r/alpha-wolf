@@ -1,4 +1,5 @@
 import type { MarketDataTrust } from "../lib/api";
+import { formatLocalDate, formatLocalDateTime } from "../lib/locale";
 
 export function DataTrustBadge({ trust, className = "" }: { trust?: MarketDataTrust | null; className?: string }) {
   if (!trust) return <div className={`rounded-[9px] border border-[#f5c451]/35 bg-[#f5c451]/8 px-3 py-2 font-mono text-[10.5px] text-[#f5c451] ${className}`}>Market provenance unavailable · do not treat as current</div>;
@@ -41,7 +42,7 @@ export function DataTrustBadge({ trust, className = "" }: { trust?: MarketDataTr
 function formatTime(value?: string | null) {
   if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return Number.isNaN(date.getTime()) ? value : formatLocalDateTime(date);
 }
 
 function isExpired(value?: string | null) {
@@ -53,7 +54,7 @@ function isExpired(value?: string | null) {
 function formatDate(value?: string | null) {
   if (!value) return null;
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? value : formatLocalDate(date);
 }
 
 function inferTimestampSource(trust: MarketDataTrust) {
