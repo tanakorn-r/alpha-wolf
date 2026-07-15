@@ -21,14 +21,20 @@ BUY_TIMING_PENDING_TTL_SECONDS = 2
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_refresh: bool = False) -> dict[str, Any] | None:
+def build_buy_timing(
+    symbol: str,
+    strategy: StrategyKey = "stable_dca",
+    force_refresh: bool = False,
+    *,
+    refresh_stale: bool = True,
+) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
     cache_key = f"v15-industry-company-seasonality:{normalized}:{strategy}"
     cached = cache_get(BUY_TIMING_CACHE_NAMESPACE, cache_key)
     if cached is not None and not force_refresh:
         return cached
 
-    stock = fetch_symbol_record(normalized)
+    stock = fetch_symbol_record(normalized, refresh_stale=refresh_stale)
     if not stock:
         return None
 
@@ -45,10 +51,10 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_re
     with ThreadPoolExecutor(max_workers=4) as pool:
         futs = {
             # Keep dividends out of Close so the backtest can book and report them explicitly.
-            pool.submit(fetch_history, ticker, "5y", False): "history",
-            pool.submit(fetch_dividends, ticker, "5y"): "dividends",
-            pool.submit(build_detail_bundle, normalized, strategy): "detail",
-            pool.submit(deep_analysis, normalized): "deep",
+            pool.submit(fetch_history, ticker, "5y", False, refresh_stale=refresh_stale): "history",
+            pool.submit(fetch_dividends, ticker, "5y", refresh_stale=refresh_stale): "dividends",
+            pool.submit(build_detail_bundle, normalized, strategy, refresh_stale=refresh_stale): "detail",
+            pool.submit(deep_analysis, normalized, refresh_stale=refresh_stale): "deep",
         }
         for fut in _as_completed(futs):
             key = futs[fut]

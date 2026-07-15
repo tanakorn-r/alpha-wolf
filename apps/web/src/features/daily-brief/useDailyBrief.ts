@@ -82,7 +82,13 @@ export function useDailyBrief() {
   const [enrichmentReady, setEnrichmentReady] = useState(false);
   const auth = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = auth.data?.id ? `user:${auth.data.id}` : "signed-out";
-  const portfolio = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: Boolean(auth.data?.id) });
+  const portfolio = useQuery({
+    queryKey: ["portfolio", accountScope],
+    queryFn: loadPortfolio,
+    enabled: Boolean(auth.data?.id),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
   setFxRates(portfolio.data?.fxRates);
 
   const holdings = portfolio.data?.holdings ?? [];

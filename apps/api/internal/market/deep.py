@@ -26,8 +26,8 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def deep_analysis(symbol: str) -> dict[str, Any] | None:
-    record = fetch_symbol_record(symbol)
+def deep_analysis(symbol: str, *, refresh_stale: bool = True) -> dict[str, Any] | None:
+    record = fetch_symbol_record(symbol, refresh_stale=refresh_stale)
     if not record:
         return None
 
@@ -37,7 +37,7 @@ def deep_analysis(symbol: str) -> dict[str, Any] | None:
     change_percent = float(record.get("changePct") or 0.0)
     generated_at = datetime.now(timezone.utc).isoformat()
 
-    history = fetch_history(make_ticker(symbol), period="3mo")
+    history = fetch_history(make_ticker(symbol), period="3mo", refresh_stale=refresh_stale)
     candles: list[dict[str, float]] = []
     if not history.empty and {"High", "Low", "Close"}.issubset(history.columns):
         tail = history.tail(WINDOW)

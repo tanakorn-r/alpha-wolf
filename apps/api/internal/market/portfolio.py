@@ -12,6 +12,7 @@ from internal.fx import fx_payload
 from internal.store.portfolio import list_dca_orders, list_holdings, list_transactions
 from internal.store.settings import load_user_settings
 from internal.store.utils import as_float, coerce_iso_date
+from internal.store.yahoo_cache import YahooCacheEntry, load_yahoo_data_batch
 from internal.yahoo.client import fetch_dividends, fetch_history, load_ticker_modules, quote_snapshot_meta, ticker as make_ticker
 from models import IncomeEvent, PortfolioDashboard, PortfolioMarker, PortfolioPoint, PortfolioSummary
 
@@ -26,7 +27,7 @@ def _to_base_series(series: pd.Series, currency: str | None, rates: dict[str, fl
     return series / rate if rate else series
 
 
-def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
+def build_portfolio_dashboard(user_id: int = 0, *, refresh_stale: bool = True) -> PortfolioDashboard:
     settings = load_user_settings(user_id) if user_id else None
     reporting_currency = str((settings or {}).get("baseCurrency") or "THB")
     fx = fx_payload([reporting_currency])
@@ -48,7 +49,15 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
         if items
     )
     active_symbols = {holding.symbol for holding in holdings}
-    closed_dividends_ytd_thb = _closed_position_dividends(transactions_by_symbol, active_symbols, thb_per_usd)
+    market_symbols = active_symbols | set(transactions_by_symbol)
+    yahoo_cache = _portfolio_yahoo_cache(market_symbols)
+    closed_dividends_ytd_thb = _closed_position_dividends(
+        transactions_by_symbol,
+        active_symbols,
+        thb_per_usd,
+        yahoo_cache,
+        refresh_stale=refresh_stale,
+    )
     if not holdings:
         cash_balance_thb = ledger_cash_thb + closed_dividends_ytd_thb
         total_return_thb = cash_balance_thb - net_contributions_thb
@@ -75,7 +84,7 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
     # miss. ThreadPoolExecutor.map runs them concurrently while preserving input order, so the
     # zip() below still lines up holdings with their data correctly.
     with ThreadPoolExecutor(max_workers=min(8, len(holdings))) as pool:
-        live = list(pool.map(_load_holding_market_data, holdings))
+        live = list(pool.map(lambda holding: _load_holding_market_data(holding, yahoo_cache, refresh_stale=refresh_stale), holdings))
 
     rows: list[dict[str, object]] = []
     holding_trust: list[dict[str, Any]] = []
@@ -151,13 +160,26 @@ def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
     if not holdings:
         return {"quotes": [], "pending": False, "updatedAt": None, **_quote_fx(fx)}
 
+    yahoo_cache = _portfolio_yahoo_cache({holding.symbol for holding in holdings}, include_dividends=False)
+
     def load(holding) -> dict[str, Any]:
-        modules = load_ticker_modules(make_ticker(holding.symbol), holding.symbol)
+        symbol = holding.symbol.upper()
+        modules = load_ticker_modules(
+            make_ticker(symbol),
+            symbol,
+            company_cached=yahoo_cache.get((symbol, "modules", "")),
+            quote_cached=yahoo_cache.get((symbol, "quote", "")),
+            cache_supplied=True,
+        )
         info = merge_ticker_info(modules, holding.symbol)
         price = as_float(info.get("currentPrice")) or as_float(info.get("regularMarketPrice"))
         previous = as_float(info.get("regularMarketPreviousClose"))
         change_pct = ((price - previous) / previous * 100.0) if price and previous else 0.0
-        meta = quote_snapshot_meta(holding.symbol)
+        meta = quote_snapshot_meta(
+            symbol,
+            cached_entry=yahoo_cache.get((symbol, "quote", "")),
+            cache_supplied=True,
+        )
         record = {
             "symbol": holding.symbol,
             "price": price,
@@ -172,6 +194,7 @@ def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
             include_news=False,
             include_dividends=False,
             check_fundamentals=False,
+            cache_entries=yahoo_cache,
         )
         return {
             "symbol": holding.symbol,
@@ -195,16 +218,43 @@ def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
     }
 
 
-def _load_holding_market_data(holding):
-    ticker = make_ticker(holding.symbol)
-    modules = load_ticker_modules(ticker, holding.symbol)
+def _load_holding_market_data(
+    holding,
+    yahoo_cache: dict[tuple[str, str, str], YahooCacheEntry] | None = None,
+    *,
+    refresh_stale: bool = True,
+):
+    symbol = holding.symbol.upper()
+    supplied = yahoo_cache is not None
+    entries = yahoo_cache or {}
+    ticker = make_ticker(symbol)
+    modules = load_ticker_modules(
+        ticker,
+        symbol,
+        company_cached=entries.get((symbol, "modules", "")),
+        quote_cached=entries.get((symbol, "quote", "")),
+        cache_supplied=supplied,
+        refresh_stale=refresh_stale,
+    )
     info = merge_ticker_info(modules, holding.symbol)
-    history = fetch_history(ticker, period="1y")
+    history = fetch_history(
+        ticker,
+        period="1y",
+        cached_entry=entries.get((symbol, "history", "1y")),
+        cache_supplied=supplied,
+        refresh_stale=refresh_stale,
+    )
     entry = build_entry_from_info(holding.symbol, info)
     record = fetch_record_from_ticker(entry, ticker=ticker, info=info, history=history)
     # Only count dividends whose ex-date fell on/after purchase — a position bought today has
     # not earned any dividend yet; it accrues once an ex-date passes while the stock is held.
-    dividends = fetch_dividends(ticker, period="ytd")
+    dividends = fetch_dividends(
+        ticker,
+        period="ytd",
+        cached_entry=entries.get((symbol, "dividends", "ytd")),
+        cache_supplied=supplied,
+        refresh_stale=refresh_stale,
+    )
     trust = build_yahoo_data_trust(
         holding.symbol,
         stock={**record, "regularMarketTime": info.get("regularMarketTime")},
@@ -220,6 +270,9 @@ def _load_holding_market_data(holding):
         },
         history=history,
         history_period="1y",
+        include_news=False,
+        dividends_period="ytd",
+        cache_entries=yahoo_cache,
     )
     return record, history, info, dividends, trust
 
@@ -249,13 +302,27 @@ def _dividends_for_transactions(dividends: pd.Series | None, transactions: list[
     return total
 
 
-def _closed_position_dividends(transactions_by_symbol: dict[str, list[Any]], active_symbols: set[str], thb_per_usd: float) -> float:
+def _closed_position_dividends(
+    transactions_by_symbol: dict[str, list[Any]],
+    active_symbols: set[str],
+    thb_per_usd: float,
+    yahoo_cache: dict[tuple[str, str, str], YahooCacheEntry] | None = None,
+    *,
+    refresh_stale: bool = True,
+) -> float:
     closed_symbols = [symbol for symbol in transactions_by_symbol if symbol not in active_symbols]
     if not closed_symbols:
         return 0.0
 
     def load(symbol: str) -> tuple[str, pd.Series]:
-        return symbol, fetch_dividends(make_ticker(symbol), period="ytd")
+        normalized = symbol.upper()
+        return symbol, fetch_dividends(
+            make_ticker(normalized),
+            period="ytd",
+            cached_entry=(yahoo_cache or {}).get((normalized, "dividends", "ytd")),
+            cache_supplied=yahoo_cache is not None,
+            refresh_stale=refresh_stale,
+        )
 
     total = 0.0
     with ThreadPoolExecutor(max_workers=min(6, len(closed_symbols))) as pool:
@@ -263,6 +330,24 @@ def _closed_position_dividends(transactions_by_symbol: dict[str, list[Any]], act
             native_total = _dividends_for_transactions(dividends, transactions_by_symbol[symbol])
             total += _native_to_thb(native_total, "THB" if symbol.endswith(".BK") else "USD", thb_per_usd)
     return total
+
+
+def _portfolio_yahoo_cache(
+    symbols: set[str],
+    *,
+    include_dividends: bool = True,
+) -> dict[tuple[str, str, str], YahooCacheEntry]:
+    requests: list[tuple[str, str, str]] = []
+    for symbol in symbols:
+        normalized = symbol.upper().strip()
+        requests.extend([
+            (normalized, "modules", ""),
+            (normalized, "quote", ""),
+            (normalized, "history", "1y"),
+        ])
+        if include_dividends:
+            requests.append((normalized, "dividends", "ytd"))
+    return load_yahoo_data_batch(requests)
 
 
 def _dashboard_fx(fx: dict[str, object], reporting_currency: str) -> dict[str, object]:

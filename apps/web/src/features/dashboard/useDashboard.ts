@@ -30,7 +30,13 @@ export function useDashboard() {
 
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
-  const portfolioQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: Boolean(authQuery.data?.id) });
+  const portfolioQuery = useQuery({
+    queryKey: ["portfolio", accountScope],
+    queryFn: loadPortfolio,
+    enabled: Boolean(authQuery.data?.id),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
   const savedPortfolio = portfolioQuery.data;
   setFxRates(savedPortfolio?.fxRates);
   const holdingSymbolsKey = (savedPortfolio?.holdings ?? []).map((holding) => holding.symbol).sort().join(",");

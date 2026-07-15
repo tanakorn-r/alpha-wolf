@@ -6,7 +6,7 @@ from typing import Any, Iterable
 import pandas as pd
 
 from internal.store.utils import as_float, normalize_timestamp
-from internal.store.yahoo_cache import load_yahoo_data
+from internal.store.yahoo_cache import YahooCacheEntry, load_yahoo_data
 from internal.store.universe_cache import load_market_universe
 
 
@@ -29,8 +29,16 @@ YAHOO_PROVIDER_POLICY: dict[str, Any] = {
 }
 
 
-def yahoo_dataset_meta(symbol: str, name: str, *, data_type: str | None = None, period: str = "") -> dict[str, Any]:
-    entry = load_yahoo_data(symbol.upper().strip(), data_type or name, period)
+def yahoo_dataset_meta(
+    symbol: str,
+    name: str,
+    *,
+    data_type: str | None = None,
+    period: str = "",
+    cache_entries: dict[tuple[str, str, str], YahooCacheEntry] | None = None,
+) -> dict[str, Any]:
+    cache_key = (symbol.upper().strip(), (data_type or name).lower(), period.lower())
+    entry = cache_entries.get(cache_key) if cache_entries is not None else load_yahoo_data(*cache_key)
     available = bool(entry and entry.payload not in (None, {}, []))
     return {
         "name": name,
@@ -52,19 +60,21 @@ def build_yahoo_data_trust(
     include_news: bool = True,
     include_dividends: bool = True,
     check_fundamentals: bool = True,
+    dividends_period: str | None = None,
+    cache_entries: dict[tuple[str, str, str], YahooCacheEntry] | None = None,
 ) -> dict[str, Any]:
     stock = stock or {}
     business = business or {}
     history = history if isinstance(history, pd.DataFrame) else pd.DataFrame()
     datasets = [
-        yahoo_dataset_meta(symbol, "quote"),
-        yahoo_dataset_meta(symbol, "fundamentals", data_type="modules"),
-        yahoo_dataset_meta(symbol, "history", period=history_period),
+        yahoo_dataset_meta(symbol, "quote", cache_entries=cache_entries),
+        yahoo_dataset_meta(symbol, "fundamentals", data_type="modules", cache_entries=cache_entries),
+        yahoo_dataset_meta(symbol, "history", period=history_period, cache_entries=cache_entries),
     ]
     if include_news:
-        datasets.append(yahoo_dataset_meta(symbol, "news"))
+        datasets.append(yahoo_dataset_meta(symbol, "news", cache_entries=cache_entries))
     if include_dividends:
-        datasets.append(yahoo_dataset_meta(symbol, "dividends", period=history_period))
+        datasets.append(yahoo_dataset_meta(symbol, "dividends", period=dividends_period or history_period, cache_entries=cache_entries))
 
     quote_time = normalize_timestamp(stock.get("marketTimestamp") or stock.get("regularMarketTime"))
     market_time = quote_time or _latest_history_timestamp(history)

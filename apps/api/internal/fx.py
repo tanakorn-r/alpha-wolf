@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
@@ -12,6 +13,8 @@ from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 
 FX_TTL_SECONDS = 86_400
 _FX_REFRESH_LOCK = threading.Lock()
+_FX_BACKGROUND_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="fx-refresh")
+_FX_REFRESHING: set[str] = set()
 _FALLBACK_USD_QUOTES = {
     "USD": 1.0,
     "THB": float(os.getenv("FALLBACK_USD_THB", "36.5")),
@@ -54,6 +57,19 @@ def usd_quote_rate(currency: str | None, *, symbol: str | None = None, on_date: 
     if cached and cached.is_fresh and cached_rate:
         return FxRate("USD", quote, cached_rate, cached.fetched_at, cached.expires_at, "yfinance")
 
+    # Spot FX is part of portfolio/dashboard first paint. Never make that request wait for
+    # Yahoo: return stale persisted data (or a configured fallback) and refresh once in the
+    # background. Historical rates are used while recording a trade and remain synchronous
+    # below because substituting today's fallback would corrupt its cost basis.
+    if on_date is None:
+        _schedule_spot_refresh(yahoo_symbol, quote, period_key)
+        if cached and cached_rate:
+            return FxRate("USD", quote, cached_rate, cached.fetched_at, cached.expires_at, "yfinance-cache", stale=True)
+        fallback = _FALLBACK_USD_QUOTES.get(quote)
+        if fallback and fallback > 0:
+            return FxRate("USD", quote, fallback, now, now, "fallback", stale=True)
+        raise ValueError(f"No USD/{quote} exchange rate is available")
+
     with _FX_REFRESH_LOCK:
         # A previous waiter may have refreshed the database while this caller was blocked.
         refreshed = load_yahoo_data(yahoo_symbol, "fx", period_key)
@@ -81,6 +97,31 @@ def usd_quote_rate(currency: str | None, *, symbol: str | None = None, on_date: 
     if fallback and fallback > 0:
         return FxRate("USD", quote, fallback, now, now, "fallback", stale=True)
     raise ValueError(f"No USD/{quote} exchange rate is available")
+
+
+def _schedule_spot_refresh(symbol: str, quote: str, period_key: str) -> None:
+    with _FX_REFRESH_LOCK:
+        if symbol in _FX_REFRESHING:
+            return
+        _FX_REFRESHING.add(symbol)
+
+    def run() -> None:
+        try:
+            live_rate = _fetch_rate(symbol, None)
+            save_yahoo_data(
+                symbol,
+                "fx",
+                {"base": "USD", "quote": quote, "rate": live_rate, "source": "yfinance"},
+                period=period_key,
+                ttl_seconds=FX_TTL_SECONDS,
+            )
+        except Exception:
+            pass
+        finally:
+            with _FX_REFRESH_LOCK:
+                _FX_REFRESHING.discard(symbol)
+
+    _FX_BACKGROUND_EXECUTOR.submit(run)
 
 
 def to_usd(value: float, currency: str | None, *, symbol: str | None = None, on_date: date | None = None) -> tuple[float, FxRate]:

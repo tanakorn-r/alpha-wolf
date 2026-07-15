@@ -10,8 +10,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from internal.store import db as store_db
-from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
+from internal.store import db as store_db, yahoo_cache
+from internal.store.yahoo_cache import load_yahoo_data, load_yahoo_data_batch, save_yahoo_data
 from internal.yahoo.client import fetch_history
 
 
@@ -59,6 +59,22 @@ class YahooPersistentCacheTests(unittest.TestCase):
         self.assertIsNotNone(cached)
         self.assertTrue(cached.is_fresh)  # type: ignore[union-attr]
         self.assertEqual(cached.payload[0]["title"], "Cached")  # type: ignore[union-attr]
+
+    def test_batch_load_uses_one_connection_for_many_exact_datasets(self) -> None:
+        save_yahoo_data("AAPL", "quote", {"price": 100}, ttl_seconds=3600)
+        save_yahoo_data("SIRI.BK", "history", {"records": []}, period="1y", ttl_seconds=3600)
+
+        with patch.object(yahoo_cache, "connect", wraps=store_db.connect) as connect:
+            cached = load_yahoo_data_batch([
+                ("AAPL", "quote", ""),
+                ("SIRI.BK", "history", "1y"),
+                ("AAPL", "modules", ""),
+            ])
+
+        self.assertEqual(connect.call_count, 1)
+        self.assertEqual(cached[("AAPL", "quote", "")].payload["price"], 100)
+        self.assertIn(("SIRI.BK", "history", "1y"), cached)
+        self.assertNotIn(("AAPL", "modules", ""), cached)
 
     def test_history_is_read_from_database_without_second_yahoo_call(self) -> None:
         ticker = FakeHistoryTicker()

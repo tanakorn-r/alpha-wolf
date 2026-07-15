@@ -11,7 +11,7 @@ import yfinance as yf
 from internal.store.cache import should_attempt_refresh, try_acquire_compute_lock
 from internal.store.utils import as_float
 from internal.store.utils import safe_dict
-from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
+from internal.store.yahoo_cache import YahooCacheEntry, load_yahoo_data, save_yahoo_data
 
 QUOTE_TTL_SECONDS = 60
 MODULES_TTL_SECONDS = 90 * 86_400
@@ -259,12 +259,21 @@ def _merge_module_payloads(company: dict[str, Any], quote: dict[str, Any], symbo
     return {symbol: merged} if merged else {}
 
 
-def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
+def load_ticker_modules(
+    t: yf.Ticker,
+    symbol: str,
+    *,
+    company_cached: YahooCacheEntry | None = None,
+    quote_cached: YahooCacheEntry | None = None,
+    cache_supplied: bool = False,
+    refresh_stale: bool = True,
+) -> dict[str, Any]:
     normalized = symbol.upper().strip()
-    company_cached = load_yahoo_data(normalized, "modules")
-    quote_cached = load_yahoo_data(normalized, "quote")
+    if not cache_supplied:
+        company_cached = load_yahoo_data(normalized, "modules")
+        quote_cached = load_yahoo_data(normalized, "quote")
 
-    if not company_cached or not company_cached.is_fresh:
+    if not company_cached or (refresh_stale and not company_cached.is_fresh):
         def _refresh_company() -> None:
             result = build_ticker_modules(t, normalized)
             if _modules_have_market_data(result, normalized):
@@ -272,7 +281,7 @@ def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
 
         _refresh_in_background("yahoo_modules", normalized, _refresh_company)
 
-    if not quote_cached or not quote_cached.is_fresh:
+    if not quote_cached or (refresh_stale and not quote_cached.is_fresh):
         def _refresh_quote() -> None:
             result = build_quote_modules(t, normalized)
             if _modules_have_quote(result, normalized):
@@ -285,8 +294,13 @@ def load_ticker_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
     return _merge_module_payloads(company, quote, normalized)
 
 
-def quote_snapshot_meta(symbol: str) -> dict[str, Any]:
-    cached = load_yahoo_data(symbol.upper().strip(), "quote")
+def quote_snapshot_meta(
+    symbol: str,
+    *,
+    cached_entry: YahooCacheEntry | None = None,
+    cache_supplied: bool = False,
+) -> dict[str, Any]:
+    cached = cached_entry if cache_supplied else load_yahoo_data(symbol.upper().strip(), "quote")
     return {
         "fresh": bool(cached and cached.is_fresh and isinstance(cached.payload, dict)),
         "stale": bool(cached and not cached.is_fresh and isinstance(cached.payload, dict)),
@@ -296,16 +310,24 @@ def quote_snapshot_meta(symbol: str) -> dict[str, Any]:
     }
 
 
-def fetch_history(t: yf.Ticker, period: str = "1y", auto_adjust: bool = True) -> pd.DataFrame:
+def fetch_history(
+    t: yf.Ticker,
+    period: str = "1y",
+    auto_adjust: bool = True,
+    *,
+    cached_entry: YahooCacheEntry | None = None,
+    cache_supplied: bool = False,
+    refresh_stale: bool = True,
+) -> pd.DataFrame:
     # auto_adjust=False keeps Close split-adjusted but dividend-UNADJUSTED (plus a raw "Dividends"
     # per-share column). Callers that need to book real dividend cash flows without double-counting
     # them against Yahoo's default continuously-reinvested adjusted Close must pass False.
     symbol = _ticker_symbol(t)
     dataset = "history" if auto_adjust else "history_raw"
-    cached = load_yahoo_data(symbol, dataset, period) if symbol else None
+    cached = cached_entry if cache_supplied else load_yahoo_data(symbol, dataset, period) if symbol else None
     frame = _history_from_payload(cached.payload) if cached else pd.DataFrame()
 
-    if symbol and (not cached or not cached.is_fresh or frame.empty):
+    if symbol and (not cached or frame.empty or (refresh_stale and not cached.is_fresh)):
         def _refresh() -> None:
             # Re-read inside the task (not the value captured above) since some time may
             # have passed between scheduling and actually running on the background thread.
@@ -355,12 +377,18 @@ def normalize_history_frame(history: Any) -> pd.DataFrame:
     return frame
 
 
-def fetch_news(t: yf.Ticker) -> list[dict[str, Any]]:
+def fetch_news(
+    t: yf.Ticker,
+    *,
+    cached_entry: YahooCacheEntry | None = None,
+    cache_supplied: bool = False,
+    refresh_stale: bool = True,
+) -> list[dict[str, Any]]:
     symbol = _ticker_symbol(t)
-    cached = load_yahoo_data(symbol, "news") if symbol else None
+    cached = cached_entry if cache_supplied else load_yahoo_data(symbol, "news") if symbol else None
     has_data = bool(cached and isinstance(cached.payload, list))
 
-    if symbol and (not cached or not cached.is_fresh):
+    if symbol and (not cached or (refresh_stale and not cached.is_fresh)):
         def _refresh() -> None:
             result = _fetch_news_live(t)
             if result:
@@ -441,12 +469,19 @@ def _publisher_name(value: Any) -> str | None:
     return _first_text(value)
 
 
-def fetch_dividends(t: yf.Ticker, period: str = "ytd") -> pd.Series:
+def fetch_dividends(
+    t: yf.Ticker,
+    period: str = "ytd",
+    *,
+    cached_entry: YahooCacheEntry | None = None,
+    cache_supplied: bool = False,
+    refresh_stale: bool = True,
+) -> pd.Series:
     symbol = _ticker_symbol(t)
-    cached = load_yahoo_data(symbol, "dividends", period) if symbol else None
+    cached = cached_entry if cache_supplied else load_yahoo_data(symbol, "dividends", period) if symbol else None
     series = _dividends_from_payload(cached.payload) if cached else pd.Series(dtype="float64")
 
-    if symbol and (not cached or not cached.is_fresh or series.empty):
+    if symbol and (not cached or series.empty or (refresh_stale and not cached.is_fresh)):
         def _refresh() -> None:
             try:
                 dividends = t.get_dividends(period=period)

@@ -32,7 +32,7 @@ class BuyTimingPendingTests(unittest.TestCase):
 
         self.assertIsInstance(response, JSONResponse)
         self.assertEqual(response.status_code, 202)
-        build.assert_called_once_with("AAPL", "stable_dca")
+        build.assert_called_once_with("AAPL", "stable_dca", refresh_stale=False)
         claim.assert_not_called()
         openai.assert_not_called()
 

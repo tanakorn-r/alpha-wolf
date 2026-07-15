@@ -17,8 +17,9 @@ from internal.market.technicals import (
 from internal.market.catalog import get_industry_peers
 from internal.market.company_structure import classify_company_structure
 from internal.market.data_trust import build_yahoo_data_trust
+from internal.market.records import build_entry_from_info, fetch_record_from_ticker, merge_ticker_info
 from internal.store.cache import cache_compute_lock, cache_get, cache_set
-from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
+from internal.store.yahoo_cache import load_yahoo_data, load_yahoo_data_batch, save_yahoo_data
 from internal.store.universe_cache import load_market_universe
 from internal.store.utils import as_float, normalize_statement_key, percent_value, recommendation_label, safe_dataframe_records, safe_dict
 from internal.news.kaohoon import market_news as fetch_kaohoon_news
@@ -36,9 +37,15 @@ DOMAIN_TTL_SECONDS = 86_400
 FUNDAMENTALS_TTL_SECONDS = 90 * 86_400
 
 
-def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None = None) -> dict[str, Any] | None:
+def build_detail_bundle(
+    symbol: str,
+    strategy: StrategyKey,
+    *,
+    mode: str | None = None,
+    refresh_stale: bool = True,
+) -> dict[str, Any] | None:
     selected_mode = mode if mode in {"swing", "day", "long", "value", "fomo"} else None
-    cache_key = f"{symbol.upper()}:{strategy}:{selected_mode or 'default'}"
+    cache_key = f"{symbol.upper()}:{strategy}:{selected_mode or 'default'}:{'refresh' if refresh_stale else 'stored'}"
     cached = cache_get(DETAIL_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
@@ -47,7 +54,7 @@ def build_detail_bundle(symbol: str, strategy: StrategyKey, *, mode: str | None 
         cached = cache_get(DETAIL_CACHE_NAMESPACE, cache_key)
         if cached is not None:
             return cached
-        result = _build_detail_bundle_uncached(symbol, strategy, selected_mode=selected_mode)
+        result = _build_detail_bundle_uncached(symbol, strategy, selected_mode=selected_mode, refresh_stale=refresh_stale)
         if result is not None:
             # A placeholder must expire quickly so the next poll can observe rows written by
             # the background refresh. Caching it for the normal detail TTL traps the UI in the
@@ -62,29 +69,57 @@ def _build_detail_bundle_uncached(
     strategy: StrategyKey,
     *,
     selected_mode: str | None,
+    refresh_stale: bool,
 ) -> dict[str, Any] | None:
-
-    stock = fetch_symbol_record(symbol)
-    if not stock:
-        return None
-
-    ticker = make_ticker(symbol)
+    normalized = symbol.upper().strip()
+    ticker = make_ticker(normalized)
+    yahoo_cache = load_yahoo_data_batch([
+        (normalized, "modules", ""),
+        (normalized, "quote", ""),
+        (normalized, "history", "5y"),
+        (normalized, "news", ""),
+        (normalized, "dividends", "5y"),
+    ])
 
     # Fetch yfinance data in parallel — modules, history, news, dividends are
     # all independent network calls and used to take 4-6 s sequentially.
     from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
 
     def _modules():
-        return load_ticker_modules(ticker, symbol)
+        return load_ticker_modules(
+            ticker,
+            normalized,
+            company_cached=yahoo_cache.get((normalized, "modules", "")),
+            quote_cached=yahoo_cache.get((normalized, "quote", "")),
+            cache_supplied=True,
+            refresh_stale=refresh_stale,
+        )
 
     def _history():
-        return fetch_history(ticker, period="5y")
+        return fetch_history(
+            ticker,
+            period="5y",
+            cached_entry=yahoo_cache.get((normalized, "history", "5y")),
+            cache_supplied=True,
+            refresh_stale=refresh_stale,
+        )
 
     def _news():
-        return fetch_news(ticker)
+        return fetch_news(
+            ticker,
+            cached_entry=yahoo_cache.get((normalized, "news", "")),
+            cache_supplied=True,
+            refresh_stale=refresh_stale,
+        )
 
     def _dividends():
-        return fetch_dividends(ticker, period="5y")
+        return fetch_dividends(
+            ticker,
+            period="5y",
+            cached_entry=yahoo_cache.get((normalized, "dividends", "5y")),
+            cache_supplied=True,
+            refresh_stale=refresh_stale,
+        )
 
     modules = {}
     history = pd.DataFrame()
@@ -114,7 +149,12 @@ def _build_detail_bundle_uncached(
             elif key == "dividends":
                 dividends = val
 
-    news = merge_thai_market_news(raw_news, symbol)
+    info = merge_ticker_info(modules, normalized)
+    if not info and history.empty:
+        return None
+    entry = build_entry_from_info(normalized, info)
+    stock = fetch_record_from_ticker(entry, ticker=ticker, info=info, history=history)
+    news = merge_thai_market_news(raw_news, normalized, include_market_feed=refresh_stale)
 
     stock = hydrate_stock_quote_from_history(stock, history)
 
@@ -122,7 +162,7 @@ def _build_detail_bundle_uncached(
     business = build_business_profile(modules, history, stock)
     company_structure = classify_company_structure(business, stock)
     performance = build_performance_profile(history)
-    peers = build_peer_profile(stock, business, strategy)
+    peers = build_peer_profile(stock, business, strategy, allow_live_peers=refresh_stale)
     verdict = build_verdict(stock, business, performance, peers, strategy, technicals, history=history, mode=selected_mode)
     outlook = build_outlook(business, performance, peers)
     dividend_pattern = build_dividend_dip_pattern(history, dividends)
@@ -132,6 +172,7 @@ def _build_detail_bundle_uncached(
         business=business,
         history=history,
         history_period="5y",
+        cache_entries=yahoo_cache,
     )
 
     result = {
@@ -237,7 +278,7 @@ def get_financials(symbol: str) -> dict[str, Any] | None:
     return persistent.payload if persistent and isinstance(persistent.payload, dict) else result
 
 
-def get_ai_financials(symbol: str) -> dict[str, Any] | None:
+def get_ai_financials(symbol: str, *, refresh_stale: bool = True) -> dict[str, Any] | None:
     """Small, parallel financial pack for model context.
 
     The full financial endpoint makes many Yahoo calls for UI drill-down tables. AI analysis
@@ -253,7 +294,7 @@ def get_ai_financials(symbol: str) -> dict[str, Any] | None:
     if cached is not None:
         return cached
     persistent = load_yahoo_data(normalized, "financials", "ai")
-    if persistent and persistent.is_fresh and isinstance(persistent.payload, dict):
+    if persistent and isinstance(persistent.payload, dict) and (persistent.is_fresh or not refresh_stale):
         cache_set(FINANCIALS_CACHE_NAMESPACE, cache_key, persistent.payload, FUNDAMENTALS_TTL_SECONDS)
         return persistent.payload
 
@@ -266,7 +307,7 @@ def get_ai_financials(symbol: str) -> dict[str, Any] | None:
     _refresh_in_background("yahoo_ai_financials", normalized, _refresh)
     return persistent.payload if persistent and isinstance(persistent.payload, dict) else {}
 
-def get_domain_insights(symbol: str) -> dict[str, Any] | None:
+def get_domain_insights(symbol: str, *, refresh_stale: bool = True) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
     if not normalized:
         return None
@@ -275,7 +316,7 @@ def get_domain_insights(symbol: str) -> dict[str, Any] | None:
     if cached is not None:
         return cached
     persistent = load_yahoo_data(normalized, "domain_insights")
-    if persistent and persistent.is_fresh and isinstance(persistent.payload, dict):
+    if persistent and isinstance(persistent.payload, dict) and (persistent.is_fresh or not refresh_stale):
         cache_set(INSIGHTS_CACHE_NAMESPACE, normalized, persistent.payload, DOMAIN_TTL_SECONDS)
         return persistent.payload
 
@@ -297,12 +338,30 @@ def get_domain_insights(symbol: str) -> dict[str, Any] | None:
     return persistent.payload if persistent and isinstance(persistent.payload, dict) else {}
 
 
-def get_market_comparison(symbol: str) -> dict[str, Any] | None:
+def get_market_comparison(symbol: str, *, refresh_stale: bool = True) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
     cache_key = f"market_comparison:v5:{normalized}"
     cached = cache_get(MARKET_COMPARISON_CACHE_NAMESPACE, cache_key)
     if cached is not None:
         return cached
+    persistent = load_yahoo_data(normalized, "market_comparison", "v5")
+    if persistent and isinstance(persistent.payload, dict) and (persistent.is_fresh or not refresh_stale):
+        cache_set(MARKET_COMPARISON_CACHE_NAMESPACE, cache_key, persistent.payload, DOMAIN_TTL_SECONDS)
+        return persistent.payload
+
+    if not refresh_stale:
+        # A forced AI run means regenerate the model answer, not synchronously rebuild Yahoo
+        # evidence. Warm a genuinely missing comparison for a later request and use the last
+        # persisted snapshot (even stale) for this one.
+        if not persistent:
+            def _refresh() -> None:
+                result = get_market_comparison(normalized, refresh_stale=True)
+                if result:
+                    cache_set(MARKET_COMPARISON_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
+
+            _refresh_in_background("yahoo_market_comparison", normalized, _refresh)
+        return persistent.payload if persistent and isinstance(persistent.payload, dict) else {}
+
     stock = fetch_symbol_record(normalized)
     if not stock:
         return None
@@ -354,6 +413,7 @@ def get_market_comparison(symbol: str) -> dict[str, Any] | None:
             check_fundamentals=False,
         ),
     }
+    save_yahoo_data(normalized, "market_comparison", result, period="v5", ttl_seconds=DOMAIN_TTL_SECONDS)
     cache_set(MARKET_COMPARISON_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
     return result
 
@@ -493,11 +553,17 @@ def build_performance_profile(history: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def build_peer_profile(stock: dict[str, Any], business: dict[str, Any], strategy: StrategyKey) -> dict[str, Any]:
+def build_peer_profile(
+    stock: dict[str, Any],
+    business: dict[str, Any],
+    strategy: StrategyKey,
+    *,
+    allow_live_peers: bool = True,
+) -> dict[str, Any]:
     region = "th" if str(stock.get("symbol") or "").endswith(".BK") else "us"
     industry = str(business.get("industry") or "")
     try:
-        live_records = get_industry_peers(region, industry) if industry and industry != "Unknown" else []
+        live_records = get_industry_peers(region, industry) if allow_live_peers and industry and industry != "Unknown" else []
     except Exception:
         live_records = []
     peer_source = "Live industry screen"
@@ -1037,7 +1103,12 @@ def normalize_statement_period(value: Any) -> str:
     return str(value)
 
 
-def merge_thai_market_news(company_news: list[dict[str, Any]], symbol: str) -> list[dict[str, Any]]:
+def merge_thai_market_news(
+    company_news: list[dict[str, Any]],
+    symbol: str,
+    *,
+    include_market_feed: bool = True,
+) -> list[dict[str, Any]]:
     """Enrich Thai (.BK) tickers with the shared Kaohoon SET feed.
 
     Yahoo rarely returns company news for Thai listings, so the market feed both
@@ -1045,7 +1116,7 @@ def merge_thai_market_news(company_news: list[dict[str, Any]], symbol: str) -> l
     company-specific news first; skipped entirely for non-Thai symbols where a
     Thai market roundup would just be noise.
     """
-    if not symbol.upper().endswith(".BK"):
+    if not symbol.upper().endswith(".BK") or not include_market_feed:
         return company_news
 
     market = fetch_kaohoon_news(5)

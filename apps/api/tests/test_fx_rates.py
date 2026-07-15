@@ -33,20 +33,30 @@ class FxRateTests(unittest.TestCase):
         self.db_patch.stop()
         self.tempdir.cleanup()
 
-    def test_yfinance_rate_is_cached_in_database_for_one_day(self) -> None:
+    def test_spot_rate_returns_fallback_without_waiting_for_yahoo(self) -> None:
+        with patch.object(fx, "_schedule_spot_refresh") as schedule, patch.object(fx, "_fetch_rate") as fetch:
+            result = fx.usd_quote_rate("THB")
+
+        self.assertEqual(result.rate, 36.5)
+        self.assertEqual(result.source, "fallback")
+        self.assertTrue(result.stale)
+        schedule.assert_called_once_with("THB=X", "THB", "spot")
+        fetch.assert_not_called()
+
+    def test_background_spot_refresh_is_cached_in_database_for_one_day(self) -> None:
         history = pd.DataFrame({"Close": [35.25, 35.5]}, index=pd.to_datetime(["2026-07-14", "2026-07-15"]))
         ticker = Mock()
         ticker.history.return_value = history
 
         with patch.object(fx.yf, "Ticker", return_value=ticker) as ticker_factory:
-            first = fx.usd_quote_rate("THB")
-            second = fx.usd_quote_rate("THB")
+            fx._schedule_spot_refresh("THB=X", "THB", "spot")
+            fx._FX_BACKGROUND_EXECUTOR.submit(lambda: None).result(timeout=2)
+            result = fx.usd_quote_rate("THB")
 
-        self.assertEqual(first.rate, 35.5)
-        self.assertEqual(second.rate, 35.5)
+        self.assertEqual(result.rate, 35.5)
         self.assertEqual(ticker_factory.call_count, 1)
         self.assertEqual(ticker.history.call_count, 1)
-        self.assertGreaterEqual((first.expires_at - first.fetched_at).total_seconds(), 86_399)
+        self.assertGreaterEqual((result.expires_at - result.fetched_at).total_seconds(), 86_399)
         with store_db.connect() as db:
             row = db.execute("SELECT data_type, period FROM yahoo_data_cache WHERE symbol = ?", ("THB=X",)).fetchone()
         self.assertEqual(tuple(row), ("fx", "spot"))
@@ -89,12 +99,14 @@ class FxRateTests(unittest.TestCase):
         ticker = Mock()
         ticker.history.side_effect = RuntimeError("offline")
 
-        with patch.object(fx.yf, "Ticker", return_value=ticker):
+        with patch.object(fx, "_schedule_spot_refresh") as schedule, patch.object(fx.yf, "Ticker", return_value=ticker):
             result = fx.usd_quote_rate("THB")
 
         self.assertEqual(result.rate, 34.75)
         self.assertTrue(result.stale)
         self.assertEqual(result.source, "yfinance-cache")
+        schedule.assert_called_once_with("THB=X", "THB", "spot")
+        ticker.history.assert_not_called()
 
     def test_thai_return_is_calculated_in_native_currency_before_display_conversion(self) -> None:
         siri = native_transaction(1, "SIRI.BK", "BUY", 13_500, 1.47)

@@ -223,25 +223,28 @@ def _fetch_analysis_data(
     insights: dict[str, Any] = {}
 
     def _bundle() -> dict[str, Any] | None:
-        return build_detail_bundle(symbol, strategy, mode=mode)
+        # AI generation is database-first even when force=true. Force regenerates only the
+        # OpenAI answer; stale persisted market evidence remains valid input and Yahoo refresh
+        # is scheduled only for a dataset that has never been stored.
+        return build_detail_bundle(symbol, strategy, mode=mode, refresh_stale=False)
 
     def _financials() -> dict[str, Any]:
         try:
-            return get_ai_financials(symbol) or {}
+            return get_ai_financials(symbol, refresh_stale=False) or {}
         except Exception as exc:
             print(f"Warning: Financials load failed for {symbol}: {exc}")
             return {}
 
     def _market() -> dict[str, Any]:
         try:
-            return get_market_comparison(symbol) or {}
+            return get_market_comparison(symbol, refresh_stale=False) or {}
         except Exception as exc:
             print(f"Warning: Market comparison load failed for {symbol}: {exc}")
             return {}
 
     def _insights() -> dict[str, Any]:
         try:
-            return get_domain_insights(symbol) or {}
+            return get_domain_insights(symbol, refresh_stale=False) or {}
         except Exception as exc:
             print(f"Warning: Domain insights load failed for {symbol}: {exc}")
             return {}
@@ -357,7 +360,7 @@ def analyst_report(
     result_key = AIResultKey(user_id, "analyst-report", normalized, agent_id, f"v13:{strategy}:{position_cache_key}")
     cached_analysis = _load_saved_ai_result(result_key, cache_key)
     if cached_analysis is not None and not force:
-        bundle = build_detail_bundle(normalized, strategy)
+        bundle = build_detail_bundle(normalized, strategy, refresh_stale=False)
         if not bundle:
             raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
         if bundle.get("dataPending"):
@@ -658,7 +661,7 @@ def technical_analysis(symbol: str, request: Request, agent: str = Query("vera")
     if cached is not None and not force:
         return cached
 
-    bundle = build_detail_bundle(normalized, "momentum")
+    bundle = build_detail_bundle(normalized, "momentum", refresh_stale=False)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
     _require_ai_market_data(bundle, normalized)
@@ -711,30 +714,6 @@ def _require_ai_market_data(bundle: dict[str, Any], symbol: str) -> None:
 
 def _position_context(symbol: str, user_id: int = 0) -> dict[str, Any]:
     normalized = symbol.upper().strip()
-    try:
-        portfolio = build_portfolio_dashboard(user_id)
-        data = portfolio.model_dump() if hasattr(portfolio, "model_dump") else dict(portfolio or {})
-        for holding in data.get("holdings") or []:
-            if str(holding.get("symbol") or "").upper() != normalized:
-                continue
-            return {
-                "isHolding": True,
-                "mode": "holding",
-                "question": "The user already owns this stock. Analyze whether they should stay with it, buy more, trim, or sell. Focus on whether today's price is a reason to worry or whether they can keep holding.",
-                "symbol": normalized,
-                "shares": holding.get("shares"),
-                "averageCost": holding.get("averageCost"),
-                "currentValue": holding.get("value"),
-                "costBasis": holding.get("cost"),
-                "gainLoss": holding.get("gainLoss"),
-                "gainLossPct": holding.get("gainLossPct"),
-                "monthlyDca": holding.get("monthlyDca"),
-                "strategy": holding.get("strategy"),
-                "createdAt": holding.get("createdAt"),
-            }
-    except Exception as exc:
-        print(f"Warning: Portfolio context load failed for {normalized}: {exc}")
-
     try:
         for holding in list_holdings(user_id):
             if holding.symbol.upper() != normalized:
@@ -834,7 +813,7 @@ def portfolio_review(request: Request, agent: str = Query("vera"), force: bool =
     agent_id = normalize_agent_id(agent)
     user_id = user_id_from_request(request)
     account_scope = account_cache_scope(user_id)
-    portfolio = build_portfolio_dashboard(user_id)
+    portfolio = build_portfolio_dashboard(user_id, refresh_stale=False)
     portfolio_data = portfolio.model_dump() if hasattr(portfolio, "model_dump") else dict(portfolio or {})
     context = _portfolio_review_context(portfolio)
     cache_digest = hashlib.sha256(

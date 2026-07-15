@@ -86,7 +86,13 @@ export function StockDetailDrawer() {
     retry: false,
     refetchOnWindowFocus: false,
   });
-  const planQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: addOpen && Boolean(authQuery.data?.id) });
+  const planQuery = useQuery({
+    queryKey: ["portfolio", accountScope],
+    queryFn: loadPortfolio,
+    enabled: addOpen && Boolean(authQuery.data?.id),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
   const portfolioHolding = planQuery.data?.holdings.find((item) => item.symbol === selectedSymbol);
   const addHoldingMutation = useMutation({
     mutationFn: async () => {

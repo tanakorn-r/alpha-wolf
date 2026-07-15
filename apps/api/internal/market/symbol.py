@@ -23,7 +23,7 @@ _SUPPORTED_QUOTE_TYPES = {
 }
 
 
-def fetch_symbol_record(symbol: str) -> dict[str, Any] | None:
+def fetch_symbol_record(symbol: str, *, refresh_stale: bool = True) -> dict[str, Any] | None:
     normalized = symbol.upper().strip()
     if not normalized:
         return None
@@ -34,7 +34,7 @@ def fetch_symbol_record(symbol: str) -> dict[str, Any] | None:
 
     try:
         ticker = make_ticker(normalized)
-        modules = load_ticker_modules(ticker, normalized)
+        modules = load_ticker_modules(ticker, normalized, refresh_stale=refresh_stale)
         info = merge_ticker_info(modules, normalized)
         if not info:
             return None

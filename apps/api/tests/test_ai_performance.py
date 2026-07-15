@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
@@ -47,7 +48,7 @@ class AiPerformanceTests(unittest.TestCase):
 
     def test_today_profile_skips_heavy_research_sources(self) -> None:
         with (
-            patch("routes.analysis.build_detail_bundle", return_value={"stock": {"symbol": "TEST"}}),
+            patch("routes.analysis.build_detail_bundle", return_value={"stock": {"symbol": "TEST"}}) as bundle_builder,
             patch("routes.analysis.get_ai_financials") as financials,
             patch("routes.analysis.get_market_comparison") as market,
             patch("routes.analysis.get_domain_insights") as insights,
@@ -61,10 +62,31 @@ class AiPerformanceTests(unittest.TestCase):
             )
 
         self.assertEqual(bundle, {"stock": {"symbol": "TEST"}})
+        bundle_builder.assert_called_once_with("TEST", "capitalized", mode=None, refresh_stale=False)
         self.assertEqual((financial_data, market_data, insight_data), ({}, {}, {}))
         financials.assert_not_called()
         market.assert_not_called()
         insights.assert_not_called()
+
+    def test_position_context_reads_saved_holding_without_rebuilding_portfolio(self) -> None:
+        holding = SimpleNamespace(
+            symbol="SIRI.BK",
+            shares=13_500,
+            averageCost=0.04,
+            monthlyDca=0,
+            strategy="capitalized",
+            createdAt="2026-07-15T00:00:00+00:00",
+        )
+        with (
+            patch("routes.analysis.list_holdings", return_value=[holding]),
+            patch("routes.analysis.build_portfolio_dashboard") as dashboard,
+        ):
+            from routes.analysis import _position_context
+            context = _position_context("SIRI.BK", 7)
+
+        self.assertTrue(context["isHolding"])
+        self.assertEqual(context["shares"], 13_500)
+        dashboard.assert_not_called()
 
     def test_model_context_caps_large_research_arrays(self) -> None:
         bundle = {

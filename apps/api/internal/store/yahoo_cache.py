@@ -48,6 +48,41 @@ def load_yahoo_data(symbol: str, data_type: str, period: str = "") -> YahooCache
         return None
 
 
+def load_yahoo_data_batch(requests: list[tuple[str, str, str]]) -> dict[tuple[str, str, str], YahooCacheEntry]:
+    """Load many exact Yahoo datasets with one remote database round trip."""
+    normalized = {
+        (symbol.upper().strip(), data_type.strip().lower(), period.strip().lower())
+        for symbol, data_type, period in requests
+        if symbol.strip() and data_type.strip()
+    }
+    if not normalized:
+        return {}
+    keys = [yahoo_cache_key(*request) for request in normalized]
+    placeholders = ",".join("?" for _ in keys)
+    try:
+        with connect() as db:
+            rows = db.execute(
+                f"SELECT symbol, data_type, period, payload, fetched_at, expires_at FROM yahoo_data_cache WHERE cache_key IN ({placeholders})",
+                tuple(keys),
+            ).fetchall()
+    except Exception:
+        return {}
+
+    result: dict[tuple[str, str, str], YahooCacheEntry] = {}
+    for row in rows:
+        try:
+            values = tuple(row)
+            key = (str(values[0]).upper(), str(values[1]).lower(), str(values[2]).lower())
+            result[key] = YahooCacheEntry(
+                payload=json.loads(str(values[3]) or "null"),
+                fetched_at=_parse_datetime(str(values[4])),
+                expires_at=_parse_datetime(str(values[5])),
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    return result
+
+
 def save_yahoo_data(
     symbol: str,
     data_type: str,

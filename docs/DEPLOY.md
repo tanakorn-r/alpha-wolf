@@ -8,14 +8,14 @@ Install CLIs and authenticate:
 
 ```sh
 gcloud auth login
-gcloud auth configure-docker asia-southeast3-docker.pkg.dev
+gcloud auth configure-docker asia-northeast1-docker.pkg.dev
 ```
 
 Set deploy variables:
 
 ```sh
 export GCP_PROJECT="alpha-wolf-501716"
-export GCP_REGION="asia-southeast3"
+export GCP_REGION="asia-northeast1"
 export CLOUD_RUN_SERVICE="alpha-wolf-api"
 export ARTIFACT_REPOSITORY="alpha-wolf-be"
 ```
@@ -68,4 +68,18 @@ The scripts stop on a dirty worktree by default. To deploy a local work-in-progr
 
 ```sh
 ALLOW_DIRTY=1 ./scripts/deploy-all.sh
+```
+
+The production defaults deliberately co-locate Cloud Run in Tokyo (`asia-northeast1`)
+with the Turso `nrt` database, keep one instance warm, allow eight concurrent requests,
+and leave CPU available after a response so stale Yahoo cache refreshes can finish.
+
+After the first Tokyo deploy, update Cloudflare's production `VITE_API_BASE` to the
+new URL printed by the deploy script (without adding `/api`), then trigger a frontend
+deployment. Keep the Jakarta service for rollback until the live Worker has been checked.
+
+Current Tokyo service URL:
+
+```txt
+https://alpha-wolf-api-6r4m3zptwq-an.a.run.app
 ```

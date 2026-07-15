@@ -115,7 +115,13 @@ export function useHuntAi() {
     },
     onError: (error) => setAiError(error instanceof Error ? error.message : "Could not activate Pro."),
   });
-  const portfolioQuery = useQuery({ queryKey: ["portfolio", accountScope], queryFn: loadPortfolio, enabled: authenticated });
+  const portfolioQuery = useQuery({
+    queryKey: ["portfolio", accountScope],
+    queryFn: loadPortfolio,
+    enabled: authenticated,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
   const watchlistQuery = useQuery({ queryKey: ["portfolio-watchlist", accountScope], queryFn: loadPortfolioWatchlist, enabled: authenticated });
   const addWatchlistMutation = useMutation({
     mutationFn: addPortfolioWatchlistSymbols,

@@ -40,7 +40,7 @@ class AnalystCacheFirstTests(unittest.TestCase):
             patch.object(
                 portfolio_market,
                 "quote_snapshot_meta",
-                side_effect=lambda symbol: {"fresh": symbol == "AAPL", "fetchedAt": "2026-07-13T12:00:00+00:00" if symbol == "AAPL" else None},
+                side_effect=lambda symbol, **_kwargs: {"fresh": symbol == "AAPL", "fetchedAt": "2026-07-13T12:00:00+00:00" if symbol == "AAPL" else None},
             ),
         ):
             result = portfolio_market.build_portfolio_quotes(1)

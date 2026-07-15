@@ -21,10 +21,14 @@ REPO="${ARTIFACT_REPOSITORY:-alpha-wolf-be}"
 SERVICE="${CLOUD_RUN_SERVICE:-alpha-wolf-api}"
 CLOUD_RUN_CONCURRENCY="${CLOUD_RUN_CONCURRENCY:-8}"
 CLOUD_RUN_MIN_INSTANCES="${CLOUD_RUN_MIN_INSTANCES:-1}"
+CLOUD_RUN_MAX_INSTANCES="${CLOUD_RUN_MAX_INSTANCES:-20}"
 CLOUD_RUN_MEMORY="${CLOUD_RUN_MEMORY:-1Gi}"
 
 # GENERATE UNIQUE VERSION TAG (Fixes the Artifact Registry Immutability error)
 TAG=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d-%H%M%S)
+if [[ -n "$(git status --porcelain 2>/dev/null)" ]]; then
+  TAG="${TAG}-$(date +%Y%m%d-%H%M%S)"
+fi
 IMAGE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/${REPO}/${SERVICE}:${TAG}"
 
 ENV_FILE="${ENV_FILE:-.env.production}"
@@ -70,12 +74,13 @@ fi
 
 # -- Turso setup -------------------------------------------------------------
 TURSO_URL="$(read_env_value TURSO_URL)"
+TURSO_DATABASE_URL="$(read_env_value TURSO_DATABASE_URL)"
 LIBSQL_DATABASE_URL="$(read_env_value LIBSQL_DATABASE_URL)"
 TURSO_AUTH_TOKEN="$(read_env_value TURSO_AUTH_TOKEN)"
 LIBSQL_AUTH_TOKEN="$(read_env_value LIBSQL_AUTH_TOKEN)"
 
-if [[ -z "$TURSO_URL" && -n "$LIBSQL_DATABASE_URL" ]]; then
-  TURSO_URL="$LIBSQL_DATABASE_URL"
+if [[ -z "$TURSO_URL" ]]; then
+  TURSO_URL="${TURSO_DATABASE_URL:-$LIBSQL_DATABASE_URL}"
 fi
 if [[ -z "$TURSO_AUTH_TOKEN" && -n "$LIBSQL_AUTH_TOKEN" ]]; then
   TURSO_AUTH_TOKEN="$LIBSQL_AUTH_TOKEN"
@@ -94,6 +99,8 @@ if [[ -z "$TURSO_URL" ]]; then
 
   TURSO_URL="$(turso db show "$TURSO_DB_NAME" --url)"
   TURSO_AUTH_TOKEN="$(turso db tokens create "$TURSO_DB_NAME")"
+  upsert_env_value TURSO_DATABASE_URL "$TURSO_URL"
+  upsert_env_value TURSO_AUTH_TOKEN "$TURSO_AUTH_TOKEN"
   log "Turso configured: $TURSO_URL"
 else
   log "Turso already configured: $TURSO_URL"
@@ -165,6 +172,7 @@ gcloud run deploy "$SERVICE" \
   --port 8080 \
   --concurrency "$CLOUD_RUN_CONCURRENCY" \
   --min "$CLOUD_RUN_MIN_INSTANCES" \
+  --max "$CLOUD_RUN_MAX_INSTANCES" \
   --cpu-boost \
   --no-cpu-throttling \
   --memory "$CLOUD_RUN_MEMORY" \
@@ -174,7 +182,11 @@ gcloud run deploy "$SERVICE" \
 rm -f "$ENV_YAML"
 
 log "Done! Service URL:"
-gcloud run services describe "$SERVICE" \
+SERVICE_URL="$(gcloud run services describe "$SERVICE" \
   --project "$GCP_PROJECT" \
   --region "$GCP_REGION" \
-  --format "value(status.url)"
+  --format "value(status.url)")"
+echo "$SERVICE_URL"
+log "Health check"
+curl --fail --silent --show-error "${SERVICE_URL}/health"
+echo

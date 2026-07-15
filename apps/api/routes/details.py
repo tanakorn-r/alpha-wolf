@@ -212,7 +212,7 @@ def details_buy_timing(
 
         # force=true means regenerate the Agent reasoning, not bypass all persisted Yahoo/derived
         # market data. The snapshot has its own 15-minute freshness contract.
-        result = build_buy_timing(normalized, strategy)
+        result = build_buy_timing(normalized, strategy, refresh_stale=False)
         if not result:
             raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
         if result.get("dataPending"):
@@ -278,7 +278,7 @@ def details_upward_moves(
     if cached is not None and not force:
         return cached
 
-    bundle = build_detail_bundle(normalized, strategy)
+    bundle = build_detail_bundle(normalized, strategy, refresh_stale=False)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
 
