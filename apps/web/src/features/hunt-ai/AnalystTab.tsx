@@ -1,10 +1,12 @@
 import { AgentCall } from "../../components/agents/AgentCall";
+import { useQuery } from "@tanstack/react-query";
 import { PaywallGate } from "../../components/ui/PaywallGate";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { formatCurrency } from "../../lib/format";
 import { formatAnalyzedAt, signalLevel } from "./lib";
 import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
+import { loadAiDecisionHistory } from "../../lib/api";
 
 export function AnalystTab({ hunt }: { hunt: HuntAi }) {
   const analyst = hunt.analyst;
@@ -25,6 +27,11 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
   const detail = analyst.detail;
   const analysis = analyst.analysis;
   const verdict = analysis ? signalLevel(analysis.confidence, analysis.signal) : null;
+  const history = useQuery({
+    queryKey: ["ai-decision-history", selectedTicker, hunt.activeAgentId, analysis?.generatedAt],
+    queryFn: () => loadAiDecisionHistory(selectedTicker, hunt.activeAgentId),
+    enabled: hunt.signedIn && Boolean(selectedTicker && analysis),
+  });
 
   return (
     <div className="flex flex-col gap-3">
@@ -57,6 +64,7 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
           accent={analysis.agent?.color ?? verdict.color}
           meta={`${analysis.agentFitReason} · not financial advice`}
           onRerun={() => void analyst.run(undefined, true)}
+          dataTrust={detail?.dataTrust}
         >
           <div className="grid gap-3 text-[12px] leading-[1.6] min-[900px]:grid-cols-2">
             <div className="rounded-[10px] border border-white/[0.07] bg-black/20 p-3.5">
@@ -77,6 +85,20 @@ export function AnalystTab({ hunt }: { hunt: HuntAi }) {
             </div>
           </div>
           <div className="mt-3 rounded-[9px] border border-[#f5c451]/25 bg-[#f5c451]/[0.04] px-3.5 py-3 text-[11.5px] leading-[1.55] text-[#d5c28c]"><span className="mr-2 font-bold uppercase tracking-[0.06em] text-[#f5c451]">What changes the call</span>{analysis.changeTrigger}</div>
+          {history.data?.length ? (
+            <details className="mt-3 rounded-[9px] border border-white/[0.08] bg-black/20 px-3.5 py-3">
+              <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Decision history · why the AI changed its mind</summary>
+              <ol className="mt-3 grid gap-3">
+                {history.data.slice(0, 8).map((item) => (
+                  <li key={item.runId} className="border-l-2 border-white/10 pl-3 text-[11px] leading-[1.5] text-[#bcbcc2]">
+                    <div className="font-mono text-[10px] text-[#8c8c95]">{new Date(item.createdAt).toLocaleString()} · {item.feature} · {item.decision.action}</div>
+                    <div className="mt-1">{item.whyChanged}</div>
+                    <div className="mt-1 font-mono text-[9px] text-[#5a5a62]">{item.model} · prompt {item.promptVersion}</div>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
         </AgentCall>
       ) : null}
 

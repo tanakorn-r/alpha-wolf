@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -229,6 +229,7 @@ class PortfolioDashboard(BaseModel):
     fxSource: str | None = None
     fxStale: bool = False
     reportingCurrency: str = "THB"
+    dataTrust: dict[str, Any] | None = None
 
 
 class MarketSnapshot(BaseModel):
@@ -255,6 +256,7 @@ class MarketComparison(BaseModel):
     benchmark: MarketComparisonAsset
     peer: MarketComparisonAsset
     points: list[MarketComparisonPoint] = Field(default_factory=list)
+    dataTrust: dict[str, Any] | None = None
 
 
 class StockAnalysisScore(BaseModel):
@@ -372,6 +374,12 @@ class StockAnalysisResponse(StockAnalysis):
     recap: str | None = None
     agentFit: Literal["aligned", "neutral", "against"] | None = None
     agentFitReason: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class AnalystBrief(BaseModel):
@@ -429,6 +437,12 @@ class StrategyPlaybookResponse(StrategyPlaybook):
     recap: str | None = None
     agentFit: Literal["aligned", "neutral", "against"] | None = None
     agentFitReason: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class StrategyRecommendationRequest(BaseModel):
@@ -476,6 +490,12 @@ class QuantPerspectiveResponse(QuantPerspective):
     recap: str | None = None
     agentFit: Literal["aligned", "neutral", "against"] | None = None
     agentFitReason: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class ValuationRightNow(BaseModel):
@@ -565,6 +585,12 @@ class ValuationVerdictResponse(ValuationVerdict):
     recap: str | None = None
     agentFit: Literal["aligned", "neutral", "against"] | None = None
     agentFitReason: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class TodayPlanAssessment(BaseModel):
@@ -617,6 +643,12 @@ class TodayPerformanceResponse(TodayPerformance):
     model: str
     agent: AgentBadge | None = None
     generatedAt: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class TechnicalFrameworkRead(BaseModel):
@@ -649,6 +681,12 @@ class TechnicalAnalysisResponse(TechnicalAnalysis):
     model: str
     agent: AgentBadge | None = None
     generatedAt: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class AgentStyle(BaseModel):
@@ -692,6 +730,12 @@ class PortfolioReviewResponse(PortfolioReview):
     model: str
     agent: AgentBadge
     generatedAt: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class BuyTimingMonthDecision(BaseModel):
@@ -796,6 +840,12 @@ class TechnicalMovesPredictionResponse(TechnicalMovesPrediction):
     model: str
     agent: AgentBadge | None = None
     generatedAt: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class MarketUniverseCache(BaseModel):

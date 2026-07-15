@@ -81,6 +81,7 @@ function TimingPage({ timing, analyzedAt, onRefresh }: { timing: BuyTimingRespon
         onRerun={onRefresh}
         signoff={false}
         density="compact"
+        dataTrust={timing.dataTrust}
       />
 
       <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-3.5">
@@ -318,14 +319,15 @@ function BacktestStats({ timing }: { timing: BuyTimingResponse }) {
   const normalizedReturn = result.exposureNormalizedReturnPct;
   const normalizedEdge = normalizedReturn == null ? null : normalizedReturn - result.alwaysBuyReturnPct;
   const battlefield = result.battlefield;
+  const claimEligible = result.historicalClaimEligible === true && result.validation?.status === "VALIDATED";
   const battlefieldVerdict = battlefield?.verdict ?? (normalizedEdge == null ? "MATCH" : normalizedEdge > 0 ? "WIN" : "LOSS");
-  const battlefieldColor = battlefieldVerdict === "WIN" ? "#3ecf8e" : battlefieldVerdict === "LOSS" ? "#f2575c" : "#ececee";
+  const battlefieldColor = !claimEligible ? "#8c8c95" : battlefieldVerdict === "WIN" ? "#3ecf8e" : battlefieldVerdict === "LOSS" ? "#f2575c" : "#ececee";
   const primaryValue = battlefield?.primaryValue ?? normalizedReturn;
   const benchmarkValue = battlefield?.benchmarkValue ?? result.alwaysBuyReturnPct;
   const edgeValue = battlefield?.edgeValue ?? normalizedEdge;
   const metricUnit = battlefield?.unit ?? "percent";
   const metricValue = (value: number | null | undefined) => value == null ? "—" : metricUnit === "ratio" ? `${value.toFixed(2)}x` : `${signed(value)}%`;
-  const edgeLabel = battlefield
+  const edgeLabel = !claimEligible ? "In-sample edge · not validated" : battlefield
     ? `${battlefieldVerdict === "WIN" ? "Won" : battlefieldVerdict === "LOSS" ? "Lost" : "Matched"} · ${battlefield.label}`
     : battlefieldVerdict === "WIN" ? "AI beat DCA" : battlefieldVerdict === "LOSS" ? "AI trailed DCA" : "AI matched DCA";
   const exposureGivenUp = Math.max(0, 100 - exposure);
@@ -344,6 +346,11 @@ function BacktestStats({ timing }: { timing: BuyTimingResponse }) {
       {limitedSample ? (
         <div className="mb-2 rounded-[9px] border border-[#f5c451]/25 bg-[#f5c451]/[0.06] px-3 py-2.5 text-[10.5px] leading-[1.5] text-[#d5c28c]">
           <b className="text-[#f5c451]">Limited history: only {result.observedMonths} months.</b> Calendar-month averages may contain just one observation, so this comparison is descriptive—not reliable evidence of timing skill.
+        </div>
+      ) : null}
+      {!claimEligible ? (
+        <div className="mb-2 rounded-[9px] border border-[#8c8c95]/25 bg-white/[0.025] px-3 py-2.5 text-[10.5px] leading-[1.5] text-[#9a9aa2]">
+          <b className="text-[#c8c8cd]">No AI win/loss claim yet.</b> {result.validation?.reason ?? "This is an in-sample diagnostic. A walk-forward or held-out test is required before treating the edge as evidence of skill."}
         </div>
       ) : null}
       <div className="grid gap-2.5 min-[820px]:grid-cols-4">
@@ -379,7 +386,7 @@ function BacktestStats({ timing }: { timing: BuyTimingResponse }) {
         />
       </div>
       <div className="mt-2 text-[10px] leading-[1.5] text-[#5a5a62]">
-        {battlefield ? <><b className="text-[#8c8c95]">Battlefield: {battlefield.objective}</b> {battlefield.explanation} </> : null}
+        {battlefield && claimEligible ? <><b className="text-[#8c8c95]">Battlefield: {battlefield.objective}</b> {battlefield.explanation} </> : null}
         Exposure-normalized return remains an estimate—actual plan return divided by average stock exposure—not a simulated fully invested portfolio. {`The plan deployed in ${result.investedMonths} of ${result.observedMonths} months. For owners, a “25%” buy invests one quarter of that month's delegated contribution, while 75%/100% may redeploy reserve. Rex and Kai size the available tactical cash instead.`}
       </div>
       {(result.agentDividendsReceived > 0 || result.alwaysBuyDividendsReinvested > 0) ? (

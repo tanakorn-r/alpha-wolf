@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import os
 import secrets
+import json
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from internal.store.auth import create_session, delete_session, upsert_google_user, user_for_session
+from internal.store.auth import account_exists, create_session, delete_session, upsert_google_user, user_for_session
 from internal.store.entitlements import fulfill_stripe_ai_credits, redeem_pro_trial
+from internal.store.account_lifecycle import delete_account_data, export_account_data, legal_acceptance_status, record_current_legal_acceptance
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -21,6 +23,8 @@ SESSION_TTL_DAYS = 30
 class GoogleCredential(BaseModel):
     credential: str = Field(min_length=20)
     nonce: str = Field(min_length=20)
+    acceptTerms: bool = False
+    acceptPrivacy: bool = False
 
 
 class CreditCheckout(BaseModel):
@@ -30,6 +34,11 @@ class CreditCheckout(BaseModel):
 
 class CreditCheckoutConfirmation(BaseModel):
     sessionId: str = Field(min_length=10, max_length=255)
+
+
+class AccountDeletion(BaseModel):
+    confirmation: str
+    acknowledgeCreditForfeiture: bool = False
 
 
 CREDIT_PACKS = {
@@ -63,6 +72,8 @@ def create_credit_checkout(payload: CreditCheckout, request: Request) -> dict[st
     user = user_for_session(request.cookies.get(SESSION_COOKIE))
     if not user:
         raise HTTPException(status_code=401, detail="Sign in before adding AI credits")
+    if not user.get("legalAccepted"):
+        raise HTTPException(status_code=409, detail="Accept the current Terms and Privacy Policy before purchasing AI tokens")
     pack = CREDIT_PACKS.get(payload.credits)
     if not pack:
         raise HTTPException(status_code=400, detail="Unknown credit pack")
@@ -189,6 +200,10 @@ def _fulfill_checkout_session(session: Any, *, event_key: str, expected_user_id:
     client_reference_id = str(session.get("client_reference_id") or "")
     if expected_user_id is not None and user_id != expected_user_id:
         raise HTTPException(status_code=403, detail="Stripe Session belongs to another account")
+    if expected_user_id is None and not account_exists(user_id):
+        # A checkout webhook can arrive after its account was permanently deleted. Never
+        # recreate an orphan token balance for an identity that no longer exists.
+        return 0
     if session.get("mode") != "payment" or client_reference_id != str(user_id):
         raise HTTPException(status_code=400, detail="Stripe Session identity is invalid")
     if session.get("payment_status") != "paid":
@@ -227,6 +242,8 @@ def google_login(payload: GoogleCredential, request: Request, response: Response
     client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     if not client_id:
         raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    if not payload.acceptTerms or not payload.acceptPrivacy:
+        raise HTTPException(status_code=400, detail="Accept the Terms and Privacy Policy to create or connect an AlphaWolf account")
 
     claims = _verify_google_token(payload.credential, client_id)
     if not secrets.compare_digest(str(claims.get("nonce") or ""), payload.nonce):
@@ -244,6 +261,8 @@ def google_login(payload: GoogleCredential, request: Request, response: Response
         name=str(claims.get("name") or email.split("@", 1)[0]),
         picture_url=str(claims.get("picture") or "").strip() or None,
     )
+    record_current_legal_acceptance(int(user["id"]))
+    user = {**user, **legal_acceptance_status(int(user["id"]))}
     raw_session, expires_at = create_session(user["id"], ttl_days=SESSION_TTL_DAYS)
     response.set_cookie(
         SESSION_COOKIE,
@@ -257,6 +276,44 @@ def google_login(payload: GoogleCredential, request: Request, response: Response
     )
     response.delete_cookie(NONCE_COOKIE, path="/api/auth")
     return {"user": user}
+
+
+@router.post("/legal/accept")
+def accept_current_legal(request: Request) -> dict[str, Any]:
+    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in before accepting account terms")
+    record_current_legal_acceptance(int(user["id"]))
+    return {"user": user_for_session(request.cookies.get(SESSION_COOKIE))}
+
+
+@router.get("/account/export")
+def account_export(request: Request) -> Response:
+    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in to export your account data")
+    payload = json.dumps(export_account_data(int(user["id"])), ensure_ascii=False, indent=2, default=str)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="alphawolf-account-export.json"'},
+    )
+
+
+@router.delete("/account")
+def account_delete(payload: AccountDeletion, request: Request, response: Response) -> dict[str, bool]:
+    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    if not user:
+        raise HTTPException(status_code=401, detail="Sign in to delete your account")
+    if payload.confirmation.strip() != "DELETE":
+        raise HTTPException(status_code=400, detail='Type DELETE to confirm permanent account deletion')
+    remaining = int((user.get("aiUsage") or {}).get("tokens") or 0)
+    if remaining > 0 and not payload.acknowledgeCreditForfeiture:
+        raise HTTPException(status_code=409, detail=f"This account still has {remaining} unused AI tokens. Confirm that deletion forfeits them, or contact support first.")
+    delete_account_data(int(user["id"]))
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(NONCE_COOKIE, path="/api/auth")
+    return {"ok": True}
 
 
 @router.post("/logout")

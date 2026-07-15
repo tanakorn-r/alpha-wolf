@@ -56,7 +56,7 @@ export function Next100Result({ report, timeframe, onRerun, canRerun, analyzedAt
 
   return (
     <div className="flex flex-col gap-3">
-      <AgentCall agent={report.agent} label="Forecast agent" score={avgConfidence} scoreLabel="scenario confidence" signal={gain >= 0 ? "UPSIDE PATH" : "RISK PATH"} headline={`Next 10 Forecast · ${report.symbol}`} summary={`Past movement first, forecast second. The model maps ${rows.length} future moves from ${formatCurrency(report.currentPrice, currency)} to ${formatCurrency(finalPrice, currency)}.`} accent={forecastColor} meta={`Cached ${formatAnalyzedAt(analyzedAt)} · scenario, not a guaranteed trade`} onRerun={canRerun ? onRerun : undefined}>
+      <AgentCall agent={report.agent} label="Forecast agent" score={avgConfidence} scoreLabel="scenario confidence" signal={gain >= 0 ? "UPSIDE PATH" : "RISK PATH"} headline={`Next 10 Forecast · ${report.symbol}`} summary={`Past movement first, forecast second. The model maps ${rows.length} future moves from ${formatCurrency(report.currentPrice, currency)} to ${formatCurrency(finalPrice, currency)}.`} accent={forecastColor} meta={`Cached ${formatAnalyzedAt(analyzedAt)} · scenario, not a guaranteed trade`} onRerun={canRerun ? onRerun : undefined} dataTrust={report.dataTrust}>
         <div className="mt-5 grid overflow-hidden rounded-[12px] border border-[#24242a] min-[820px]:grid-cols-3">
           <TapeSummaryCard
             label="1. Last 10 days"

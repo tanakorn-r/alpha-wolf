@@ -5,10 +5,12 @@ import { AiVerdictCard } from "../../components/AiVerdictCard";
 import { AgentByline } from "../../components/agents/AgentByline";
 import { AgentRecap } from "../../components/agents/AgentRecap";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
+import { DataTrustBadge } from "../../components/DataTrustBadge";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { GoogleAccountModal } from "../../components/auth/GoogleAccount";
 import { Modal } from "../../components/ui/Modal";
 import { lockBodyScroll } from "../../lib/bodyScrollLock";
+import { useDialogAccessibility } from "../../lib/useDialogAccessibility";
 import { TickerPerformanceChart } from "../../components/charts/TickerPerformanceChart";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
 import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate } from "../../lib/format";
@@ -52,6 +54,7 @@ export function StockDetailDrawer() {
   const [addPrice, setAddPrice] = useState("");
   const [pendingTimedOut, setPendingTimedOut] = useState(false);
   const drawerRef = useRef<HTMLElement>(null);
+  const dialogRef = useDialogAccessibility(closeDetail, detailOpen);
   const tabsRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
   const detailQuery = useQuery({
@@ -220,7 +223,7 @@ export function StockDetailDrawer() {
       {signInOpen ? <GoogleAccountModal user={authQuery.data ?? null} onClose={() => setSignInOpen(false)} /> : null}
       <button type="button" aria-label="Close stock detail" onClick={closeDetail} className={`aw-overlay fixed inset-0 z-30 bg-slate-900/30 transition-opacity ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} />
       <aside ref={drawerRef} onClick={closeDetail} className={`aw-drawer fixed inset-0 z-40 flex items-end justify-center overflow-hidden px-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-opacity min-[720px]:items-start min-[720px]:overflow-y-auto min-[720px]:px-6 min-[720px]:py-8 ${detailOpen ? "opacity-100" : "pointer-events-none opacity-0"}`} aria-label="Stock detail panel">
-        <div onClick={(event) => event.stopPropagation()} className="aw-detail-panel relative flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-w-0 w-full max-w-[1040px] flex-col overflow-hidden rounded-t-[var(--aw-radius-frame)] border border-[#2a2a31] bg-[#0e0e10] shadow-[0_30px_90px_rgba(0,0,0,.55)] min-[720px]:max-h-none min-[720px]:rounded-[var(--aw-radius-frame)]">
+        <div ref={dialogRef as React.Ref<HTMLDivElement>} role="dialog" aria-modal="true" aria-label={`${selectedSymbol} stock detail`} tabIndex={-1} onClick={(event) => event.stopPropagation()} className="aw-detail-panel relative flex max-h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] min-w-0 w-full max-w-[1040px] flex-col overflow-hidden rounded-t-[var(--aw-radius-frame)] border border-[#2a2a31] bg-[#0e0e10] shadow-[0_30px_90px_rgba(0,0,0,.55)] outline-none min-[720px]:max-h-none min-[720px]:rounded-[var(--aw-radius-frame)]">
           <DrawerHeader
             detail={detail}
             symbol={selectedSymbol}
@@ -243,7 +246,7 @@ export function StockDetailDrawer() {
                   Price paid (per share)
                   <input required type="number" min="0" step="any" value={addPrice} onChange={(event) => setAddPrice(event.target.value)} placeholder="Your buy price" className="h-10 rounded-[var(--aw-radius-control)] border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]" />
                 </label>
-                <p className="text-[11px] leading-[1.5] text-[#5a5a62]">Prefilled with the live price ({formatCurrency(detail.stock.price, detail.stock.currency)}) — change it to what you actually paid. Adding more averages into your existing position.</p>
+                <p className="text-[11px] leading-[1.5] text-[#5a5a62]">Prefilled with the latest available price ({formatCurrency(detail.stock.price, detail.stock.currency)}) — change it to what you actually paid. Adding more averages into your existing position.</p>
                 {addHoldingMutation.isError ? <p className="text-[11px] text-[#f2575c]">{addStatus}</p> : null}
                 <button disabled={addHoldingMutation.isPending} className="mt-1 flex items-center justify-center gap-2 rounded-[var(--aw-radius-control)] bg-[#3ecf8e] py-3 text-sm font-bold text-[#06120c] disabled:opacity-60">
                   {addHoldingMutation.isPending ? <LoadingSpinner size={14} /> : null}Add to portfolio
@@ -283,6 +286,7 @@ export function StockDetailDrawer() {
               </div>
             ) : null}
             {detail && !loading && !detail.dataPending ? <>
+              <DataTrustBadge trust={detail.dataTrust} />
               {analyzing || savedAnalysisQuery.isPending ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing || savedAnalysisQuery.isPending} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
               <QuickReadCard detail={detail} analysis={analysis} agent={activeAgent} />
               <ResearchTabs ref={tabsRef} active={tab} onSelect={selectTab} />

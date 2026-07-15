@@ -10,6 +10,13 @@
         "command": "python3 -m uvicorn main:app --reload --env-file .env --host 127.0.0.1 --port 8000"
       }
     },
+    "worker": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": "apps/api",
+        "command": "python3 -m internal.ai.backtrade_worker"
+      }
+    },
     "build": {
       "executor": "nx:run-commands",
       "options": {

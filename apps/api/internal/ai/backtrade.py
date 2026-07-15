@@ -10,7 +10,7 @@ import pandas as pd
 
 from internal.ai.agents import agent_badge, normalize_agent_id
 from internal.ai.openai_client import OpenAIAnalysisError, decide_backtrade_with_openai
-from internal.store.backtrade_jobs import load_backtrade_job, save_backtrade_job
+from internal.store.backtrade_jobs import account_has_active_backtrade, claim_backtrade_job, load_backtrade_job, release_backtrade_lease, renew_backtrade_lease, save_backtrade_job
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 from internal.yahoo.client import _refresh_in_background, fetch_history, ticker as make_ticker
 
@@ -34,9 +34,8 @@ def create_backtrade_job(account_scope: str, payload: dict[str, Any]) -> dict[st
     # first session of the new month. This bounds a five-year run to roughly 60 AI calls.
     mode = "monthly"
     with _LOCK:
-        for job in _JOBS.values():
-            if job["accountScope"] == account_scope and job["status"] in {"queued", "running"}:
-                raise RuntimeError("A replay is already running for this account")
+        if account_has_active_backtrade(account_scope):
+            raise RuntimeError("A replay is already running for this account")
         job_id = uuid4().hex
         _JOBS[job_id] = {
             "id": job_id,
@@ -52,7 +51,9 @@ def create_backtrade_job(account_scope: str, payload: dict[str, Any]) -> dict[st
             "error": None,
         }
         save_backtrade_job(_JOBS[job_id])
-    _EXECUTOR.submit(_run_job, job_id, symbol, agent_id, years, contribution, mode)
+    # Local execution keeps development simple. The durable worker reclaims this job if the API
+    # process exits; production should also run `python -m internal.ai.backtrade_worker`.
+    _EXECUTOR.submit(run_next_backtrade_job, f"api-{job_id[:8]}")
     return _public_job(_JOBS[job_id])
 
 
@@ -61,9 +62,6 @@ def get_backtrade_job(account_scope: str, job_id: str) -> dict[str, Any] | None:
         job = _JOBS.get(job_id)
         if not job:
             job = load_backtrade_job(job_id, account_scope)
-            if job and job.get("status") in {"queued", "running"}:
-                job.update(status="failed", stage="Interrupted", error="The server restarted before this replay completed. Run it again.", progress=100)
-                save_backtrade_job(job)
             if job:
                 _JOBS[job_id] = job
         if not job or job["accountScope"] != account_scope:
@@ -75,15 +73,30 @@ def _public_job(job: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in job.items() if key != "accountScope"}
 
 
-def _update(job_id: str, **values: Any) -> None:
+def _update(job_id: str, worker_id: str | None = None, **values: Any) -> None:
     with _LOCK:
         if job_id in _JOBS:
             _JOBS[job_id].update(values)
+            save_backtrade_job(_JOBS[job_id])
+    if worker_id:
+        renew_backtrade_lease(job_id, worker_id)
 
 
-def _run_job(job_id: str, symbol: str, agent_id: str, years: int, contribution: float, mode: str) -> None:
+def run_next_backtrade_job(worker_id: str) -> bool:
+    job = claim_backtrade_job(worker_id)
+    if not job:
+        return False
+    job_id = str(job["id"])
+    with _LOCK:
+        _JOBS[job_id] = job
+    config = job.get("config") or {}
+    _run_job(job_id, str(job["symbol"]), normalize_agent_id(str((job.get("agent") or {}).get("id") or "vera")), int(config.get("years") or 5), float(config.get("monthlyContribution") or 100), str(config.get("mode") or "monthly"), worker_id)
+    return True
+
+
+def _run_job(job_id: str, symbol: str, agent_id: str, years: int, contribution: float, mode: str, worker_id: str) -> None:
     try:
-        _update(job_id, status="running", stage="Loading historical evidence", progress=2)
+        _update(job_id, worker_id, status="running", stage="Loading historical evidence", progress=2)
         # Fundamentals are fetched once for the whole job, never once per replay month. Statement
         # periods become visible only after a conservative reporting lag in _financial_as_of.
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix="backtrade-data") as loader:
@@ -105,14 +118,13 @@ def _run_job(job_id: str, symbol: str, agent_id: str, years: int, contribution: 
         replay_sessions = min(len(frame) - 1, years * 252)
         start_index = max(200, len(frame) - replay_sessions)
         event_indices = _event_indices(frame, start_index, mode)
-        _update(job_id, stage="Replaying point-in-time decisions", progress=5)
-        result = _simulate(job_id, frame, event_indices, start_index, contribution, agent_id, mode, financial_timeline)
-        _update(job_id, status="complete", stage="Complete", progress=100, result=result)
-        save_backtrade_job(_JOBS[job_id])
+        _update(job_id, worker_id, stage="Replaying point-in-time decisions", progress=5)
+        result = _simulate(job_id, frame, event_indices, start_index, contribution, agent_id, mode, financial_timeline, worker_id)
+        _update(job_id, worker_id, status="complete", stage="Complete", progress=100, result=result)
     except Exception as exc:
-        _update(job_id, status="failed", stage="Failed", error=str(exc), progress=100)
-        if job_id in _JOBS:
-            save_backtrade_job(_JOBS[job_id])
+        _update(job_id, worker_id, status="failed", stage="Failed", error=str(exc), progress=100)
+    finally:
+        release_backtrade_lease(job_id)
 
 
 def _event_indices(frame: pd.DataFrame, start: int, mode: str) -> list[int]:
@@ -138,7 +150,7 @@ def _event_indices(frame: pd.DataFrame, start: int, mode: str) -> list[int]:
     return sorted(set(ordered))
 
 
-def _simulate(job_id: str, frame: pd.DataFrame, events: list[int], start: int, contribution: float, agent_id: str, mode: str, financial_timeline: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def _simulate(job_id: str, frame: pd.DataFrame, events: list[int], start: int, contribution: float, agent_id: str, mode: str, financial_timeline: list[dict[str, Any]] | None = None, worker_id: str | None = None) -> dict[str, Any]:
     cash = shares = benchmark_shares = contributed = 0.0
     agent_dividends_received = dca_dividends_reinvested = 0.0
     decisions: list[dict[str, Any]] = []
@@ -231,7 +243,7 @@ def _simulate(job_id: str, frame: pd.DataFrame, events: list[int], start: int, c
         decisions.append(audit)
         pending = audit
         total_decisions = len(events) + 1
-        _update(job_id, progress=min(96, 5 + round(len(decisions) / max(1, total_decisions) * 91)), stage=f"Replaying decision {len(decisions)} of {total_decisions}")
+        _update(job_id, worker_id, progress=min(96, 5 + round(len(decisions) / max(1, total_decisions) * 91)), stage=f"Replaying decision {len(decisions)} of {total_decisions}")
 
     final_agent = equity[-1]["agent"]
     final_dca = equity[-1]["dca"]

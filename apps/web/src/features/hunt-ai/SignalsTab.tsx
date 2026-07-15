@@ -90,6 +90,7 @@ function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: Val
         accent={theme.accent}
         meta={`Cached ${formatAnalyzedAt(analyzedAt)} · supplied fundamentals only · not financial advice`}
         onRerun={onRun}
+        dataTrust={verdict.dataTrust}
       >
         <div className="mt-4 flex justify-end">
           <button type="button" onClick={onOpen} className="rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2 text-[11px] font-bold text-[#bcbcc2] hover:border-[#3ecf8e]">Open stock detail</button>

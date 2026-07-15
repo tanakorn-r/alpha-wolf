@@ -8,6 +8,7 @@ import {
   loadStockDetailsBatch,
   loadTodayPerformance,
   type DcaOrder,
+  type CanonicalDecisionState,
   type MarketCalendarEvent,
   type PortfolioHolding,
   type StockDetailResponse,
@@ -66,6 +67,7 @@ export type HoldingBriefRow = {
   sellTrigger: DecisionPanel;
   events: HoldingEvent[];
   dcaOrders: DcaOrder[];
+  decisionState?: CanonicalDecisionState | null;
 };
 
 export type DailyBrief = ReturnType<typeof useDailyBrief>;
@@ -132,6 +134,7 @@ export function useDailyBrief() {
       calendarFailed: calendar.isError,
       detailsLoading: details.isLoading,
       detailsFetching: details.isFetching,
+      dataTrust: portfolio.data?.dataTrust,
       totalPl: holdings.reduce((sum, holding) => sum + holding.gainLoss, 0),
       summary: buildSummary(rows, counts),
     };
@@ -231,7 +234,8 @@ function buildHoldingRow({
   const currency = detail?.stock.currency ?? holding.currency;
   const todayPct = detail?.stock.changePct ?? holding.changePct ?? 0;
   const rating = clamp(Math.round(detail?.verdict?.score ?? fallbackRating(holding, detail)), 1, 99);
-  const action = detail?.verdict?.action ?? "WATCH";
+  const rawAction = detail?.verdict?.action ?? "WATCH";
+  const action = detail?.decisionState?.timing === "CHASE" && (rawAction === "BUY" || rawAction === "BUY SETUP") ? "WAIT" : rawAction;
   const sma50 = detail?.technicals?.sma50;
   const exDiv = events.find((event) => event.kind === "EX-DIV");
   const payment = events.find((event) => event.kind === "PAYS");
@@ -278,6 +282,7 @@ function buildHoldingRow({
     sellTrigger: buildSellTrigger(sma50, price, currency),
     events,
     dcaOrders,
+    decisionState: detail?.decisionState,
   };
 }
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { confirmAiCreditCheckout, createAiCreditCheckout } from "../../lib/api";
 import { Modal } from "../ui/Modal";
+import { Link } from "react-router-dom";
 
 const PACKS = [
   { credits: 25 as const, price: "$2.99", note: "A few extra Agent reads" },
@@ -77,6 +78,7 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
           <button type="button" disabled={buying} onClick={confirm} className="mt-4 w-full rounded-[var(--aw-radius-control)] bg-[#3ecf8e] px-4 py-2.5 text-[12px] font-bold text-[#07120d] disabled:opacity-50">
             {buying ? "Opening Stripe…" : `Continue to Stripe · ${pack.price}`}
           </button>
+          <div className="mt-3 text-center text-[9.5px] leading-[1.5] text-[#696972]">By continuing, you agree to the <Link to="/terms" className="text-[#8c8c95]">Terms</Link>. See the <Link to="/refunds" className="text-[#8c8c95]">Refund Policy</Link>. AlphaWolf does not store your card details.</div>
       </>
     </Modal>
   );

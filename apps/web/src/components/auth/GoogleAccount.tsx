@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { Modal } from "../ui/Modal";
-import { connectGoogleAccount, disconnectAccount, loadAuthUser, loadGoogleAuthBootstrap, type AuthUser } from "../../lib/api";
+import { acceptCurrentLegal, connectGoogleAccount, deleteAccount, disconnectAccount, downloadAccountExport, loadAuthUser, loadGoogleAuthBootstrap, type AuthUser } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
 
 type GoogleCredentialResponse = { credential?: string };
@@ -44,6 +45,9 @@ export function GoogleAccount() {
 export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const clearAccountState = useWolfStore((state) => state.clearAccountState);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [forfeit, setForfeit] = useState(false);
   const logout = useMutation({
     mutationFn: disconnectAccount,
     onSuccess: async () => {
@@ -56,6 +60,17 @@ export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; o
       onClose();
     },
   });
+  const accept = useMutation({ mutationFn: acceptCurrentLegal, onSuccess: (next) => queryClient.setQueryData(["auth-user"], next) });
+  const exportData = useMutation({ mutationFn: downloadAccountExport });
+  const removeAccount = useMutation({
+    mutationFn: () => deleteAccount({ confirmation, acknowledgeCreditForfeiture: forfeit }),
+    onSuccess: async () => {
+      await queryClient.cancelQueries();
+      queryClient.clear();
+      clearAccountState();
+      window.location.assign("/");
+    },
+  });
 
   return (
     <Modal title={user ? "Your account" : "Sign in"} onClose={onClose}>
@@ -65,8 +80,22 @@ export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; o
           <div className="mt-3 text-[16px] font-extrabold text-[#ececee]">{user.name}</div>
           <div className="mt-1 text-[12px] text-[#8c8c95]">{user.email}</div>
           <div className="mt-4 rounded-[9px] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2.5 text-[11.5px] leading-[1.5] text-[#8c8c95]">
-            Your Google identity is connected to AlphaWolf on this device.
+            Your Google identity is connected to AlphaWolf. AlphaWolf stores research notes and portfolio records; it does not hold assets or execute trades.
           </div>
+          {!user.legalAccepted ? <div className="mt-3 rounded-[9px] border border-[#f5c451]/35 bg-[#f5c451]/10 p-3 text-left text-[11px] leading-[1.5] text-[#d5c28c]">Review the current <Link className="text-[#74a4ff]" to="/terms" onClick={onClose}>Terms</Link> and <Link className="text-[#74a4ff]" to="/privacy" onClick={onClose}>Privacy Policy</Link>.<button type="button" disabled={accept.isPending} onClick={() => accept.mutate()} className="mt-2 block font-bold text-[#f5c451]">{accept.isPending ? "Saving…" : "Accept current versions"}</button></div> : null}
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => exportData.mutate()} disabled={exportData.isPending} className="rounded-[9px] border border-[#34343c] px-3 py-2.5 text-[11px] font-bold text-[#bcbcc2] disabled:opacity-50">{exportData.isPending ? "Preparing…" : "Export my data"}</button>
+            <button type="button" onClick={() => setDeleteOpen((value) => !value)} className="rounded-[9px] border border-[#f2575c]/35 px-3 py-2.5 text-[11px] font-bold text-[#f2575c]">Delete account</button>
+          </div>
+          {exportData.isError ? <div className="mt-2 text-left text-[10.5px] text-[#f2575c]">{exportData.error instanceof Error ? exportData.error.message : "Export failed."}</div> : null}
+          {deleteOpen ? <div className="mt-3 rounded-[10px] border border-[#f2575c]/35 bg-[#f2575c]/[0.06] p-3 text-left">
+            <div className="text-[11px] font-bold text-[#f2575c]">Permanent deletion</div><p className="mt-1 text-[10.5px] leading-[1.5] text-[#9a9aa3]">This removes your portfolio, transactions, saved AI results, watchlist, support records, replay jobs, sessions, and token balance. Export first if you want a copy.</p>
+            <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Type DELETE" className="mt-2 h-9 w-full rounded-[7px] border border-[#3a3034] bg-[#0e0e10] px-3 text-xs text-[#ececee] outline-none focus:border-[#f2575c]" />
+            {(user.aiUsage?.tokens ?? 0) > 0 ? <label className="mt-2 flex items-start gap-2 text-[10px] leading-[1.4] text-[#9a9aa3]"><input type="checkbox" checked={forfeit} onChange={(event) => setForfeit(event.target.checked)} className="mt-0.5" />I understand deletion forfeits {user.aiUsage?.tokens} unused AI tokens, including promotional or purchased tokens. I can contact Support first for a refund question.</label> : null}
+            {removeAccount.isError ? <div className="mt-2 text-[10.5px] text-[#f2575c]">{removeAccount.error instanceof Error ? removeAccount.error.message : "Deletion failed."}</div> : null}
+            <button type="button" disabled={confirmation !== "DELETE" || removeAccount.isPending || ((user.aiUsage?.tokens ?? 0) > 0 && !forfeit)} onClick={() => removeAccount.mutate()} className="mt-3 w-full rounded-[8px] bg-[#f2575c] px-3 py-2 text-[11px] font-bold text-white disabled:opacity-35">{removeAccount.isPending ? "Deleting…" : "Permanently delete account"}</button>
+          </div> : null}
+          <nav className="mt-3 flex flex-wrap justify-center gap-3 text-[10px] text-[#6f6f78]"><Link to="/terms" onClick={onClose}>Terms</Link><Link to="/privacy" onClick={onClose}>Privacy</Link><Link to="/refunds" onClick={onClose}>Refunds</Link><Link to="/support" onClick={onClose}>Support</Link></nav>
           <button type="button" onClick={() => logout.mutate()} disabled={logout.isPending} className="mt-4 w-full rounded-[9px] border border-[#f2575c]/40 bg-[#f2575c]/10 px-4 py-2.5 text-[12px] font-bold text-[#f2575c] disabled:opacity-50">
             {logout.isPending ? "Signing out…" : "Sign out"}
           </button>
@@ -88,6 +117,7 @@ export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; o
 function GoogleSignIn({ onConnected }: { onConnected: (user: AuthUser) => void }) {
   const buttonRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState("");
+  const [accepted, setAccepted] = useState(false);
   const bootstrap = useQuery({ queryKey: ["google-auth-bootstrap"], queryFn: loadGoogleAuthBootstrap, staleTime: 0, retry: 0 });
   const login = useMutation({
     mutationFn: connectGoogleAccount,
@@ -108,7 +138,7 @@ function GoogleSignIn({ onConnected }: { onConnected: (user: AuthUser) => void }
         ux_mode: "popup",
         auto_select: false,
         callback: (response) => {
-          if (response.credential) login.mutate({ credential: response.credential, nonce: config.nonce! });
+          if (response.credential) login.mutate({ credential: response.credential, nonce: config.nonce!, acceptTerms: accepted, acceptPrivacy: accepted });
           else setError("Google did not return an account credential.");
         },
       });
@@ -128,7 +158,7 @@ function GoogleSignIn({ onConnected }: { onConnected: (user: AuthUser) => void }
       active = false;
       window.google?.accounts.id.cancel();
     };
-  }, [bootstrap.data, login.mutate]);
+  }, [accepted, bootstrap.data, login.mutate]);
 
   if (bootstrap.isLoading) return <div className="py-6 text-center text-[12px] text-[#8c8c95]">Preparing secure sign-in…</div>;
   if (bootstrap.isError) return <AuthError text="The authentication service is unavailable." />;
@@ -143,10 +173,11 @@ function GoogleSignIn({ onConnected }: { onConnected: (user: AuthUser) => void }
       </div>
       <h3 className="mt-3 text-[16px] font-extrabold text-[#ececee]">Sign in to AlphaWolf</h3>
       <p className="mx-auto mt-1.5 max-w-[330px] text-[12px] leading-[1.55] text-[#8c8c95]">Use your Google account to save identity and unlock account-based features.</p>
-      <div className="mt-5 flex min-h-11 justify-center" ref={buttonRef} />
+      <label className="mx-auto mt-4 flex max-w-[330px] items-start gap-2 text-left text-[10.5px] leading-[1.5] text-[#8c8c95]"><input type="checkbox" checked={accepted} onChange={(event) => setAccepted(event.target.checked)} className="mt-0.5" />I agree to the <Link className="text-[#74a4ff]" to="/terms">Terms</Link> and acknowledge the <Link className="text-[#74a4ff]" to="/privacy">Privacy Policy</Link>.</label>
+      <div className={`mt-4 flex min-h-11 justify-center ${accepted ? "" : "pointer-events-none opacity-35"}`} ref={buttonRef} />
       {login.isPending ? <div className="mt-3 text-[11.5px] text-[#3ecf8e]">Verifying your Google account…</div> : null}
       {error ? <div className="mt-3 text-[11.5px] text-[#f2575c]">{error}</div> : null}
-      <div className="mt-5 border-t border-[#2a2a31] pt-4 text-[10.5px] leading-[1.5] text-[#5a5a62]">AlphaWolf receives your Google account ID, name, email, and profile picture. Your Google password is never shared.</div>
+      <div className="mt-5 border-t border-[#2a2a31] pt-4 text-[10.5px] leading-[1.5] text-[#5a5a62]">AlphaWolf receives your Google account ID, name, email, and profile picture. Your Google password is never shared. AlphaWolf is a research-notes service and does not open a brokerage account.</div>
     </div>
   );
 }

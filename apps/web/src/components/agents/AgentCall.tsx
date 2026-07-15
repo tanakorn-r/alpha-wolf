@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import type { AgentBadge } from "../../lib/api";
+import type { AgentBadge, MarketDataTrust } from "../../lib/api";
+import { DataTrustBadge } from "../DataTrustBadge";
 import { Ring } from "../../lib/ring";
 import { PremiumAiButton } from "../PremiumAiButton";
 import { AgentCard } from "./AgentCard";
@@ -36,6 +37,7 @@ export function AgentCall({
   signoff,
   density = "default",
   bylineDetail,
+  dataTrust,
 }: {
   agent?: AgentBadge | null;
   label: string;
@@ -53,6 +55,7 @@ export function AgentCall({
   signoff?: string | false;
   density?: "default" | "compact";
   bylineDetail?: string;
+  dataTrust?: MarketDataTrust | null;
 }) {
   const color = accent ?? agent?.color ?? "#3ecf8e";
   const safeScore = typeof score === "number" ? Math.max(0, Math.min(100, score)) : null;
@@ -115,6 +118,8 @@ export function AgentCall({
       ) : null}
 
       {children}
+
+      {dataTrust !== undefined ? <DataTrustBadge trust={dataTrust} className="mt-4" /> : null}
 
       {meta || onRerun ? (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-3" style={{ borderColor: `${color}30` }}>

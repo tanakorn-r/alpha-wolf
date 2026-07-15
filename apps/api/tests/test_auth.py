@@ -51,12 +51,13 @@ class GoogleAuthTests(unittest.TestCase):
         with patch("routes.auth._verify_google_token", return_value=claims):
             login_response = Response()
             login = auth.google_login(
-                auth.GoogleCredential(credential="x" * 40, nonce=str(nonce)),
+                auth.GoogleCredential(credential="x" * 40, nonce=str(nonce), acceptTerms=True, acceptPrivacy=True),
                 _request(),
                 login_response,
             )
 
         self.assertEqual(login["user"]["googleSub"], "google-user-123")
+        self.assertTrue(login["user"]["legalAccepted"])
         set_cookie_headers = [value.decode() for key, value in login_response.raw_headers if key == b"set-cookie"]
         self.assertTrue(any("HttpOnly" in value for value in set_cookie_headers))
         session = _cookie_value(set_cookie_headers, auth.SESSION_COOKIE)
@@ -71,12 +72,21 @@ class GoogleAuthTests(unittest.TestCase):
         with patch("routes.auth._verify_google_token", return_value=claims):
             with self.assertRaises(HTTPException) as raised:
                 auth.google_login(
-                    auth.GoogleCredential(credential="x" * 40, nonce="expected" * 4),
+                    auth.GoogleCredential(credential="x" * 40, nonce="expected" * 4, acceptTerms=True, acceptPrivacy=True),
                     _request(),
                     Response(),
                 )
 
         self.assertEqual(raised.exception.status_code, 401)
+
+    def test_google_login_requires_terms_and_privacy_acceptance(self) -> None:
+        with self.assertRaises(HTTPException) as raised:
+            auth.google_login(
+                auth.GoogleCredential(credential="x" * 40, nonce="expected" * 4),
+                _request(),
+                Response(),
+            )
+        self.assertEqual(raised.exception.status_code, 400)
 
     def test_cloud_run_forwarded_https_uses_cross_site_secure_cookie(self) -> None:
         request = _request(headers={"x-forwarded-proto": "https"})

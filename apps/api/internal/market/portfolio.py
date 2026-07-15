@@ -7,6 +7,7 @@ from typing import Any
 import pandas as pd
 
 from internal.market.records import build_entry_from_info, fetch_record_from_ticker, merge_ticker_info
+from internal.market.data_trust import aggregate_data_trust, build_yahoo_data_trust
 from internal.fx import fx_payload
 from internal.store.portfolio import list_dca_orders, list_holdings, list_transactions
 from internal.store.utils import as_float, coerce_iso_date
@@ -74,6 +75,7 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
         live = list(pool.map(_load_holding_market_data, holdings))
 
     rows: list[dict[str, object]] = []
+    holding_trust: list[dict[str, Any]] = []
     invested_thb = 0.0
     securities_value_thb = 0.0
     dividends_ytd_thb = closed_dividends_ytd_thb
@@ -83,7 +85,8 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
     buy_markers: list[PortfolioMarker] = []
 
     for holding, data in zip(holdings, live, strict=True):
-        record, history, info, paid_dividends = data
+        record, history, info, paid_dividends, data_trust = data
+        holding_trust.append(data_trust)
         symbol_transactions = transactions_by_symbol.get(holding.symbol, [])
         currency = str(record.get("currency") or (_transaction_currency(symbol_transactions[0]) if symbol_transactions else ("THB" if holding.symbol.endswith(".BK") else "USD"))).upper()
         native_cost, _realized = _native_fifo_metrics(symbol_transactions)
@@ -100,7 +103,7 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
         closes = _close_series(history, since=purchase_date, current_price=float(record["price"]) if record.get("price") else None)
         if not closes.empty:
             histories.append((symbol_transactions, closes, currency))
-        rows.append({**holding.model_dump(), **record, "value": _transport_money(value_thb, thb_per_usd), "cost": _transport_money(cost_thb, thb_per_usd), "gainLoss": _transport_money(value_thb - cost_thb, thb_per_usd), "gainLossPct": round(((value_thb - cost_thb) / cost_thb) * 100, 2) if cost_thb else 0})
+        rows.append({**holding.model_dump(), **record, "dataTrust": data_trust, "value": _transport_money(value_thb, thb_per_usd), "cost": _transport_money(cost_thb, thb_per_usd), "gainLoss": _transport_money(value_thb - cost_thb, thb_per_usd), "gainLossPct": round(((value_thb - cost_thb) / cost_thb) * 100, 2) if cost_thb else 0})
         income_events.extend(_income_events(holding.symbol, holding.shares, info))
         for transaction in symbol_transactions:
             if transaction.kind == "BUY":
@@ -132,6 +135,7 @@ def build_portfolio_dashboard(user_id: int = 0) -> PortfolioDashboard:
         markers=buy_markers + [PortfolioMarker(date=item.scheduledFor, symbol=item.symbol, amount=item.amount) for item in orders],
         incomeEvents=sorted(income_events, key=lambda item: item.date),
         transactions=transactions,
+        dataTrust=aggregate_data_trust(holding_trust),
         **_dashboard_fx(fx),
     )
 
@@ -150,6 +154,21 @@ def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
         previous = as_float(info.get("regularMarketPreviousClose"))
         change_pct = ((price - previous) / previous * 100.0) if price and previous else 0.0
         meta = quote_snapshot_meta(holding.symbol)
+        record = {
+            "symbol": holding.symbol,
+            "price": price,
+            "currency": info.get("currency") or ("THB" if holding.symbol.endswith(".BK") else "USD"),
+            "regularMarketTime": info.get("regularMarketTime"),
+        }
+        trust = build_yahoo_data_trust(
+            holding.symbol,
+            stock=record,
+            business={},
+            history_period="1y",
+            include_news=False,
+            include_dividends=False,
+            check_fundamentals=False,
+        )
         return {
             "symbol": holding.symbol,
             "price": price,
@@ -157,6 +176,7 @@ def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
             "changePct": round(change_pct, 2),
             "fresh": meta["fresh"],
             "fetchedAt": meta["fetchedAt"],
+            "dataTrust": trust,
         }
 
     with ThreadPoolExecutor(max_workers=min(8, len(holdings))) as pool:
@@ -166,6 +186,7 @@ def build_portfolio_quotes(user_id: int = 0) -> dict[str, Any]:
         "quotes": quotes,
         "pending": any(not item.get("fresh") for item in quotes),
         "updatedAt": max(fresh_dates) if fresh_dates else None,
+        "dataTrust": aggregate_data_trust([item.get("dataTrust") for item in quotes]),
         **_quote_fx(fx),
     }
 
@@ -180,7 +201,23 @@ def _load_holding_market_data(holding):
     # Only count dividends whose ex-date fell on/after purchase — a position bought today has
     # not earned any dividend yet; it accrues once an ex-date passes while the stock is held.
     dividends = fetch_dividends(ticker, period="ytd")
-    return record, history, info, dividends
+    trust = build_yahoo_data_trust(
+        holding.symbol,
+        stock={**record, "regularMarketTime": info.get("regularMarketTime")},
+        business={
+            "marketCap": info.get("marketCap"),
+            "peRatio": info.get("trailingPE") or info.get("forwardPE"),
+            "priceToBook": info.get("priceToBook"),
+            "roe": info.get("returnOnEquity"),
+            "profitMargin": info.get("profitMargins"),
+            "revenueGrowth": info.get("revenueGrowth"),
+            "dividendYield": info.get("dividendYield"),
+            "debtToEquity": info.get("debtToEquity"),
+        },
+        history=history,
+        history_period="1y",
+    )
+    return record, history, info, dividends, trust
 
 
 def _first_buy_date(transactions: list[Any]) -> str | None:

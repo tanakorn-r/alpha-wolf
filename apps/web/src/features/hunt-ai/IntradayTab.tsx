@@ -133,6 +133,7 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
                 { label: "Take profit", value: moneyMaybe(analysis.targetPrice?.targetPrice, currency), color: "#3ecf8e" },
               ]}
               meta={`Cached ${formatAnalyzedAt(intraday.analyzedAt)} · delayed quote`}
+              dataTrust={analysis.dataTrust}
             />
           ) : (
             <div className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-5 text-center">

@@ -16,6 +16,7 @@ from internal.market.technicals import (
 )
 from internal.market.catalog import get_industry_peers
 from internal.market.company_structure import classify_company_structure
+from internal.market.data_trust import build_yahoo_data_trust
 from internal.store.cache import cache_compute_lock, cache_get, cache_set
 from internal.store.yahoo_cache import load_yahoo_data, save_yahoo_data
 from internal.store.universe_cache import load_market_universe
@@ -125,6 +126,13 @@ def _build_detail_bundle_uncached(
     verdict = build_verdict(stock, business, performance, peers, strategy, technicals, history=history, mode=selected_mode)
     outlook = build_outlook(business, performance, peers)
     dividend_pattern = build_dividend_dip_pattern(history, dividends)
+    data_trust = build_yahoo_data_trust(
+        symbol,
+        stock=stock,
+        business=business,
+        history=history,
+        history_period="5y",
+    )
 
     result = {
         "stock": stock,
@@ -140,6 +148,7 @@ def _build_detail_bundle_uncached(
         "strategy": strategy,
         "mode": selected_mode,
         "dividendPattern": dividend_pattern,
+        "dataTrust": data_trust,
         # True when this symbol has never been fetched from Yahoo yet (or the cache expired
         # and the background refresh hasn't landed): every numeric field above is a zero/empty
         # placeholder, not real data. The frontend must show a "still loading" state instead of
@@ -314,7 +323,8 @@ def get_market_comparison(symbol: str) -> dict[str, Any] | None:
     peer_candidates = candidates[:1]
     if not peer_candidates:
         return None
-    stock_series = _monthly_rebased(fetch_history(make_ticker(normalized), period="1y"))
+    stock_history = fetch_history(make_ticker(normalized), period="1y")
+    stock_series = _monthly_rebased(stock_history)
     benchmark_symbol, benchmark_name, benchmark_series = _best_benchmark_series(region)
     peer_series_values = [
         _monthly_rebased(fetch_history(make_ticker(str(item["symbol"])), period="1y"))
@@ -333,6 +343,16 @@ def get_market_comparison(symbol: str) -> dict[str, Any] | None:
         "benchmark": {"symbol": benchmark_symbol, "name": benchmark_name, "returnPct": round(points[-1]["benchmark"] - 100, 2)},
         "peer": {"symbol": peer["symbol"], "name": peer.get("name") or peer["symbol"], "returnPct": round(points[-1]["peer"] - 100, 2)},
         "points": points,
+        "dataTrust": build_yahoo_data_trust(
+            normalized,
+            stock=stock,
+            business={},
+            history=stock_history,
+            history_period="1y",
+            include_news=False,
+            include_dividends=False,
+            check_fundamentals=False,
+        ),
     }
     cache_set(MARKET_COMPARISON_CACHE_NAMESPACE, cache_key, result, DOMAIN_TTL_SECONDS)
     return result

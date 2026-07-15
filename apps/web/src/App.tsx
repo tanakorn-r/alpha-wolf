@@ -12,6 +12,7 @@ import { StockHuntPage } from "./pages/StockHuntPage";
 import { HuntAiPage } from "./pages/HuntAiPage";
 import { DividendHuntPage } from "./pages/DividendHuntPage";
 import { LiveTradePage } from "./pages/LiveTradePage";
+import { PrivacyPage, RefundPage, SupportPage, TermsPage } from "./pages/LegalPages";
 import { ensureMarketCatalog, loadAuthUser } from "./lib/api";
 
 const VISITED_STORAGE_KEY = "aw_visited_app";
@@ -91,6 +92,10 @@ export default function App() {
   useQuery({ queryKey: ["market-catalog"], queryFn: ensureMarketCatalog, staleTime: 86_400_000 });
   return (
     <Routes>
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
+      <Route path="/refunds" element={<RefundPage />} />
+      <Route path="/support" element={<SupportPage />} />
       <Route path="/" element={<HomeRoute />} />
       <Route element={<AppShell />}>
         <Route path="/daily-brief" element={<Navigate to="/hunt-ai?tab=brief" replace />} />

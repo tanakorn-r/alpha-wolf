@@ -47,7 +47,7 @@ function TickerHeader({ detail, loading, onRun, hasAnalysis }: { detail: StockDe
 function AgentRead({ analysis, onRerun }: { analysis: TechnicalAnalysisResponse; onRerun: () => void }) {
   const color = analysis.tone === "good" ? "#3ecf8e" : analysis.tone === "bad" ? "#ff5f68" : "#f5c451";
   return (
-    <AgentCall agent={analysis.agent} label="Chart read" score={analysis.confidence} scoreLabel="technical fit" signal={analysis.signal} headline={analysis.headline} summary={analysis.summary} accent={color} onRerun={onRerun} meta="Agent-weighted technical read · heuristic, not financial advice">
+    <AgentCall agent={analysis.agent} label="Chart read" score={analysis.confidence} scoreLabel="technical fit" signal={analysis.signal} headline={analysis.headline} summary={analysis.summary} accent={color} onRerun={onRerun} meta="Agent-weighted technical read · heuristic, not financial advice" dataTrust={analysis.dataTrust}>
       <div className="mt-4 grid gap-2 min-[760px]:grid-cols-5">
         {analysis.frameworks.map((item) => <div key={item.framework} className="rounded-[var(--aw-radius-control)] border border-[#29292f] bg-[#0e0e10] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-bold text-[#ececee]">{humanize(item.framework)}</span><div className="flex items-center gap-1.5"><FrameworkStance stance={item.stance} /><span className="text-[8px] font-bold" style={{ color: item.weight === "PRIMARY" ? color : item.weight === "CONFIRMATION" ? "#74a4ff" : "#6f6f78" }}>{item.weight}</span></div></div><div className="mt-2 text-[11px] font-semibold leading-[1.4]">{item.verdict}</div><div className="mt-1 text-[9.5px] leading-[1.45] text-[#777780]">{item.evidence}</div></div>)}
       </div>

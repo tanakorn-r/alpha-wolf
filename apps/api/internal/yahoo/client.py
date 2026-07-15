@@ -221,6 +221,7 @@ def build_quote_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
     fast = _safe_fast_info(t)
     last_price = fast.get("last_price")
     previous_close = fast.get("regular_market_previous_close") or fast.get("previous_close")
+    metadata = safe_dict(_safe_attr(t, "history_metadata", {}))
     price = {
         key: value for key, value in {
             "symbol": symbol,
@@ -229,6 +230,7 @@ def build_quote_modules(t: yf.Ticker, symbol: str) -> dict[str, Any]:
             "regularMarketPreviousClose": previous_close,
             "regularMarketVolume": fast.get("last_volume"),
             "marketCap": fast.get("market_cap"),
+            "regularMarketTime": metadata.get("regularMarketTime"),
         }.items() if value is not None
     }
     summary = {
@@ -287,7 +289,10 @@ def quote_snapshot_meta(symbol: str) -> dict[str, Any]:
     cached = load_yahoo_data(symbol.upper().strip(), "quote")
     return {
         "fresh": bool(cached and cached.is_fresh and isinstance(cached.payload, dict)),
+        "stale": bool(cached and not cached.is_fresh and isinstance(cached.payload, dict)),
+        "available": bool(cached and isinstance(cached.payload, dict)),
         "fetchedAt": cached.fetched_at.isoformat() if cached else None,
+        "expiresAt": cached.expires_at.isoformat() if cached else None,
     }
 
 

@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import { loadAgents, type AgentProfile } from "../../lib/api";
+import { lockBodyScroll } from "../../lib/bodyScrollLock";
+import { useDialogAccessibility } from "../../lib/useDialogAccessibility";
 
 type Props = {
   activeAgentId: string;
@@ -10,9 +12,12 @@ type Props = {
 };
 
 export function AgentPickerModal({ activeAgentId, onUse, onClose }: Props) {
+  const titleId = useId();
+  const dialogRef = useDialogAccessibility(onClose);
   const { data: agents = [], isLoading } = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
   const [profileId, setProfileId] = useState(activeAgentId);
   const profile = useMemo(() => agents.find((agent) => agent.id === profileId) ?? agents.find((agent) => agent.id === activeAgentId) ?? agents[0], [activeAgentId, agents, profileId]);
+  useEffect(() => lockBodyScroll(), []);
 
   function useAgent(agentId: string) {
     onUse(agentId);
@@ -21,11 +26,11 @@ export function AgentPickerModal({ activeAgentId, onUse, onClose }: Props) {
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[calc(0.75rem+env(safe-area-inset-top))] min-[720px]:items-center min-[720px]:p-4">
-      <div className="flex max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-[1080px] flex-col overflow-hidden rounded-t-[16px] border border-[#34343c] bg-[#111114] shadow-2xl min-[720px]:max-h-[calc(100dvh-32px)] min-[720px]:rounded-[14px]">
+      <div ref={dialogRef as React.Ref<HTMLDivElement>} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="flex max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-[1080px] flex-col overflow-hidden rounded-t-[16px] border border-[#34343c] bg-[#111114] shadow-2xl outline-none min-[720px]:max-h-[calc(100dvh-32px)] min-[720px]:rounded-[14px]">
         <div className="flex flex-none items-center justify-between border-b border-[#2a2a31] bg-[#161619] px-5 py-3.5">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5a5a62]">AlphaWolf</div>
-            <h2 className="mt-1 text-[18px] font-extrabold tracking-[-0.2px] text-[#ececee]">Choose your agent</h2>
+            <h2 id={titleId} className="mt-1 text-[18px] font-extrabold tracking-[-0.2px] text-[#ececee]">Choose your agent</h2>
           </div>
           <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-[8px] border border-[#2a2a31] bg-[#0e0e10] text-[18px] leading-none text-[#8c8c95] hover:border-[#5a5a62] hover:text-[#ececee]" aria-label="Close agent picker">
             ×

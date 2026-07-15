@@ -14,7 +14,49 @@ export type AuthUser = {
   proActive?: boolean;
   plan?: "free" | "pro";
   aiUsage?: { used: number; tokens: number; remaining: number };
+  legalAccepted?: boolean;
+  legalAcceptedAt?: string | null;
+  termsVersion?: string;
+  privacyVersion?: string;
 };
+
+export type AiDecisionHistoryItem = {
+  runId: string;
+  feature: string;
+  subject: string;
+  agentId: string;
+  model: string;
+  promptVersion: string;
+  sourceTimestamps: Record<string, unknown>;
+  decision: { action: string; stateId: string; ownership?: string | null; timing?: string | null; headline?: string | null; summary?: string | null };
+  status: string;
+  error?: string | null;
+  createdAt: string;
+  whyChanged: string;
+};
+
+export async function loadAiDecisionHistory(subject: string, agent: string): Promise<AiDecisionHistoryItem[]> {
+  if (!subject) return [];
+  const query = new URLSearchParams({ subject, agent, limit: "20" });
+  const response = await fetch(`${API_BASE}/ai/decision-history?${query}`, { credentials: "include" });
+  if (response.status === 401) return [];
+  if (!response.ok) throw new Error(`Could not load decision history (${response.status})`);
+  return ((await response.json()) as { items: AiDecisionHistoryItem[] }).items;
+}
+
+export type AppNotification = { id: number; kind: string; subject: string; title: string; message: string; readAt?: string | null; createdAt: string };
+
+export async function loadNotifications(): Promise<{ items: AppNotification[]; unread: number }> {
+  const response = await fetch(`${API_BASE}/notifications`, { credentials: "include" });
+  if (response.status === 401) return { items: [], unread: 0 };
+  if (!response.ok) throw new Error(`Could not load notifications (${response.status})`);
+  return response.json();
+}
+
+export async function markNotificationRead(id: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/notifications/${id}/read`, { method: "POST", credentials: "include" });
+  if (!response.ok) throw new Error(`Could not update notification (${response.status})`);
+}
 
 export async function loadAuthUser(): Promise<AuthUser | null> {
   const response = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
@@ -78,16 +120,55 @@ export async function loadGoogleAuthBootstrap(): Promise<{ configured: boolean; 
   return (await response.json()) as { configured: boolean; clientId?: string | null; nonce?: string | null };
 }
 
-export async function connectGoogleAccount({ credential, nonce }: { credential: string; nonce: string }): Promise<AuthUser> {
+export async function connectGoogleAccount({ credential, nonce, acceptTerms, acceptPrivacy }: { credential: string; nonce: string; acceptTerms: boolean; acceptPrivacy: boolean }): Promise<AuthUser> {
   const response = await fetch(`${API_BASE}/auth/google`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ credential, nonce }),
+    body: JSON.stringify({ credential, nonce, acceptTerms, acceptPrivacy }),
   });
   if (!response.ok) throw new Error(`Google sign-in failed: ${response.status}`);
   const payload = (await response.json()) as { user: AuthUser };
   return payload.user;
+}
+
+export async function acceptCurrentLegal(): Promise<AuthUser> {
+  const response = await fetch(`${API_BASE}/auth/legal/accept`, { method: "POST", credentials: "include" });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Could not accept account terms (${response.status})`));
+  return ((await response.json()) as { user: AuthUser }).user;
+}
+
+export async function downloadAccountExport(): Promise<void> {
+  const response = await fetch(`${API_BASE}/auth/account/export`, { credentials: "include" });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Could not export account (${response.status})`));
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "alphawolf-account-export.json";
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function deleteAccount(value: { confirmation: string; acknowledgeCreditForfeiture: boolean }): Promise<void> {
+  const response = await fetch(`${API_BASE}/auth/account`, {
+    method: "DELETE",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(value),
+  });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Could not delete account (${response.status})`));
+}
+
+export async function submitSupportRequest(value: { email: string; category: "support" | "account" | "privacy" | "refund" | "bug"; subject: string; message: string }): Promise<{ requestId: number; message: string }> {
+  const response = await fetch(`${API_BASE}/support`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...value, website: "" }),
+  });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Could not submit support request (${response.status})`));
+  return (await response.json()) as { requestId: number; message: string };
 }
 
 export async function disconnectAccount(): Promise<void> {
@@ -157,11 +238,50 @@ export type StockNewsItem = {
   summary?: string;
 };
 
+export type MarketDataTrust = {
+  provider: string;
+  transport?: string;
+  symbol?: string;
+  marketTimestamp?: string | null;
+  marketTimestampSource?: string | null;
+  fetchedAt?: string | null;
+  status: "delayed" | "stale" | "partial" | "unavailable";
+  stale: boolean;
+  delayed: boolean;
+  fallback: { used: boolean; source?: string | null; reason?: string | null };
+  missingFields: string[];
+  datasets?: Array<{ name: string; provider: string; available: boolean; fetchedAt?: string | null; expiresAt?: string | null; stale: boolean }>;
+  policy?: { primary: string; fallback: string; rules: string[]; cacheWindows?: Record<string, string> };
+};
+
+export type CanonicalDecisionState = {
+  id: string;
+  symbol: string;
+  evidenceAsOf?: string | null;
+  ownership: "PARTICIPATE" | "WATCH" | "AVOID" | "EXIT";
+  timing: "BUY" | "BUILDING" | "BREAKOUT" | "WAIT" | "CHASE" | "TRIM" | "SELL";
+  price?: number | null;
+  support?: number | null;
+  resistance?: number | null;
+  volumeRatio?: number | null;
+  sectorEvidence?: { archetype: string; required: string[]; available: string[]; missing: string[]; missingMeansUnknown: boolean };
+};
+
+export type AIProductionMetadata = {
+  decisionState?: CanonicalDecisionState | null;
+  guardedDecision?: { stateId?: string | null; ownership?: string | null; timing?: string | null; feature: string; agentId: string; guardedAt: string } | null;
+  qualityChecks?: Array<Record<string, unknown>>;
+  promptVersion?: string | null;
+  runId?: string | null;
+};
+
 export type StockDetailResponse = {
   // True on a fresh cache miss: the backend fetches yfinance data in the background and
   // returns immediately rather than blocking, so every numeric field below is a zero/empty
   // placeholder until the next request after the refresh lands — never format these as real.
   dataPending?: boolean;
+  dataTrust?: MarketDataTrust | null;
+  decisionState?: CanonicalDecisionState | null;
   stock: StockRecord;
   history: Array<{
     date: string;
@@ -306,7 +426,8 @@ export type StockAnalysisEntryPrice = {
   why: string;
 };
 
-export type StockAnalysisResponse = {
+export type StockAnalysisResponse = AIProductionMetadata & {
+  dataTrust?: MarketDataTrust | null;
   signal: string;
   headline: string;
   tone: "good" | "warn" | "bad";
@@ -350,7 +471,7 @@ export type StockAnalysisResponse = {
   agentFitReason?: string | null;
 };
 
-export type AnalystBriefResponse = {
+export type AnalystBriefResponse = AIProductionMetadata & {
   signal: string;
   headline: string;
   tone: "good" | "warn" | "bad";
@@ -414,6 +535,7 @@ export type StrategyPick = {
 };
 
 export type StrategyPlaybookResponse = {
+  dataTrust?: MarketDataTrust | null;
   strategy: string;
   headline: string;
   marketRead: string;
@@ -434,7 +556,8 @@ export type QuantPerspectiveCheck = {
   insight: string;
 };
 
-export type QuantPerspectiveResponse = {
+export type QuantPerspectiveResponse = AIProductionMetadata & {
+  dataTrust?: MarketDataTrust | null;
   signal: string;
   tone: "good" | "warn" | "bad";
   buyScore: number;
@@ -457,7 +580,8 @@ export type QuantPerspectiveResponse = {
   agentFitReason?: string | null;
 };
 
-export type ValuationVerdictResponse = {
+export type ValuationVerdictResponse = AIProductionMetadata & {
+  dataTrust?: MarketDataTrust | null;
   symbol: string;
   name: string;
   currency: string;
@@ -514,7 +638,8 @@ export type ValuationVerdictResponse = {
   agentFitReason?: string | null;
 };
 
-export type TodayPerformanceResponse = {
+export type TodayPerformanceResponse = AIProductionMetadata & {
+  dataTrust?: MarketDataTrust | null;
   signal: string;
   tone: "good" | "warn" | "bad";
   buyScore: number;
@@ -543,7 +668,8 @@ export type TodayPerformanceResponse = {
   generatedAt?: string | null;
 };
 
-export type TechnicalAnalysisResponse = {
+export type TechnicalAnalysisResponse = AIProductionMetadata & {
+  dataTrust?: MarketDataTrust | null;
   symbol: string;
   signal: "BUY" | "HOLD" | "WAIT" | "TRIM" | "SELL";
   tone: "good" | "warn" | "bad";
@@ -646,6 +772,7 @@ async function backtradeApiError(response: Response, fallback: string) {
 }
 
 export type PortfolioReviewResponse = {
+  dataTrust?: MarketDataTrust | null;
   score: number;
   verdict: string;
   intro: string;
@@ -715,16 +842,18 @@ export type PortfolioDashboard = {
   fxSource?: string | null;
   fxStale: boolean;
   reportingCurrency: string;
+  dataTrust?: MarketDataTrust | null;
 };
 
 export type PortfolioQuotesResponse = {
-  quotes: Array<{ symbol: string; price?: number | null; currency?: string | null; changePct: number; fresh: boolean; fetchedAt?: string | null }>;
+  quotes: Array<{ symbol: string; price?: number | null; currency?: string | null; changePct: number; fresh: boolean; fetchedAt?: string | null; dataTrust?: MarketDataTrust | null }>;
   pending: boolean;
   updatedAt?: string | null;
   fxRates: Record<string, number>;
   fxFetchedAt?: string | null;
   fxSource?: string | null;
   fxStale: boolean;
+  dataTrust?: MarketDataTrust | null;
 };
 
 export type FxRatesResponse = {
@@ -768,6 +897,7 @@ export type MarketComparisonResponse = {
   benchmark: { symbol: string; name: string; returnPct: number };
   peer: { symbol: string; name: string; returnPct: number };
   points: Array<{ date: string; stock: number; benchmark: number; peer: number }>;
+  dataTrust?: MarketDataTrust | null;
 };
 
 export type PaginatedStocksResponse = {
@@ -916,6 +1046,7 @@ export type HistoricalMove = {
 };
 
 export type UpwardMovesResponse = {
+  dataTrust?: MarketDataTrust | null;
   symbol: string;
   timeframe: "1D" | "1W";
   currentPrice: number;
@@ -997,7 +1128,8 @@ export type DeepAnalysisResponse = {
   generatedAt: string;
 };
 
-export type BuyTimingResponse = {
+export type BuyTimingResponse = AIProductionMetadata & {
+  dataTrust?: MarketDataTrust | null;
   symbol: string;
   name: string;
   currency: string;
@@ -1087,7 +1219,7 @@ export type BuyTimingResponse = {
   monthlyMap?: Array<{ month: string; score: number; action: "BUY" | "TRIM" | "HOLD"; returnPct: number; currentYearReturnPct?: number | null; isExMonth: boolean; isCurrent: boolean; note: string }>;
   agentMonthlyPlan?: Array<{ month: string; score: number; action: "BUY" | "ADD_SMALL" | "HOLD" | "TRIM" | "SELL"; buyBudgetPct: number; trimPositionPct: number; calculatedAction: "BUY" | "TRIM" | "HOLD"; returnPct: number; currentYearReturnPct?: number | null; isExMonth: boolean; isCurrent: boolean; note: string; reason: string }> | null;
   monthlyHistory?: Array<{ date: string; month: string; close: number }>;
-  backtest?: { years: number; observedMonths: number; investedMonths: number; skippedMonths: number; monthlyContribution: number; totalContributed: number; endingValue: number; endingCash: number; endingStockValue: number; profitLoss: number; alwaysBuyEndingValue: number; strategyReturnPct: number; alwaysBuyReturnPct: number; strategyMoneyWeightedReturnPct?: number | null; alwaysBuyMoneyWeightedReturnPct?: number | null; exposureNormalizedReturnPct?: number | null; matchedExposureBenchmarkReturnPct?: number | null; strategyReturnWithoutDividendsPct: number; alwaysBuyReturnWithoutDividendsPct: number; strategyDividendReturnBoostPct: number; alwaysBuyDividendReturnBoostPct: number; edgePct: number; strategyMaxDrawdownPct: number; alwaysBuyMaxDrawdownPct: number; averageStockExposurePct: number; agentDividendsReceived: number; agentDividendsReinvested?: number; alwaysBuyDividendsReinvested: number; battlefield?: { kind: "OWNER_COMPOUNDING" | "TACTICAL_SWING" | "RISK_EFFICIENCY" | "HYBRID_ALLOCATION"; label: string; objective: string; verdict: "WIN" | "MATCH" | "LOSS"; primaryMetricLabel: string; primaryValue: number | null; benchmarkLabel: string; benchmarkValue: number; edgeValue: number | null; unit: "percent" | "ratio"; explanation: string; expectedTailwind: boolean }; method: string; inSample: boolean; ledger: Array<{ date: string; month: string; action: string; buyBudgetPct: number; trimPositionPct: number; dividendIncome: number; contributed: number; cash: number; stockValue: number; accountValue: number; profitLoss: number }> } | null;
+  backtest?: { years: number; observedMonths: number; investedMonths: number; skippedMonths: number; monthlyContribution: number; totalContributed: number; endingValue: number; endingCash: number; endingStockValue: number; profitLoss: number; alwaysBuyEndingValue: number; strategyReturnPct: number; alwaysBuyReturnPct: number; strategyMoneyWeightedReturnPct?: number | null; alwaysBuyMoneyWeightedReturnPct?: number | null; exposureNormalizedReturnPct?: number | null; matchedExposureBenchmarkReturnPct?: number | null; strategyReturnWithoutDividendsPct: number; alwaysBuyReturnWithoutDividendsPct: number; strategyDividendReturnBoostPct: number; alwaysBuyDividendReturnBoostPct: number; edgePct: number; strategyMaxDrawdownPct: number; alwaysBuyMaxDrawdownPct: number; averageStockExposurePct: number; agentDividendsReceived: number; agentDividendsReinvested?: number; alwaysBuyDividendsReinvested: number; battlefield?: { kind: "OWNER_COMPOUNDING" | "TACTICAL_SWING" | "RISK_EFFICIENCY" | "HYBRID_ALLOCATION"; label: string; objective: string; verdict: "WIN" | "MATCH" | "LOSS"; primaryMetricLabel: string; primaryValue: number | null; benchmarkLabel: string; benchmarkValue: number; edgeValue: number | null; unit: "percent" | "ratio"; explanation: string; expectedTailwind: boolean }; method: string; inSample: boolean; historicalClaimEligible?: boolean; validation?: { status: "NOT_VALIDATED" | "VALIDATED" | "INSUFFICIENT_DATA"; method: string; reason: string; observations?: number; edgePct?: number | null }; ledger: Array<{ date: string; month: string; action: string; buyBudgetPct: number; trimPositionPct: number; dividendIncome: number; contributed: number; cash: number; stockValue: number; accountValue: number; profitLoss: number }> } | null;
   events: Array<{ exDate: string; amount?: number | null; dipPct: number; recoverySessions?: number | null }>;
   technicalContext?: {
     signal?: string | null;

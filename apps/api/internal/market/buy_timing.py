@@ -193,6 +193,7 @@ def build_buy_timing(symbol: str, strategy: StrategyKey = "stable_dca", force_re
             "news": (detail.get("news") or [])[:5],
         },
         "dataPending": bool(not current_price or history.empty),
+        "dataTrust": detail.get("dataTrust"),
     }
     cache_set(
         BUY_TIMING_CACHE_NAMESPACE,
@@ -789,6 +790,15 @@ def _backtest_monthly_plan(history: Any, plan: Any, agent_id: str | None = None)
             "close. Held shares revalue at actual unadjusted month-end closes."
         ),
         "inSample": True,
+        "historicalClaimEligible": False,
+        "validation": {
+            "status": "NOT_VALIDATED",
+            "method": "walk-forward / out-of-sample required",
+            "reason": (
+                "This plan was generated after the displayed history was known. Its replay is an "
+                "in-sample diagnostic and cannot support a performance or skill claim."
+            ),
+        },
     }
 
 

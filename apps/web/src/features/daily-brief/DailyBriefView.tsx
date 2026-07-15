@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { AgentCall } from "../../components/agents/AgentCall";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
+import { DataTrustBadge } from "../../components/DataTrustBadge";
 import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ErrorCard, LoadingPanel, RetryPanel } from "../../components/ui/panels";
 import { PillTabs } from "../../components/ui/PillTabs";
@@ -25,7 +26,7 @@ const filters: Array<{ key: BriefFilter; label: string }> = [
 ];
 
 export function DailyBriefView({ brief }: { brief: DailyBrief }) {
-  if (brief.loading) return <LoadingPanel title="Building your Daily Brief..." body="Reading your holdings, live detail cards, and dividend calendar." />;
+  if (brief.loading) return <LoadingPanel title="Building your Daily Brief..." body="Reading your holdings, stored market snapshots, and dividend calendar." />;
   if (brief.failed) return <RetryPanel label="Daily Brief could not load your portfolio." onRetry={brief.retry} />;
 
   return (
@@ -35,6 +36,7 @@ export function DailyBriefView({ brief }: { brief: DailyBrief }) {
         <h2 className="mt-1 text-lg font-semibold">{brief.rows.length ? triageHeadline(brief) : "Add holdings to get a daily read"}</h2>
         <p className="mt-1 max-w-[560px] text-sm text-[#8c8c95]">{brief.summary}</p>
       </section>
+      {brief.rows.length ? <DataTrustBadge trust={brief.dataTrust} /> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <PillTabs
@@ -182,7 +184,7 @@ function TodayPanel({ data }: { data: TodayPerformanceResponse }) {
   const color = toneColor(data.tone);
   const alignment = data.horizonAlignment;
   return (
-    <AgentCall agent={data.agent} label="Today's plan" score={data.buyScore} scoreLabel="plan fit" signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Today only · generated on request · not financial advice">
+    <AgentCall agent={data.agent} label="Today's plan" score={data.buyScore} scoreLabel="plan fit" signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Today only · generated on request · not financial advice" dataTrust={data.dataTrust}>
       <div className="mt-4 grid gap-2.5 min-[760px]:grid-cols-[0.8fr_1.2fr]">
         <div className="rounded-[10px] border bg-[#0e0e10] p-3.5" style={{ borderColor: `${holdingActionColor(data.holdingAction)}55` }}>
           <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Do this today</div>

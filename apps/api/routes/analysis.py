@@ -13,13 +13,16 @@ from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import normalize_agent_id
 from internal.ai.access import claim_ai_run, release_ai_run, require_ai_account
 from internal.ai.context import build_analysis_context, build_technical_context, build_today_context
+from internal.ai.production_gate import attach_run_context, build_decision_state
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_brief_with_openai, analyze_quant_with_openai, analyze_technicals_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
 from internal.market.detail import build_detail_bundle, get_ai_financials, get_domain_insights, get_market_comparison
+from internal.market.data_trust import build_universe_data_trust
 from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
 from internal.market.universe import build_market_page
 from internal.store.cache import cache_get, cache_set
 from internal.store.ai_results import AIResultKey, AIResultQualityError, load_ai_result, load_latest_ai_result, save_ai_result
+from internal.store.ai_audit import list_ai_decision_history, record_ai_failure
 from internal.store.db import connect
 from internal.store.portfolio import list_holdings
 from internal.store.utils import as_float
@@ -42,6 +45,17 @@ SAVED_AI_FEATURES = {
     "buy-timing",
     "next-10",
 }
+
+
+@router.get("/api/ai/decision-history")
+def ai_decision_history(
+    request: Request,
+    subject: str = Query(...),
+    agent: str = Query("vera"),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    user_id, _ = require_ai_account(request)
+    return {"items": list_ai_decision_history(user_id, subject.strip().upper(), normalize_agent_id(agent), limit)}
 
 _LEGACY_AI_MARKERS = {
     "stock-analysis": ":v29-prime-hybrid-council:",
@@ -133,10 +147,14 @@ def _publish_ai_result(
     result: dict[str, Any],
     previous: dict[str, Any] | None,
     usage_user_id: int | None,
+    *,
+    context: dict[str, Any] | None = None,
+    data_trust: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Never let a failed quality gate erase the account's last known good answer."""
     try:
-        return save_ai_result(key, result)
+        audited = attach_run_context(result, feature=key.feature, context=context, data_trust=data_trust)
+        return save_ai_result(key, audited)
     except Exception as exc:
         release_ai_run(usage_user_id)
         if previous is not None:
@@ -296,17 +314,19 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
         position_context=position_context,
         agent_id=agent_id,
     )
+    context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
 
     usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_with_openai(context, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    result = _publish_ai_result(result_key, result, cached, usage_user_id)
+    result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -365,11 +385,13 @@ def analyst_report(
         position_context=position_context,
         agent_id=agent_id,
     )
+    context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     openai_started_at = time.monotonic()
     try:
         result = analyze_brief_with_openai(context, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached_analysis is not None:
             # A failed explicit refresh must never erase a previously saved report. Return the
@@ -384,7 +406,7 @@ def analyst_report(
     finally:
         print(f"Analyst OpenAI timing {normalized}: {time.monotonic() - openai_started_at:.3f}s")
 
-    result = _publish_ai_result(result_key, result, cached_analysis, usage_user_id)
+    result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached_analysis, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     cache_set("analysis", cache_key, result, ANALYST_REPORT_TTL_SECONDS)
     return {"status": "ready", "detail": bundle, "analysis": result}
 
@@ -423,17 +445,19 @@ def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
         domain_insights=insights_data,
         agent_id=agent_id,
     )
+    context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
 
     usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_quant_with_openai(context, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    result = _publish_ai_result(result_key, result, cached, usage_user_id)
+    result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -468,11 +492,13 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
         domain_insights=insights_data,
         agent_id=agent_id,
     )
+    context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
 
     usage_user_id, _ = claim_ai_run(request)
     try:
         result = analyze_valuation_with_openai(context, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
@@ -492,7 +518,7 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
         },
     }
     result = _align_tactical_valuation_state(result, agent_id)
-    result = _publish_ai_result(result_key, result, cached, usage_user_id)
+    result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -600,17 +626,19 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
         domain_insights=insights_data,
         agent_id=agent_id,
     )
+    context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
 
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = analyze_today_with_openai(context, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    result = _publish_ai_result(result_key, result, cached, usage_user_id)
+    result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -635,15 +663,17 @@ def technical_analysis(symbol: str, request: Request, agent: str = Query("vera")
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
     _require_ai_market_data(bundle, normalized)
     context = build_technical_context(bundle, position_context=position_context)
+    context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = {**analyze_technicals_with_openai(context, agent_id), "symbol": normalized}
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
-    result = _publish_ai_result(result_key, result, cached, usage_user_id)
+    result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     cache_set("analysis", cache_key, result, ANALYST_REPORT_TTL_SECONDS)
     return result
 
@@ -785,13 +815,15 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
     try:
         result = recommend_strategy_with_openai(context, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=build_universe_data_trust(payload.region, candidates), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     result = _filter_strategy_picks(result, candidates, payload.limit, strategy_prompt)
-    result = _publish_ai_result(result_key, result, cached, usage_user_id)
+    strategy_trust = build_universe_data_trust(payload.region, candidates)
+    result = _publish_ai_result(result_key, {**result, "dataTrust": strategy_trust}, cached, usage_user_id, context=context, data_trust=strategy_trust)
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 
@@ -803,6 +835,7 @@ def portfolio_review(request: Request, agent: str = Query("vera"), force: bool =
     user_id = user_id_from_request(request)
     account_scope = account_cache_scope(user_id)
     portfolio = build_portfolio_dashboard(user_id)
+    portfolio_data = portfolio.model_dump() if hasattr(portfolio, "model_dump") else dict(portfolio or {})
     context = _portfolio_review_context(portfolio)
     cache_digest = hashlib.sha256(
         f"{account_scope}:{agent_id}:{context.get('totalValue')}:{context.get('gainLossPct')}:{context.get('forwardYield')}:{','.join(item.get('symbol', '') for item in context.get('holdings', []))}".encode("utf-8")
@@ -820,12 +853,13 @@ def portfolio_review(request: Request, agent: str = Query("vera"), force: bool =
     try:
         result = review_portfolio_with_openai({"portfolioContext": context}, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context={"portfolioContext": context}, data_trust=portfolio_data.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    result = _publish_ai_result(result_key, result, cached, usage_user_id)
+    result = _publish_ai_result(result_key, {**result, "dataTrust": portfolio_data.get("dataTrust")}, cached, usage_user_id, context={"portfolioContext": context}, data_trust=portfolio_data.get("dataTrust"))
     cache_set("analysis", cache_key, result, DETAIL_TTL_SECONDS)
     return result
 

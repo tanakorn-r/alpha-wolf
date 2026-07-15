@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { GoogleAccountModal } from "../../components/auth/GoogleAccount";
+import { Modal } from "../../components/ui/Modal";
 
 export function ProPromoBanner({
   open,
@@ -19,10 +20,9 @@ export function ProPromoBanner({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 backdrop-blur-[3px]" role="dialog" aria-modal="true" aria-label="Start free Pro trial">
-        <div className="relative w-full max-w-[520px] rounded-[18px] bg-[linear-gradient(135deg,#3ecf8e,#4d96ff,#c77dff)] p-[2px] shadow-[0_30px_100px_rgba(0,0,0,0.7)]">
+      <Modal title="Start free Pro trial" onClose={onClose}>
+        <div className="relative -m-5 w-[calc(100%+2.5rem)] bg-[linear-gradient(135deg,#3ecf8e,#4d96ff,#c77dff)] p-[2px]">
           <div className="rounded-[16px] bg-[#101013] px-6 py-6 sm:px-8">
-            <button type="button" onClick={onClose} aria-label="Close" className="absolute right-4 top-4 grid h-8 w-8 place-items-center rounded-[7px] text-lg text-[#6f6f78] hover:bg-white/[0.05] hover:text-[#ececee]">×</button>
             <div className="mx-auto grid h-12 w-12 place-items-center rounded-[13px] border border-[#3ecf8e]/30 bg-[#3ecf8e]/10 text-[#3ecf8e]">
               <svg width="24" height="24" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M4.5 6.5 8 3l3.5 3.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" /></svg>
             </div>
@@ -47,7 +47,7 @@ export function ProPromoBanner({
             <div className="mt-2 text-center text-[10px] text-[#5a5a62]">One trial per account · token balances are enforced server-side</div>
           </div>
         </div>
-      </div>
+      </Modal>
       {signInOpen ? <GoogleAccountModal user={null} onClose={() => setSignInOpen(false)} /> : null}
     </>
   );

@@ -11,11 +11,13 @@
     "build": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx run-many --target=build --projects=api,web --parallel=2",
     "dev:web": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve web",
     "dev:api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve api",
+    "dev:replay-worker": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx run api:worker",
     "dev:go-api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve go-api",
     "build:web": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build web",
     "build:web:static": "vite build apps/web --outDir ../../dist/apps/web --emptyOutDir",
     "build:api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build api",
-    "format": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx format:write"
+    "format": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx format:write",
+    "security:scan": "python3 -m pip_audit -r apps/api/requirements.txt && npm audit --omit=dev --audit-level=high"
   },
   "devDependencies": {
     "@nx/react": "^19.6.4",

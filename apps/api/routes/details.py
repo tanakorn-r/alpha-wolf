@@ -9,15 +9,18 @@ from fastapi.responses import JSONResponse
 from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import agent_badge, normalize_agent_id
 from internal.ai.context import build_analysis_context
+from internal.ai.production_gate import attach_run_context, build_decision_state
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_buy_timing_with_openai, predict_technical_moves_with_openai
 from internal.ai.access import claim_ai_run, release_ai_run, require_ai_account
 from internal.market.deep import deep_analysis
 from internal.market.buy_timing import apply_ai_narrative, build_agent_evidence, build_buy_timing
 from internal.market.detail import build_detail_bundle, get_domain_insights, get_financials, get_market_comparison
+from internal.market.data_trust import YAHOO_PROVIDER_POLICY
 from internal.market.patterns import signed_moves_from_points
 from internal.market.scoring import StrategyKey
 from internal.store.cache import cache_compute_lock, cache_get, cache_set
 from internal.store.ai_results import AIResultKey, AIResultQualityError, load_ai_result, save_ai_result
+from internal.store.ai_audit import record_ai_failure
 from models import MarketComparison, TechnicalMovesPredictionResponse
 
 router = APIRouter()
@@ -30,9 +33,13 @@ def _publish_ai_result(
     result: dict[str, Any],
     previous: dict[str, Any] | None,
     usage_user_id: int | None,
+    *,
+    context: dict[str, Any] | None = None,
+    data_trust: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
-        return save_ai_result(key, result)
+        audited = attach_run_context(result, feature=key.feature, context=context, data_trust=data_trust)
+        return save_ai_result(key, audited)
     except Exception as exc:
         release_ai_run(usage_user_id)
         if previous is not None:
@@ -103,7 +110,28 @@ def _compact_daily_detail(bundle: dict[str, Any]) -> dict[str, Any]:
         },
         "history": (bundle.get("history") or [])[-56:],
         "news": (bundle.get("news") or [])[:1],
+        "dataTrust": bundle.get("dataTrust"),
+        "decisionState": _bundle_decision_state(bundle),
         "dataPending": bool(bundle.get("dataPending")),
+    }
+
+
+def _bundle_decision_state(bundle: dict[str, Any]) -> dict[str, Any]:
+    return build_decision_state({
+        "stock": bundle.get("stock") or {},
+        "business": bundle.get("business") or {},
+        "technicals": bundle.get("technicals") or {},
+        "companyStructureProfile": bundle.get("companyStructure") or {},
+    }, data_trust=bundle.get("dataTrust"))
+
+
+@router.get("/api/market/data-policy")
+def market_data_policy() -> dict[str, Any]:
+    return {
+        "provider": "Yahoo Finance",
+        "transport": "yfinance",
+        "delayed": True,
+        "policy": YAHOO_PROVIDER_POLICY,
     }
 
 
@@ -117,7 +145,7 @@ def details(
     bundle = build_detail_bundle(normalized, strategy, mode=mode)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
-    return bundle
+    return {**bundle, "decisionState": _bundle_decision_state(bundle)}
 
 
 @router.get("/api/details/{symbol}/financials")
@@ -204,9 +232,18 @@ def details_buy_timing(
             agent_evidence = build_agent_evidence(result, agent_id)
             agent_result = {key: value for key, value in result.items() if key != "_sourceSnapshots"}
             agent_result["agentEvidence"] = agent_evidence
+            snapshots = result.get("_sourceSnapshots") if isinstance(result.get("_sourceSnapshots"), dict) else {}
+            agent_result["canonicalDecisionState"] = build_decision_state({
+                "stock": {"symbol": result.get("symbol"), "price": result.get("price"), "currency": result.get("currency")},
+                "business": snapshots.get("business") or {},
+                "technicals": snapshots.get("technicals") or result.get("technicalContext") or {},
+                "businessStructure": result.get("businessStructure") or {},
+                "companyStructureProfile": result.get("companyStructureProfile") or {},
+            }, data_trust=result.get("dataTrust"))
             narrative = analyze_buy_timing_with_openai({"buyTiming": agent_result}, agent_id)
             response = {**apply_ai_narrative(agent_result, narrative), "agent": agent_badge(agent_id)}
         except (OpenAIAnalysisError, AIResultQualityError, KeyError, TypeError, ValueError) as exc:
+            record_ai_failure(key=result_key, context={"buyTiming": agent_result if "agent_result" in locals() else result}, data_trust=result.get("dataTrust"), error=exc)
             release_ai_run(usage_user_id)
             print(f"Warning: Buy Timing Agent plan failed for {normalized}/{agent_id}: {exc}")
             if cached is not None:
@@ -216,7 +253,7 @@ def details_buy_timing(
                 status_code=503,
                 detail="The Agent response was incomplete. Please retry Buy Timing.",
             ) from exc
-        response = _publish_ai_result(result_key, response, cached, usage_user_id)
+        response = _publish_ai_result(result_key, response, cached, usage_user_id, context={"buyTiming": agent_result}, data_trust=result.get("dataTrust"))
         cache_set("analysis", ai_cache_key, response, UPWARD_MOVES_TTL_SECONDS)
         return response
 
@@ -265,11 +302,13 @@ def details_upward_moves(
         "currentPrice": historical.get("currentPrice"),
     }
     context["historicalMoveDistribution"] = historical
+    context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
 
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
         result = predict_technical_moves_with_openai(context, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
@@ -277,6 +316,7 @@ def details_upward_moves(
 
     result["history"] = historical.get("history", [])
     result["historicalMoves"] = historical.get("moves", [])[:10]
-    result = _publish_ai_result(result_key, result, cached, usage_user_id)
+    result["dataTrust"] = bundle.get("dataTrust")
+    result = _publish_ai_result(result_key, result, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     cache_set("analysis", cache_key, result, UPWARD_MOVES_TTL_SECONDS)
     return result

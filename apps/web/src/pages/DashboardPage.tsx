@@ -13,6 +13,7 @@ import { SellModal } from "../features/dashboard/SellModal";
 import { StatsRow } from "../features/dashboard/StatsRow";
 import { TransactionHistory } from "../features/dashboard/TransactionHistory";
 import { useDashboard } from "../features/dashboard/useDashboard";
+import { DataTrustBadge } from "../components/DataTrustBadge";
 
 export function DashboardPage() {
   const dash = useDashboard();
@@ -29,6 +30,7 @@ export function DashboardPage() {
           Main currency {dash.portfolio.reportingCurrency} · USD/THB {dash.portfolio.fxRates.THB.toFixed(4)} · {dash.portfolio.fxSource ?? "FX cache"}{dash.portfolio.fxFetchedAt ? ` · updated ${new Date(dash.portfolio.fxFetchedAt).toLocaleString()}` : ""}{dash.portfolio.fxStale ? " · stale fallback—live refresh unavailable" : ""}
         </div>
       ) : null}
+      {dash.portfolio?.holdings.length ? <DataTrustBadge trust={dash.portfolio.dataTrust} /> : null}
       {dash.isSkeleton ? <DashboardSkeleton /> : (
         <>
           {dash.isError || dash.actionError ? (

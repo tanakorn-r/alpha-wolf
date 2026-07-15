@@ -77,7 +77,7 @@ export function StrategyTab({ hunt }: { hunt: HuntAi }) {
 function PlaybookCard({ playbook, stratLabel, stratColor }: { playbook: StrategyPlaybookResponse; stratLabel: string; stratColor: string }) {
   const score = playbook.picks.length ? Math.round(playbook.picks.reduce((sum, pick) => sum + pick.conviction, 0) / playbook.picks.length) : null;
   return (
-    <AgentCall agent={playbook.agent} label="Strategy agent" score={score} scoreLabel="average conviction" signal={stratLabel} headline={playbook.headline} summary={playbook.marketRead} accent={stratColor} meta={playbook.generatedAt ? `Generated ${formatAnalyzedAt(playbook.generatedAt)} · built for your holdings` : "Built for your holdings"}>
+    <AgentCall agent={playbook.agent} label="Strategy agent" score={score} scoreLabel="average conviction" signal={stratLabel} headline={playbook.headline} summary={playbook.marketRead} accent={stratColor} meta={playbook.generatedAt ? `Generated ${formatAnalyzedAt(playbook.generatedAt)} · built for your holdings` : "Built for your holdings"} dataTrust={playbook.dataTrust}>
       <div className="mt-5 flex flex-col gap-2.5">
         <div className="grid gap-2.5">
           {playbook.picks.map((pick, index) => {

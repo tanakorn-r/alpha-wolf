@@ -7,6 +7,9 @@ from typing import Any
 
 from internal.store.db import connect
 from internal.store.utils import json_safe
+from internal.ai.production_gate import enforce_production_gate, strip_private_run_fields
+from internal.store.ai_audit import record_ai_run
+from internal.store.notifications import notifications_from_ai_result
 
 
 class AIResultQualityError(ValueError):
@@ -105,7 +108,24 @@ def save_ai_result(key: AIResultKey, payload: dict[str, Any]) -> dict[str, Any]:
     """Quality-check and atomically replace only this account's last good result."""
     if key.user_id <= 0:
         raise PermissionError("AI results require an authenticated account")
-    checked = quality_gate_ai_result(key, payload)
+    try:
+        checked = quality_gate_ai_result(key, payload)
+        if payload.get("promptVersion") and isinstance(payload.get("decisionState"), dict):
+            checked, _ = enforce_production_gate(key.feature, key.agent_id, checked)
+    except Exception as exc:
+        if payload.get("_runContext") is not None:
+            record_ai_run(user_id=key.user_id, feature=key.feature, subject=key.subject,
+                          agent_id=key.agent_id, variant=key.variant, payload=payload,
+                          guarded=None, status="rejected", error=str(exc))
+        raise
+    run_id = None
+    if payload.get("_runContext") is not None:
+        run_id = record_ai_run(user_id=key.user_id, feature=key.feature, subject=key.subject,
+                               agent_id=key.agent_id, variant=key.variant, payload=payload,
+                               guarded=checked, status="accepted")
+    checked = strip_private_run_fields(checked)
+    if run_id:
+        checked["runId"] = run_id
     generated_at = str(checked["generatedAt"])
     now = datetime.now(timezone.utc).isoformat()
     encoded = json.dumps(json_safe(checked), ensure_ascii=False, separators=(",", ":"))
@@ -135,6 +155,7 @@ def save_ai_result(key: AIResultKey, payload: dict[str, Any]) -> dict[str, Any]:
             ),
         )
         db.commit()
+    notifications_from_ai_result(key.user_id, key.subject, checked, run_id)
     return checked
 
 

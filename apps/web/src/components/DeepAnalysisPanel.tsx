@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Area, AreaChart, CartesianGrid, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { loadDeepAnalysis, type DeepAnalysisResponse } from "../lib/api";
@@ -7,12 +7,15 @@ import { lockBodyScroll } from "../lib/bodyScrollLock";
 import { formatCurrency, formatMultiple, formatPercent } from "../lib/format";
 import { useWolfStore } from "../store/useWolfStore";
 import { LoadingSpinner } from "./LoadingSpinner";
+import { useDialogAccessibility } from "../lib/useDialogAccessibility";
 
 export function DeepAnalysisPanel() {
   const deepOpen = useWolfStore((state) => state.deepOpen);
   const deepSymbol = useWolfStore((state) => state.deepSymbol);
   const cashReserve = useWolfStore((state) => state.cashReserve);
   const closeDeepAnalysis = useWolfStore((state) => state.closeDeepAnalysis);
+  const titleId = useId();
+  const dialogRef = useDialogAccessibility(closeDeepAnalysis, deepOpen);
 
   const query = useQuery({
     queryKey: ["deep-analysis", deepSymbol],
@@ -23,13 +26,8 @@ export function DeepAnalysisPanel() {
   useEffect(() => {
     if (!deepOpen) return;
     const unlockBodyScroll = lockBodyScroll();
-    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape") closeDeepAnalysis(); };
-    window.addEventListener("keydown", onEscape);
-    return () => {
-      unlockBodyScroll();
-      window.removeEventListener("keydown", onEscape);
-    };
-  }, [deepOpen, closeDeepAnalysis]);
+    return unlockBodyScroll;
+  }, [deepOpen]);
 
   if (!deepOpen) return null;
   const deep = query.data;
@@ -40,13 +38,13 @@ export function DeepAnalysisPanel() {
   return (
     <div className="fixed inset-0 z-[55] flex items-end justify-center overflow-hidden px-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] min-[720px]:items-start min-[720px]:overflow-y-auto min-[720px]:px-5 min-[720px]:py-6">
       <button type="button" aria-label="Close deep analysis" onClick={closeDeepAnalysis} className="absolute inset-0 bg-[#060608]/60 backdrop-blur-[3px]" />
-      <div className="aw-deep-panel deep-panel-in relative flex h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[940px] max-w-full flex-col overflow-hidden rounded-t-2xl border border-[#2a2a31] bg-[#141417] shadow-[0_30px_90px_rgba(0,0,0,0.62)] min-[720px]:h-[calc(100vh-48px)] min-[720px]:rounded-2xl">
+      <div ref={dialogRef as React.Ref<HTMLDivElement>} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="aw-deep-panel deep-panel-in relative flex h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[940px] max-w-full flex-col overflow-hidden rounded-t-2xl border border-[#2a2a31] bg-[#141417] shadow-[0_30px_90px_rgba(0,0,0,0.62)] outline-none min-[720px]:h-[calc(100vh-48px)] min-[720px]:rounded-2xl">
         <div className="deep-rainbow-bar h-[3px] flex-none" />
 
         <div className="flex flex-none items-center justify-between gap-4 border-b border-[#2a2a31] bg-[#141417] px-5 py-4 min-[720px]:gap-5 min-[720px]:px-8 min-[720px]:py-6">
           <div>
             <div className="flex flex-wrap items-center gap-3">
-              <span className="font-mono text-2xl font-bold tracking-[-0.03em]">{deep?.symbol ?? deepSymbol}</span>
+              <span id={titleId} className="font-mono text-2xl font-bold tracking-[-0.03em]">{deep?.symbol ?? deepSymbol}</span>
               <span className="text-sm text-[#8c8c95]">{deep?.name ?? "Live market data"}</span>
               <span className="rounded-lg bg-gradient-to-r from-[#f5c451] via-[#ff6b9d] to-[#c77dff] px-3 py-1 text-[10px] font-black tracking-[0.7px] text-white shadow-[0_0_24px_rgba(199,125,255,0.25)]">PRO</span>
             </div>

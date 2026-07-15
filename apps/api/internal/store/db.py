@@ -231,14 +231,52 @@ def migrate() -> None:
         )
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS ai_run_audit (
+                run_id TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                feature TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                agent_id TEXT NOT NULL,
+                variant TEXT NOT NULL DEFAULT '',
+                model TEXT,
+                prompt_version TEXT NOT NULL,
+                source_timestamps TEXT NOT NULL,
+                input_payload TEXT NOT NULL,
+                raw_output TEXT NOT NULL,
+                guarded_output TEXT NOT NULL,
+                decision_state TEXT NOT NULL,
+                quality_checks TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_ai_run_audit_user_recent ON ai_run_audit(user_id, created_at DESC)")
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS backtrade_jobs (
                 id TEXT PRIMARY KEY,
                 account_scope TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'queued',
+                lease_owner TEXT,
+                lease_expires_at TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
                 payload TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
         )
+        backtrade_columns = _table_columns(db, "backtrade_jobs")
+        for name, definition in (
+            ("status", "TEXT NOT NULL DEFAULT 'queued'"),
+            ("lease_owner", "TEXT"),
+            ("lease_expires_at", "TEXT"),
+            ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if name not in backtrade_columns:
+                db.execute(f"ALTER TABLE backtrade_jobs ADD COLUMN {name} {definition}")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_backtrade_jobs_queue ON backtrade_jobs(status, lease_expires_at, updated_at)")
         db.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
@@ -317,6 +355,51 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
         )
         """
     )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS legal_acceptances (
+            user_id INTEGER NOT NULL,
+            document TEXT NOT NULL,
+            version TEXT NOT NULL,
+            accepted_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, document, version)
+        )
+        """
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_legal_acceptances_user ON legal_acceptances(user_id, accepted_at)")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS support_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            email TEXT NOT NULL,
+            category TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            message TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_support_requests_user ON support_requests(user_id, created_at)")
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            title TEXT NOT NULL,
+            message TEXT NOT NULL,
+            dedupe_key TEXT NOT NULL,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            read_at TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(user_id, dedupe_key)
+        )
+        """
+    )
+    db.execute("CREATE INDEX IF NOT EXISTS idx_notifications_user_recent ON notifications(user_id, read_at, created_at DESC)")
 
     holding_columns = _table_columns(db, "holdings")
     if "user_id" not in holding_columns:
