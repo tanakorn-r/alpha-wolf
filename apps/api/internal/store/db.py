@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import queue
 import sqlite3
 import threading
 from pathlib import Path
@@ -11,6 +12,7 @@ DATA_DIR = BASE_DIR / "data"
 DB_PATH = DATA_DIR / "alpha_wolf.sqlite3"
 DATABASE_URL = os.getenv("LIBSQL_DATABASE_URL") or os.getenv("TURSO_DATABASE_URL") or os.getenv("TURSO_URL")
 DATABASE_AUTH_TOKEN = os.getenv("LIBSQL_AUTH_TOKEN") or os.getenv("TURSO_AUTH_TOKEN")
+LIBSQL_POOL_SIZE = max(1, int(os.getenv("LIBSQL_POOL_SIZE", "4")))
 
 
 class LibsqlCursor:
@@ -58,38 +60,44 @@ class LibsqlConnection:
         pass  # libsql connections are managed by the library
 
 
-# `connect()` used to open a brand-new remote libsql/Turso connection on every single
-# call (every `with connect() as db:` block), each paying a fresh TLS+auth handshake
-# to Turso — with 10-15 of those per logical operation (e.g. building a dashboard),
-# that overhead alone was the actual cause of ~10s request latency, not cold starts.
-# The connection is opened once per process and reused for the rest of its life; a
-# lock serializes access since the underlying client isn't safe for concurrent use
-# from multiple threads at once (FastAPI runs sync handlers in a threadpool).
-_shared_libsql_conn: LibsqlConnection | None = None
-_libsql_lock = threading.Lock()
+# Remote connections are expensive to establish but a single shared connection turns
+# concurrent FastAPI requests into one long queue. Keep a small process-lifetime pool:
+# each individual libsql connection is still leased to only one thread at a time, while
+# independent account/catalog/watchlist reads can proceed concurrently.
+_libsql_pool: queue.LifoQueue[LibsqlConnection] = queue.LifoQueue(maxsize=LIBSQL_POOL_SIZE)
+_libsql_pool_created = 0
+_libsql_pool_create_lock = threading.Lock()
 
 
 class _PooledLibsqlConnection:
-    def __init__(self, conn: LibsqlConnection, lock: threading.Lock):
-        self._conn = conn
-        self._lock = lock
+    def __init__(self):
+        self._conn: LibsqlConnection | None = None
 
     def __enter__(self) -> LibsqlConnection:
-        self._lock.acquire()
+        self._conn = _acquire_libsql_connection()
         return self._conn
 
     def __exit__(self, exc_type, exc, tb) -> bool:
-        self._lock.release()
+        if self._conn is not None:
+            _libsql_pool.put(self._conn)
+            self._conn = None
         return False
 
 
-def _get_shared_libsql_connection() -> LibsqlConnection:
-    global _shared_libsql_conn
-    if _shared_libsql_conn is None:
-        with _libsql_lock:
-            if _shared_libsql_conn is None:
-                _shared_libsql_conn = LibsqlConnection()
-    return _shared_libsql_conn
+def _acquire_libsql_connection() -> LibsqlConnection:
+    global _libsql_pool_created
+    try:
+        return _libsql_pool.get_nowait()
+    except queue.Empty:
+        pass
+
+    with _libsql_pool_create_lock:
+        if _libsql_pool_created < LIBSQL_POOL_SIZE:
+            connection = LibsqlConnection()
+            _libsql_pool_created += 1
+            return connection
+
+    return _libsql_pool.get()
 
 
 class ClosingSQLiteConnection(sqlite3.Connection):
@@ -104,7 +112,7 @@ class ClosingSQLiteConnection(sqlite3.Connection):
 
 def connect() -> sqlite3.Connection | LibsqlConnection:
     if DATABASE_URL and DATABASE_URL.startswith(("libsql://", "https://", "http://")):
-        return _PooledLibsqlConnection(_get_shared_libsql_connection(), _libsql_lock)  # type: ignore[return-value]
+        return _PooledLibsqlConnection()  # type: ignore[return-value]
 
     db = sqlite3.connect(DB_PATH, factory=ClosingSQLiteConnection)
     db.row_factory = sqlite3.Row

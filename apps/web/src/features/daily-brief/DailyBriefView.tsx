@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AgentCall } from "../../components/agents/AgentCall";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { DataTrustBadge } from "../../components/DataTrustBadge";
@@ -98,8 +98,15 @@ function BriefQueueRow({
   const aiScore = state?.data?.buyScore;
   const aiTone = state?.data?.tone;
 
+  useEffect(() => {
+    // A durable DB result is the content for this page, not a hidden prerequisite for
+    // another AI run. Reveal it as soon as passive hydration completes.
+    if (hasResult) setOpen(true);
+  }, [hasResult]);
+
   function runAnalysis() {
     setOpen(true);
+    if (hasResult && !open) return;
     onOpen(hasResult);
   }
 
@@ -128,10 +135,10 @@ function BriefQueueRow({
           </div>
         </div>
         <div className="flex min-w-0 items-center justify-between gap-3 min-[820px]:justify-end">
-          {state?.loading || aiScore != null ? (
+          {state?.loading || state?.restoring || aiScore != null ? (
             <div className="flex flex-col items-center gap-1">
               <div className="relative h-12 w-12 flex-none">
-                {state?.loading ? (
+                {state?.loading || state?.restoring ? (
                   <div className="grid h-12 w-12 place-items-center"><LoadingSpinner size={18} className="text-[#6f6f78]" /></div>
                 ) : (
                   <>
@@ -144,9 +151,9 @@ function BriefQueueRow({
             </div>
           ) : null}
           <PremiumAiButton
-            label={state?.loading ? "Analyzing" : hasResult ? "Refresh" : "Analyze"}
+            label={state?.restoring ? "Loading" : state?.loading ? "Analyzing" : hasResult ? open ? "Refresh" : "View" : "Analyze"}
             sublabel="Today"
-            loading={state?.loading}
+            loading={state?.loading || state?.restoring}
             onClick={runAnalysis}
             size="xs"
             className="flex-none"

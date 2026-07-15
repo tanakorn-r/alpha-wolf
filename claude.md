@@ -84,9 +84,9 @@
 **Backend (`apps/api/`)**
 - FastAPI app (`main.py`) + `internal/store/db.py`: local SQLite file in dev,
   remote Turso/libSQL in production (`TURSO_URL`/`LIBSQL_DATABASE_URL` env var
-  present). The Turso path reuses one process-lifetime connection behind a
-  lock (`connect()`) — never create a second ad hoc connection path; a fresh
-  connection per call was the actual cause of a real ~10s prod latency bug.
+  present). The Turso path reuses a bounded process-lifetime connection pool
+  (`connect()`, default 4) — never create an ad hoc connection path; fresh
+  connections per call caused TLS overhead, while one global lock serialized prod.
   Live market data via `yfinance` (`internal/yahoo/`), AI summaries via OpenAI
   (`internal/ai/openai_client.py`, gated by `OPENAI_API_KEY` env var).
 - One route file per resource in `routes/`, registered centrally in
@@ -168,7 +168,7 @@
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Fixed Overview portfolio review restoration being presented as a new forced AI run: the passive `/ai/results/latest?feature=portfolio` DB read no longer contributes to `analyzing`, is abortable, and stays fresh/in-memory for the browser session, while only explicit Review (`force=false`) or Re-run (`force=true`) actions show Agent thinking.
+- Fixed Daily Brief DB restoration being mistaken for a new AI run: passive saved-result reads now have a bounded/cancellable `restoring` state labeled Loading, restored reports open automatically, and reopening a closed saved report uses View without forcing a refresh; only the explicit Refresh action runs AI again.
 
 **Recent Context**
 - Fixed a live crash (`Uncaught RangeError: Invalid currency code : null` in `StockDetailDrawer`'s `DrawerHeader`, `formatCurrency`). Root cause: `formatCurrency(value, currency = "USD")`'s default parameter only covers `undefined`, not an explicit `null` — and `detail.stock.currency` can genuinely be `null` now that the backend's cache-first fallback (prior entries) returns empty fields immediately for a freshly-uncached symbol instead of blocking until real data arrives. Fixed `formatCurrency` (`apps/web/src/lib/format.ts`) to coalesce `currency || "USD"` so `null` and `undefined` both fall back correctly. Checked the file for the same gap elsewhere: `formatMoneyAs` requires a non-optional `"USD" | "THB"` literal union, so TypeScript already catches a stray `null` there at compile time — `formatCurrency` was the only vulnerable one. tsc clean.

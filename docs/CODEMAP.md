@@ -60,13 +60,14 @@ export function FooPage() {
 | Path | What's inside |
 |---|---|
 | `main.py` / `routes/router.py` | App entry / route registration |
-| `routes/` | One file per endpoint group: portfolio, settings, auth, details (incl. `/deep`, `/buy-timing`, `/upward-moves`), discover, analysis (AI), calendar, dashboard, market, quote, presets… |
+| `routes/` | One file per endpoint group: portfolio, settings, auth, details (incl. `/deep`, `/buy-timing`, `/upward-moves`), discover, analysis (AI), calendar, dashboard, market, quote, presets…; `bootstrap.py` consolidates account, Agent, notification, and watchlist shell state into one startup request |
 | `models.py` | Pydantic response models (mirror `lib/api.ts` types) |
-| `internal/market/` | Business logic: detail.py, deep.py (rule-based deep read), buy_timing.py (dividend-cycle timing), patterns.py (upward-moves), discovery, portfolio, scoring, technicals, universe, calendar |
+| `internal/market/` | Business logic: detail.py, deep.py (rule-based deep read), buy_timing.py (dividend-cycle timing), patterns.py (upward-moves), discovery, portfolio, scoring, technicals, universe, calendar; `catalog.py` serves stale data immediately and deduplicates background Yahoo refreshes |
 | `internal/ai/` | openai_client.py, heuristics.py, context.py |
-| `internal/store/` | SQLite/Turso persistence: portfolio, user locale settings, durable AI response cache, replay jobs, Yahoo/cache tables |
+| `internal/store/` | SQLite/Turso persistence: portfolio, user locale settings, durable AI response cache, replay jobs, Yahoo/cache tables; `db.py` owns the bounded process-lifetime remote connection pool |
 | `internal/yahoo/client.py` | yfinance wrapper (per-ticker quotes, history, news) |
 | `internal/news/kaohoon.py` | Kaohoon International SET feed (WordPress REST); `market_news()` cached, merged into `.BK` detail news by `detail.py::merge_thai_market_news` |
+| `tests/` | Backend unit/regression tests; `test_libsql_pool.py` covers remote-pool saturation/reuse, `test_catalog_stale_while_revalidate.py` covers non-blocking catalog refresh, and `test_bootstrap.py` covers signed-in/anonymous startup aggregation |
 
 ## Conventions that save tokens
 

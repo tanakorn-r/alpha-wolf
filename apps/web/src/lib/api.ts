@@ -61,6 +61,20 @@ export async function loadAiDecisionHistory(subject: string, agent: string): Pro
 
 export type AppNotification = { id: number; kind: string; subject: string; title: string; message: string; readAt?: string | null; createdAt: string };
 
+export type AppBootstrap = {
+  user: AuthUser | null;
+  premiumPromoActive: boolean;
+  agents: AgentProfile[];
+  notifications: { items: AppNotification[]; unread: number };
+  watchlist: string[];
+};
+
+export async function loadAppBootstrap(): Promise<AppBootstrap> {
+  const response = await fetch(`${API_BASE}/bootstrap`, { credentials: "include" });
+  if (!response.ok) throw new Error(`Could not restore app shell (${response.status})`);
+  return (await response.json()) as AppBootstrap;
+}
+
 export async function loadNotifications(): Promise<{ items: AppNotification[]; unread: number }> {
   const response = await fetch(`${API_BASE}/notifications`, { credentials: "include" });
   if (response.status === 401) return { items: [], unread: 0 };

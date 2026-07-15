@@ -1,7 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { useEffect, useState } from "react";
 import { Navigate, Outlet, Route, Routes } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLayout } from "./components/layout/AppLayout";
 import { LoadingSpinner } from "./components/LoadingSpinner";
 import { DeepAnalysisPanel } from "./components/DeepAnalysisPanel";
@@ -13,7 +13,7 @@ import { HuntAiPage } from "./pages/HuntAiPage";
 import { DividendHuntPage } from "./pages/DividendHuntPage";
 import { LiveTradePage } from "./pages/LiveTradePage";
 import { PrivacyPage, RefundPage, SupportPage, TermsPage } from "./pages/LegalPages";
-import { ensureMarketCatalog, loadAuthUser } from "./lib/api";
+import { loadAppBootstrap, loadAuthUser } from "./lib/api";
 import { LocaleGate } from "./components/settings/LocalePreferences";
 
 const VISITED_STORAGE_KEY = "aw_visited_app";
@@ -89,25 +89,52 @@ function AppShell() {
   );
 }
 
+function BootstrapGate() {
+  const queryClient = useQueryClient();
+  const bootstrap = useQuery({
+    queryKey: ["app-bootstrap"],
+    queryFn: async () => {
+      const data = await loadAppBootstrap();
+      // Hydrate the existing feature-level keys before their components mount. This keeps
+      // account UI unchanged while removing four production network round trips at startup.
+      queryClient.setQueryData(["auth-user"], data.user);
+      queryClient.setQueryData(["agents"], data.agents);
+      queryClient.setQueryData(["notifications"], data.notifications);
+      if (data.user?.id) queryClient.setQueryData(["portfolio-watchlist", `user:${data.user.id}`], data.watchlist);
+      return data;
+    },
+    staleTime: 300_000,
+    retry: 1,
+  });
+
+  if (bootstrap.isPending) {
+    return <div className="grid min-h-screen place-items-center bg-[#0e0e10] text-[#3ecf8e]" role="status" aria-label="Loading Alpha Wolf"><LoadingSpinner size={22} /></div>;
+  }
+  // A rolling frontend/API deploy must not strand the app if one side reaches production
+  // first. Existing feature queries remain the graceful fallback when bootstrap fails.
+  return <Outlet />;
+}
+
 export default function App() {
-  useQuery({ queryKey: ["market-catalog"], queryFn: ensureMarketCatalog, staleTime: 86_400_000 });
   return (
     <Routes>
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/refunds" element={<RefundPage />} />
       <Route path="/support" element={<SupportPage />} />
-      <Route path="/" element={<LocaleGate><HomeRoute /></LocaleGate>} />
-      <Route element={<LocaleGate><AppShell /></LocaleGate>}>
-        <Route path="/daily-brief" element={<Navigate to="/hunt-ai?tab=brief" replace />} />
-        <Route path="/live-trade" element={<LiveTradePage />} />
-        <Route path="/scanner" element={<StockHuntPage />} />
-        <Route path="/deep-ai" element={<Navigate to="/hunt-ai" replace />} />
-        <Route path="/hunt-ai" element={<HuntAiPage />} />
-        <Route path="/day-trader" element={<Navigate to="/hunt-ai" replace />} />
-        <Route path="/calendar" element={<DividendHuntPage />} />
-        <Route path="/discover" element={<Navigate to="/scanner" replace />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+      <Route element={<BootstrapGate />}>
+        <Route path="/" element={<LocaleGate><HomeRoute /></LocaleGate>} />
+        <Route element={<LocaleGate><AppShell /></LocaleGate>}>
+          <Route path="/daily-brief" element={<Navigate to="/hunt-ai?tab=brief" replace />} />
+          <Route path="/live-trade" element={<LiveTradePage />} />
+          <Route path="/scanner" element={<StockHuntPage />} />
+          <Route path="/deep-ai" element={<Navigate to="/hunt-ai" replace />} />
+          <Route path="/hunt-ai" element={<HuntAiPage />} />
+          <Route path="/day-trader" element={<Navigate to="/hunt-ai" replace />} />
+          <Route path="/calendar" element={<DividendHuntPage />} />
+          <Route path="/discover" element={<Navigate to="/scanner" replace />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
       </Route>
     </Routes>
   );

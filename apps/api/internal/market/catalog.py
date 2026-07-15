@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -46,7 +47,9 @@ CATALOG_SECTORS = (
 )
 CATALOG_SECTOR_SIZE = 35
 SCORING_VERSION = 5
-_REFRESH_LOCK = threading.Lock()
+_REFRESH_STATE_LOCK = threading.Lock()
+_REFRESHING_REGIONS: set[str] = set()
+_REFRESH_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="catalog-refresh")
 
 
 def get_industry_peers(region: str, industry: str) -> list[dict[str, Any]]:
@@ -87,13 +90,29 @@ def get_market_catalog(regions: tuple[str, ...] | None = None) -> list[dict[str,
     if all(_catalog_fresh(value, now) for value in cached):
         return [record for value in cached if value for record in _sanitize_cached_records(value)]
 
-    with _REFRESH_LOCK:
-        cached = [load_market_universe(region) for region in requested]
-        now = datetime.now(timezone.utc)
-        if all(_catalog_fresh(value, now) for value in cached):
-            return [record for value in cached if value for record in _sanitize_cached_records(value)]
-        refreshed = [value if _catalog_fresh(value, now) else _refresh_region(region) for region, value in zip(requested, cached)]
-        return [record for value in refreshed for record in value.records]
+    _schedule_refresh(tuple(region for region, value in zip(requested, cached) if not _catalog_fresh(value, now)))
+    # Stale catalog data is still far more useful than making a page request wait for
+    # dozens of Yahoo screen calls. A completely cold database returns an empty catalog
+    # once while the same background warmer fills it for the next request.
+    return [record for value in cached if value for record in _sanitize_cached_records(value)]
+
+
+def _schedule_refresh(regions: tuple[str, ...]) -> None:
+    with _REFRESH_STATE_LOCK:
+        pending = [region for region in regions if region not in _REFRESHING_REGIONS]
+        _REFRESHING_REGIONS.update(pending)
+    for region in pending:
+        _REFRESH_EXECUTOR.submit(_refresh_region_in_background, region)
+
+
+def _refresh_region_in_background(region: str) -> None:
+    try:
+        _refresh_region(region)
+    except Exception as exc:
+        print(f"Warning: catalog refresh failed for {region}: {exc}")
+    finally:
+        with _REFRESH_STATE_LOCK:
+            _REFRESHING_REGIONS.discard(region)
 
 
 def _normalized_regions(regions: tuple[str, ...] | None) -> tuple[str, ...]:

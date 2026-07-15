@@ -73,7 +73,7 @@ export type HoldingBriefRow = {
 
 export type DailyBrief = ReturnType<typeof useDailyBrief>;
 
-export type RowAnalysisState = { loading: boolean; data: TodayPerformanceResponse | null; error: string };
+export type RowAnalysisState = { loading: boolean; restoring?: boolean; data: TodayPerformanceResponse | null; error: string };
 
 export function useDailyBrief() {
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
@@ -143,7 +143,7 @@ export function useDailyBrief() {
 
   const persistedRowAnalysis = Object.fromEntries(model.rows.flatMap((row) => {
     const cached = getHuntAiCache<TodayPerformanceResponse>(dailyBriefCacheKey(accountScope, row.symbol, row.strategy, activeAgentId));
-    return cached?.data.agent?.id === activeAgentId ? [[row.symbol, { loading: false, data: cached.data, error: "" } satisfies RowAnalysisState]] : [];
+    return cached?.data.agent?.id === activeAgentId ? [[row.symbol, { loading: false, restoring: false, data: cached.data, error: "" } satisfies RowAnalysisState]] : [];
   }));
   const displayedRowAnalysis = { ...persistedRowAnalysis, ...rowAnalysis };
   const savedHydrationKey = model.rows.map((row) => `${row.symbol}:${row.strategy}`).join("|");
@@ -151,10 +151,12 @@ export function useDailyBrief() {
   useEffect(() => {
     if (!auth.data?.id || !savedHydrationKey) return;
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     setRowAnalysis((current) => {
       const next = { ...current };
       for (const row of model.rows) {
-        if (!next[row.symbol]?.data) next[row.symbol] = { loading: true, data: null, error: "" };
+        if (!next[row.symbol]?.data) next[row.symbol] = { loading: false, restoring: true, data: null, error: "" };
       }
       return next;
     });
@@ -165,6 +167,7 @@ export function useDailyBrief() {
         subject: row.symbol,
         agent: activeAgentId,
         variantPrefix: `v23:${row.strategy}:`,
+        signal: controller.signal,
       }).catch(() => null),
     }))).then((saved) => {
       if (cancelled) return;
@@ -178,12 +181,18 @@ export function useDailyBrief() {
       setRowAnalysis((current) => {
         const next = { ...current };
         for (const item of saved) {
-          if (!next[item.row.symbol]?.data) next[item.row.symbol] = { loading: false, data: item.data?.agent?.id === activeAgentId ? item.data : null, error: "" };
+          if (!next[item.row.symbol]?.data) next[item.row.symbol] = { loading: false, restoring: false, data: item.data?.agent?.id === activeAgentId ? item.data : null, error: "" };
         }
         return next;
       });
+    }).finally(() => {
+      window.clearTimeout(timeout);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [accountScope, activeAgentId, auth.data?.id, savedHydrationKey]);
 
   return {
@@ -194,15 +203,15 @@ export function useDailyBrief() {
     activeAgentId,
     rowAnalysis: displayedRowAnalysis,
     async analyzeRow(row: HoldingBriefRow, force = false) {
-      setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: true, data: displayedRowAnalysis[row.symbol]?.data ?? null, error: "" } }));
+      setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: true, restoring: false, data: displayedRowAnalysis[row.symbol]?.data ?? null, error: "" } }));
       try {
         // A deliberate Analyze/Refresh remains a forced rerun. Persistence only restores the
         // previous result when the user returns; it never turns Refresh into a stale cache read.
         const data = await loadTodayPerformance(row.symbol, row.strategy, activeAgentId, force);
         setHuntAiCache(dailyBriefCacheKey(accountScope, row.symbol, row.strategy, activeAgentId), { analyzedAt: data.generatedAt ?? new Date().toISOString(), data });
-        setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, data, error: "" } }));
+        setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, restoring: false, data, error: "" } }));
       } catch (error) {
-        setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, data: current[row.symbol]?.data ?? null, error: error instanceof Error ? error.message : "AI analysis is unavailable." } }));
+        setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: false, restoring: false, data: current[row.symbol]?.data ?? null, error: error instanceof Error ? error.message : "AI analysis is unavailable." } }));
       }
     },
     retry() {

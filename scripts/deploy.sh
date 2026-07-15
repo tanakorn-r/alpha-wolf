@@ -13,10 +13,14 @@ cd "$ROOT_DIR"
 
 # -- Config -----------------------------------------------------------------
 GCP_PROJECT="${GCP_PROJECT:-${GCP_PROJECT_ID:-alpha-wolf-501716}}"
-GCP_REGION="${GCP_REGION:-asia-southeast3}"
+TURSO_LOCATION="${TURSO_LOCATION:-nrt}"
+# nrt is Tokyo; keep the default Cloud Run service in the same metro so every
+# libSQL operation does not pay a Jakarta-to-Tokyo network hop.
+GCP_REGION="${GCP_REGION:-asia-northeast1}"
 REPO="${ARTIFACT_REPOSITORY:-alpha-wolf-be}"
 SERVICE="${CLOUD_RUN_SERVICE:-alpha-wolf-api}"
-CLOUD_RUN_CONCURRENCY="${CLOUD_RUN_CONCURRENCY:-12}"
+CLOUD_RUN_CONCURRENCY="${CLOUD_RUN_CONCURRENCY:-8}"
+CLOUD_RUN_MIN_INSTANCES="${CLOUD_RUN_MIN_INSTANCES:-1}"
 CLOUD_RUN_MEMORY="${CLOUD_RUN_MEMORY:-1Gi}"
 
 # GENERATE UNIQUE VERSION TAG (Fixes the Artifact Registry Immutability error)
@@ -83,7 +87,7 @@ if [[ -z "$TURSO_URL" ]]; then
 
   if ! turso db show "$TURSO_DB_NAME" >/dev/null 2>&1; then
     log "Creating Turso database: $TURSO_DB_NAME"
-    turso db create "$TURSO_DB_NAME" --location nrt
+    turso db create "$TURSO_DB_NAME" --location "$TURSO_LOCATION"
   else
     log "Turso database '$TURSO_DB_NAME' already exists"
   fi
@@ -160,6 +164,9 @@ gcloud run deploy "$SERVICE" \
   --allow-unauthenticated \
   --port 8080 \
   --concurrency "$CLOUD_RUN_CONCURRENCY" \
+  --min "$CLOUD_RUN_MIN_INSTANCES" \
+  --cpu-boost \
+  --no-cpu-throttling \
   --memory "$CLOUD_RUN_MEMORY" \
   --env-vars-file "$ENV_YAML" \
   --quiet
