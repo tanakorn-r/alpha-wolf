@@ -14,6 +14,8 @@
     "dev:replay-worker": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx run api:worker",
     "dev:go-api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx serve go-api",
     "build:web": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build web",
+    "seo:submit": "npm --prefix apps/web run seo:submit",
+    "test:seo": "npm --prefix apps/web run test:seo",
     "build:web:static": "vite build apps/web --outDir ../../dist/apps/web --emptyOutDir",
     "build:api": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx build api",
     "format": "NX_DAEMON=false NX_ISOLATE_PLUGINS=false nx format:write",

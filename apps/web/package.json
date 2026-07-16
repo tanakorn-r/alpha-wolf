@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
+    "seo:submit": "node scripts/submit-indexnow.mjs",
+    "test:seo": "node scripts/test-seo.mjs",
     "dev": "vite --host localhost --port 4200",
     "build:mobile": "vite build",
     "cap:sync": "npm run build:mobile && cap sync",

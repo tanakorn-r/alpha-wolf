@@ -1,6 +1,7 @@
 # Alpha Wolf
 
 Canonical URL: https://alpha-wolf.lufas2603.workers.dev/
+Last updated: 2026-07-16
 
 > Alpha Wolf is a strategy-driven investing dashboard for Thai (SET/.BK) and US stocks. It pairs a
 > live portfolio tracker with a set of distinct AI "Agent" personas — each with its own genuine
@@ -20,17 +21,17 @@ primary currency for its Thai user base) with USD shown as a secondary conversio
 - Dual-market: Thai SET (.BK) and US tickers in one portfolio, bilingual English/Thai UI.
 
 ## Key pages
-- / — Public welcome page and entry to the application.
-- /ai-stock-analysis.html — How AlphaWolf analyzes Thai SET and US stocks with distinct Agents.
-- /ai-vs-dca-backtest.html — How AI Replay compares Agent decisions against normal monthly DCA.
-- /dividend-buy-timing.html — How dividend-cycle entry timing, accumulated dividends, and cash reserves are calculated.
+- https://alpha-wolf.lufas2603.workers.dev/ — Public welcome page and entry to the application.
+- https://alpha-wolf.lufas2603.workers.dev/ai-stock-analysis.html — How Alpha Wolf analyzes Thai SET and US stocks with distinct Agents.
+- https://alpha-wolf.lufas2603.workers.dev/ai-vs-dca-backtest.html — How AI Replay compares Agent decisions against normal monthly DCA.
+- https://alpha-wolf.lufas2603.workers.dev/dividend-buy-timing.html — How dividend-cycle entry timing, accumulated dividends, and cash reserves are calculated.
 - /scanner — Interactive stock scanner inside the application.
 - /calendar — Interactive dividend calendar inside the application.
 - /hunt-ai — Daily Signals, Daily Brief, Buy Timing, AI Replay, and Analyst reports.
 
 ## Direct answers
-- AlphaWolf is not a broker and does not execute trades.
-- AlphaWolf does not promise that AI will outperform DCA.
+- Alpha Wolf is not a broker and does not execute trades.
+- Alpha Wolf does not promise that AI will outperform DCA.
 - AI Replay includes accumulated dividend cash flows in both the Agent plan and DCA comparison.
 - Average exposure and ending cash reserve describe different things: exposure is the average share invested through time; cash reserve is cash remaining at the end.
 - The free plan includes limited AI usage. A first-time account may activate a 30-day Pro trial without a card.

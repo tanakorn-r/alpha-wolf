@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -23,7 +24,13 @@ class StripeCreditsTests(unittest.TestCase):
         with sqlite3.connect(database, factory=store_db.ClosingSQLiteConnection) as db:
             db.execute("CREATE TABLE users(id INTEGER PRIMARY KEY, premium_redeemed_at TEXT, premium_expires_at TEXT)")
             db.execute(
-                "CREATE TABLE ai_credit_balances(user_id INTEGER PRIMARY KEY, balance INTEGER DEFAULT 0, used_total INTEGER DEFAULT 0, updated_at TEXT)"
+                """CREATE TABLE ai_credit_balances(
+                       user_id INTEGER PRIMARY KEY,
+                       balance INTEGER DEFAULT 0,
+                       used_total INTEGER DEFAULT 0,
+                       starter_tokens_granted INTEGER DEFAULT 0,
+                       updated_at TEXT
+                   )"""
             )
             db.execute(
                 "CREATE TABLE stripe_credit_fulfillments(event_key TEXT PRIMARY KEY, session_id TEXT UNIQUE, user_id INTEGER, credits INTEGER, amount_total INTEGER, currency TEXT, created_at TEXT)"
@@ -84,6 +91,33 @@ class StripeCreditsTests(unittest.TestCase):
             self.assertEqual(next_month["used"], 2)
             self.assertEqual(next_month["tokens"], 1)
             self.assertEqual(next_month["remaining"], 1)
+
+    def test_existing_free_account_is_topped_up_from_three_to_thirty_once(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            database = str(Path(directory) / "credits.db")
+            self._create_credit_database(database)
+            with sqlite3.connect(database, factory=store_db.ClosingSQLiteConnection) as db:
+                db.execute(
+                    """INSERT INTO ai_credit_balances(
+                           user_id, balance, used_total, starter_tokens_granted, updated_at
+                       ) VALUES(1, 0, 3, 3, 'now')"""
+                )
+                db.commit()
+
+            with (
+                patch.object(entitlements, "connect", side_effect=lambda: sqlite3.connect(database, factory=store_db.ClosingSQLiteConnection)),
+                patch.object(entitlements, "FREE_STARTING_TOKENS", 30),
+            ):
+                first = entitlements.entitlement_status(1)
+                second = entitlements.entitlement_status(1)
+
+            self.assertEqual(first["aiUsage"], {"used": 3, "tokens": 27, "remaining": 27})
+            self.assertEqual(second["aiUsage"], first["aiUsage"])
+            with sqlite3.connect(database) as db:
+                granted = db.execute(
+                    "SELECT starter_tokens_granted FROM ai_credit_balances WHERE user_id = 1"
+                ).fetchone()[0]
+            self.assertEqual(granted, 30)
 
     def test_trial_tokens_are_a_one_time_persistent_grant(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -208,6 +242,19 @@ class StripeCreditsTests(unittest.TestCase):
                 auth.create_credit_checkout(auth.CreditCheckout(credits=25, acceptCurrentLegal=True), request)
         self.assertEqual(raised.exception.status_code, 503)
         accept.assert_called_once_with(7, source="credit_checkout")
+
+    def test_webhook_rejects_an_invalid_signature(self) -> None:
+        request = Mock(headers={"stripe-signature": "t=0,v1=invalid"})
+
+        async def body() -> bytes:
+            return b"{}"
+
+        request.body = body
+        with patch.dict("os.environ", {"STRIPE_WEBHOOK_SECRET": "whsec_test"}):
+            with self.assertRaises(HTTPException) as raised:
+                asyncio.run(auth.stripe_webhook(request))
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(raised.exception.detail, "Invalid Stripe webhook")
 
 
 if __name__ == "__main__":

@@ -3,21 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <title>Alpha Wolf — AI Agent Investing Dashboard for Thai (SET) &amp; US Stocks</title>
+    <title>Alpha Wolf | AI Investing for Thai SET &amp; US Stocks</title>
     <meta
       name="description"
-      content="Track your Thai (SET/.BK) and US stock portfolio, get daily AI Agent buy/wait verdicts from distinct decision methods, dividend-cycle buy timing, and an honest AI-vs-DCA backtest — free to try."
+      content="Track Thai SET and US stocks, compare distinct AI Agent verdicts, study dividend buy timing, and replay AI decisions against monthly DCA."
     />
+    <meta name="author" content="Alpha Wolf" />
+    <meta name="application-name" content="Alpha Wolf" />
     <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
     <link rel="canonical" href="https://alpha-wolf.lufas2603.workers.dev/" />
+    <link rel="sitemap" type="application/xml" href="/sitemap.xml" title="Alpha Wolf sitemap" />
 
     <!-- Open Graph -->
     <meta property="og:type" content="website" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="Alpha Wolf" />
     <meta property="og:url" content="https://alpha-wolf.lufas2603.workers.dev/" />
     <meta property="og:title" content="Alpha Wolf — AI Agent Investing Dashboard for Thai &amp; US Stocks" />
     <meta property="og:description" content="Daily AI Agent buy/wait verdicts, dividend-cycle buy timing, and an honest AI-vs-DCA backtest for your Thai (SET) and US stock portfolio." />
     <meta property="og:image" content="https://alpha-wolf.lufas2603.workers.dev/og-alpha-wolf.png" />
+    <meta property="og:image:secure_url" content="https://alpha-wolf.lufas2603.workers.dev/og-alpha-wolf.png" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1792" />
     <meta property="og:image:height" content="1024" />
     <meta property="og:image:alt" content="AlphaWolf AI Agent Investing for SET and US Stocks" />
@@ -32,9 +38,16 @@
     <!-- Structured data for search engines and AI answer engines -->
     <script type="application/ld+json">
       {"@context":"https://schema.org","@graph":[
-        {"@type":"Organization","@id":"https://alpha-wolf.lufas2603.workers.dev/#organization","name":"AlphaWolf","url":"https://alpha-wolf.lufas2603.workers.dev/","logo":{"@type":"ImageObject","url":"https://alpha-wolf.lufas2603.workers.dev/icon-512.png"}},
-        {"@type":"WebSite","@id":"https://alpha-wolf.lufas2603.workers.dev/#website","url":"https://alpha-wolf.lufas2603.workers.dev/","name":"AlphaWolf","description":"AI Agent investing dashboard for Thai SET and US stocks.","publisher":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#organization"},"inLanguage":["en","th"]},
-        {"@type":"SoftwareApplication","@id":"https://alpha-wolf.lufas2603.workers.dev/#app","name":"AlphaWolf","url":"https://alpha-wolf.lufas2603.workers.dev/","applicationCategory":"FinanceApplication","applicationSubCategory":"Portfolio management and stock analysis","operatingSystem":"Web, iOS, Android","isAccessibleForFree":true,"description":"AI Agent investing dashboard for Thai SET and US stocks with daily decision support, dividend-cycle buy timing, portfolio tracking, and transparent AI-versus-DCA replay.","featureList":["Thai SET and US portfolio tracking","Distinct AI Agent decision methods","Dividend-cycle buy timing","Walk-forward AI versus DCA replay","Dividend cash-flow accumulation","Contribution-adjusted drawdown comparison"],"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#organization"}}
+        {"@type":"Organization","@id":"https://alpha-wolf.lufas2603.workers.dev/#organization","name":"Alpha Wolf","alternateName":"AlphaWolf","url":"https://alpha-wolf.lufas2603.workers.dev/","logo":{"@type":"ImageObject","url":"https://alpha-wolf.lufas2603.workers.dev/icon-512.png","width":512,"height":512}},
+        {"@type":"WebSite","@id":"https://alpha-wolf.lufas2603.workers.dev/#website","url":"https://alpha-wolf.lufas2603.workers.dev/","name":"Alpha Wolf","alternateName":"AlphaWolf","description":"AI Agent investing dashboard for Thai SET and US stocks.","publisher":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#organization"},"inLanguage":["en","th"]},
+        {"@type":"WebPage","@id":"https://alpha-wolf.lufas2603.workers.dev/#webpage","url":"https://alpha-wolf.lufas2603.workers.dev/","name":"Alpha Wolf | AI Investing for Thai SET and US Stocks","description":"Track Thai SET and US stocks, compare distinct AI Agent verdicts, study dividend buy timing, and replay AI decisions against monthly DCA.","isPartOf":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#website"},"about":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#app"},"dateModified":"2026-07-16","inLanguage":"en"},
+        {"@type":"SoftwareApplication","@id":"https://alpha-wolf.lufas2603.workers.dev/#app","name":"Alpha Wolf","alternateName":"AlphaWolf","url":"https://alpha-wolf.lufas2603.workers.dev/","mainEntityOfPage":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#webpage"},"applicationCategory":"FinanceApplication","applicationSubCategory":"Portfolio management and stock analysis","operatingSystem":"Web, iOS, Android","isAccessibleForFree":true,"description":"AI Agent investing dashboard for Thai SET and US stocks with daily decision support, dividend-cycle buy timing, portfolio tracking, and transparent AI-versus-DCA replay.","featureList":["Thai SET and US portfolio tracking","Distinct AI Agent decision methods","Dividend-cycle buy timing","Walk-forward AI versus DCA replay","Dividend cash-flow accumulation","Contribution-adjusted drawdown comparison"],"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"publisher":{"@id":"https://alpha-wolf.lufas2603.workers.dev/#organization"}},
+        {"@type":"FAQPage","@id":"https://alpha-wolf.lufas2603.workers.dev/#faq","mainEntity":[
+          {"@type":"Question","name":"Is Alpha Wolf a broker?","acceptedAnswer":{"@type":"Answer","text":"No. Alpha Wolf is an investing research and decision-support dashboard. It does not execute trades."}},
+          {"@type":"Question","name":"Does Alpha Wolf promise that AI will beat DCA?","acceptedAnswer":{"@type":"Answer","text":"No. AI Replay shows when an Agent wins or loses against normal monthly dollar-cost averaging and includes dividends, exposure, cash reserve, and drawdown."}},
+          {"@type":"Question","name":"Which stock markets does Alpha Wolf support?","acceptedAnswer":{"@type":"Answer","text":"Alpha Wolf supports Thai Stock Exchange tickers using the .BK convention and US-listed stocks in one portfolio."}},
+          {"@type":"Question","name":"Is Alpha Wolf financial advice?","acceptedAnswer":{"@type":"Answer","text":"No. AI-generated analysis can be wrong and is provided for decision support, not as personalized financial advice."}}
+        ]}
       ]}
     </script>
     <link rel="alternate" type="text/plain" href="/llms.txt" title="AlphaWolf information for AI systems" />

@@ -404,7 +404,7 @@ export function useHuntAi() {
     premium,
     trialModalOpen,
     closeTrialModal: () => setTrialModalOpen(false),
-    aiUsage: authQuery.data?.aiUsage ?? { used: 0, tokens: premium ? 100 : 3, remaining: premium ? 100 : 3 },
+    aiUsage: authQuery.data?.aiUsage ?? { used: 0, tokens: premium ? 100 : 30, remaining: premium ? 100 : 30 },
     premiumExpiresAt: authQuery.data?.premiumExpiresAt ?? null,
     signedIn: authenticated,
     accountUser: authQuery.data ?? null,

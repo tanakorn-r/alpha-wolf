@@ -89,7 +89,7 @@ export function AppSidebar() {
 }
 
 function AiUsageMeter({ user }: { user: NonNullable<Awaited<ReturnType<typeof loadAuthUser>>> }) {
-  const usage = user.aiUsage ?? { used: 0, tokens: user.proActive ? 100 : 3, remaining: user.proActive ? 100 : 3 };
+  const usage = user.aiUsage ?? { used: 0, tokens: user.proActive ? 100 : 30, remaining: user.proActive ? 100 : 30 };
   const limit = Math.max(1, usage.used + usage.tokens);
   const remaining = Math.max(0, Math.min(limit, usage.remaining));
   const remainingPct = Math.round((remaining / limit) * 100);

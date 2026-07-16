@@ -99,7 +99,7 @@ def create_credit_checkout(payload: CreditCheckout, request: Request) -> dict[st
             success_url=success_url,
             cancel_url=cancel_url,
         )
-    except stripe.error.StripeError as exc:
+    except stripe.StripeError as exc:
         raise HTTPException(status_code=502, detail="Stripe Checkout is temporarily unavailable") from exc
     if not session.url:
         raise HTTPException(status_code=502, detail="Stripe Checkout did not return a payment URL")
@@ -114,7 +114,7 @@ def confirm_credit_checkout(payload: CreditCheckoutConfirmation, request: Reques
     stripe = _configured_stripe()
     try:
         session = stripe.checkout.Session.retrieve(payload.sessionId)
-    except stripe.error.StripeError as exc:
+    except stripe.StripeError as exc:
         raise HTTPException(status_code=502, detail="Stripe could not verify this Checkout Session") from exc
     purchased_credits = _fulfill_checkout_session(session, event_key=f"return:{payload.sessionId}", expected_user_id=int(user["id"]))
     return {
@@ -133,7 +133,7 @@ async def stripe_webhook(request: Request) -> dict[str, bool]:
     stripe = _stripe_client()
     try:
         event = stripe.Webhook.construct_event(payload, signature, webhook_secret)
-    except (ValueError, stripe.error.SignatureVerificationError) as exc:
+    except (ValueError, stripe.SignatureVerificationError) as exc:
         raise HTTPException(status_code=400, detail="Invalid Stripe webhook") from exc
     if event["type"] in {"checkout.session.completed", "checkout.session.async_payment_succeeded"}:
         _fulfill_checkout_session(event["data"]["object"], event_key=str(event["id"]))

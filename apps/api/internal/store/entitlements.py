@@ -6,7 +6,7 @@ from typing import Any
 
 from internal.store.db import connect
 
-FREE_STARTING_TOKENS = max(0, int(os.getenv("FREE_AI_STARTING_TOKENS", "3")))
+FREE_STARTING_TOKENS = max(0, int(os.getenv("FREE_AI_STARTING_TOKENS", "30")))
 PRO_TRIAL_TOKENS = max(1, int(os.getenv("PRO_TRIAL_TOKENS", "100")))
 PRO_TRIAL_DAYS = max(1, int(os.getenv("PRO_TRIAL_DAYS", "30")))
 
@@ -55,8 +55,20 @@ def entitlement_status(user_id: int) -> dict[str, Any]:
     initial_tokens = PRO_TRIAL_TOKENS if pro_active else FREE_STARTING_TOKENS
     with connect() as db:
         db.execute(
-            "INSERT OR IGNORE INTO ai_credit_balances(user_id, balance, used_total, updated_at) VALUES(?, ?, 0, ?)",
-            (user_id, initial_tokens, now.isoformat()),
+            """INSERT OR IGNORE INTO ai_credit_balances(
+                   user_id, balance, used_total, starter_tokens_granted, updated_at
+               ) VALUES(?, ?, 0, ?, ?)""",
+            (user_id, initial_tokens, FREE_STARTING_TOKENS, now.isoformat()),
+        )
+        # Existing accounts received the old three-token starter grant. Raise their
+        # lifetime starter allowance to the current target exactly once without
+        # resetting usage or disturbing purchased/trial tokens.
+        db.execute(
+            """UPDATE ai_credit_balances
+               SET balance = balance + (? - starter_tokens_granted),
+                   starter_tokens_granted = ?, updated_at = ?
+               WHERE user_id = ? AND starter_tokens_granted < ?""",
+            (FREE_STARTING_TOKENS, FREE_STARTING_TOKENS, now.isoformat(), user_id, FREE_STARTING_TOKENS),
         )
         db.commit()
         token_row = db.execute("SELECT balance, used_total FROM ai_credit_balances WHERE user_id = ?", (user_id,)).fetchone()

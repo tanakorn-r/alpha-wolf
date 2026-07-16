@@ -95,6 +95,27 @@ export function LandingPage({ onEnter }: { onEnter: () => void }) {
           </div>
         </section>
 
+        <section id="learn" className="border-y border-[#1b1b20] bg-[#111114]">
+          <div className="mx-auto max-w-[1100px] px-5 py-14 sm:px-6">
+            <SectionHeading eyebrow="Research before the dashboard" title="Understand how Alpha Wolf reaches a decision" />
+            <div className="mt-8 grid gap-4 md:grid-cols-3">
+              <GuideLink href="/ai-stock-analysis.html" title="AI stock analysis" body="See the valuation, income, momentum, and quantitative evidence each named Agent examines." />
+              <GuideLink href="/ai-vs-dca-backtest.html" title="AI strategy vs DCA" body="Learn how the walk-forward replay handles contributions, dividends, cash, exposure, and drawdown." />
+              <GuideLink href="/dividend-buy-timing.html" title="Dividend buy timing" body="Understand ex-dividend cycles, post-ex price behavior, seasonality, valuation, and their limitations." />
+            </div>
+          </div>
+        </section>
+
+        <section id="faq" className="mx-auto max-w-[860px] px-5 py-16 sm:px-6">
+          <SectionHeading eyebrow="Clear answers" title="What Alpha Wolf is—and is not" />
+          <div className="mt-8 grid gap-3">
+            <FaqItem question="Is Alpha Wolf a broker?">No. Alpha Wolf is an investing research and decision-support dashboard. It does not execute trades.</FaqItem>
+            <FaqItem question="Does Alpha Wolf promise that AI will beat DCA?">No. AI Replay shows when an Agent wins or loses against normal monthly DCA and includes dividends, exposure, cash reserve, and drawdown.</FaqItem>
+            <FaqItem question="Which stock markets does Alpha Wolf support?">Thai Stock Exchange tickers using the .BK convention and US-listed stocks can live in the same portfolio.</FaqItem>
+            <FaqItem question="Is this financial advice?">No. AI-generated analysis can be wrong and is provided for decision support, not as personalized financial advice.</FaqItem>
+          </div>
+        </section>
+
         <section className="px-5 pb-16 text-center sm:px-6">
           <h2 className="text-[27px] font-extrabold tracking-[-0.03em]">Give every holding a second opinion.</h2>
           <p className="mx-auto mt-3 max-w-[500px] text-[13px] leading-[1.6] text-[#777780]">Start free. Unlock Hunt AI Pro for 30 days with no card when you&apos;re ready.</p>
@@ -102,7 +123,17 @@ export function LandingPage({ onEnter }: { onEnter: () => void }) {
         </section>
       </main>
 
-      <footer className="border-t border-[#19191e] px-5 py-7"><RiskDisclaimer /></footer>
+      <footer className="border-t border-[#19191e] px-5 py-7">
+        <nav className="mx-auto mb-5 flex max-w-[1100px] flex-wrap justify-center gap-x-5 gap-y-2 text-[11px] text-[#8c8c95]" aria-label="Alpha Wolf information">
+          <a className="transition hover:text-[#ececee]" href="/ai-stock-analysis.html">AI stock analysis</a>
+          <a className="transition hover:text-[#ececee]" href="/ai-vs-dca-backtest.html">AI vs DCA</a>
+          <a className="transition hover:text-[#ececee]" href="/dividend-buy-timing.html">Dividend buy timing</a>
+          <a className="transition hover:text-[#ececee]" href="/privacy">Privacy</a>
+          <a className="transition hover:text-[#ececee]" href="/terms">Terms</a>
+          <a className="transition hover:text-[#ececee]" href="/support">Support</a>
+        </nav>
+        <RiskDisclaimer />
+      </footer>
     </div>
   );
 }
@@ -133,6 +164,8 @@ function Price({ label, value, green = false }: { label: string; value: string; 
 function Stat({ value, label }: { value: string; label: string }) { return <div><div className="font-mono text-[20px] font-bold">{value}</div><div className="mt-0.5 text-[11px] font-medium text-[#5a5a62]">{label}</div></div>; }
 function SectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) { return <div className="text-center"><div className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#5a5a62]">{eyebrow}</div><h2 className="mt-2 text-[27px] font-extrabold tracking-[-0.03em]">{title}</h2></div>; }
 function FeatureCard({ title, body, children }: { title: string; body: string; children: React.ReactNode }) { return <article className="flex flex-col rounded-[14px] border border-[#2a2a31] bg-[#161619] p-5"><h3 className="text-[15px] font-bold">{title}</h3><p className="mt-2 min-h-[60px] text-[12px] leading-[1.55] text-[#8c8c95]">{body}</p><div className="mt-4 flex-1 rounded-[10px] border border-[#232329] bg-[#0e0e10] p-3.5">{children}</div></article>; }
+function GuideLink({ href, title, body }: { href: string; title: string; body: string }) { return <a href={href} className="group rounded-[14px] border border-[#2a2a31] bg-[#161619] p-5 transition hover:-translate-y-0.5 hover:border-[#3ecf8e]/50"><h3 className="text-[15px] font-bold text-[#ececee] group-hover:text-[#3ecf8e]">{title} →</h3><p className="mt-2 text-[12px] leading-[1.6] text-[#8c8c95]">{body}</p></a>; }
+function FaqItem({ question, children }: { question: string; children: React.ReactNode }) { return <article className="rounded-[12px] border border-[#2a2a31] bg-[#161619] p-5"><h3 className="text-[14px] font-bold">{question}</h3><p className="mt-2 text-[12.5px] leading-[1.65] text-[#8c8c95]">{children}</p></article>; }
 function DailyBriefDemo() { return <><p className="text-[10.5px] text-[#777780]">3 positions need a decision today.</p><div className="mt-2 flex gap-1.5"><Badge color="#f2575c">3 sell</Badge><Badge color="#f5c451">5 watch</Badge><Badge color="#3ecf8e">12 chill</Badge></div><div className="mt-3 rounded-[8px] border border-[#26262c] bg-[#151518] p-2.5"><div className="flex items-center gap-2"><b className="font-mono text-[13px]">PTT.BK</b><Badge color="#f5c451">Watch</Badge></div><p className="mt-1 text-[11px] font-semibold">Hold: earnings in 4 days</p></div></>; }
 function TimingDemo() { return <><div className="flex flex-wrap gap-2 text-[9.5px] text-[#777780]"><span>🟡 Ex-dividend</span><span>🔵 Payment</span></div><div className="mt-3 rounded-[8px] border border-[#26262c] bg-[#151518] p-2.5"><div className="flex items-center justify-between gap-2"><b className="font-mono text-[13px]">ADVANC.BK</b><Badge color="#3ecf8e">Good entry</Badge></div><p className="mt-1.5 text-[10.5px] leading-[1.5] text-[#777780]">Ex-div in 6 days · post-ex dip favored adding within 3 sessions in 8 of 10 cycles.</p></div></>; }
 function SignalDemo() { return <div className="flex items-center gap-3"><div className="grid h-14 w-14 shrink-0 place-items-center rounded-[13px] border border-[#3ecf8e]/50"><div className="text-center"><div className="font-mono text-[19px] font-extrabold leading-none text-[#3ecf8e]">78</div><div className="mt-1 text-[7px] uppercase text-[#777780]">setup</div></div></div><div><Badge color="#3ecf8e">Buy dip</Badge><p className="mt-2 text-[11.5px] font-semibold leading-[1.45]">NVDA pulled back into support on light volume.</p></div></div>; }

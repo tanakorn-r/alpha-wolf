@@ -432,12 +432,18 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
             user_id INTEGER PRIMARY KEY,
             balance INTEGER NOT NULL DEFAULT 0,
             used_total INTEGER NOT NULL DEFAULT 0,
+            starter_tokens_granted INTEGER NOT NULL DEFAULT 0,
             updated_at TEXT NOT NULL
         )
         """
     )
-    if "used_total" not in _table_columns(db, "ai_credit_balances"):
+    credit_balance_columns = _table_columns(db, "ai_credit_balances")
+    if "used_total" not in credit_balance_columns:
         db.execute("ALTER TABLE ai_credit_balances ADD COLUMN used_total INTEGER NOT NULL DEFAULT 0")
+    if "starter_tokens_granted" not in credit_balance_columns:
+        # Every balance created before this migration had the original three-token
+        # starter grant. entitlement_status() applies only the delta to the new target.
+        db.execute("ALTER TABLE ai_credit_balances ADD COLUMN starter_tokens_granted INTEGER NOT NULL DEFAULT 3")
     # Older releases attached paid credits to one calendar month's usage row. Move
     # every legacy bonus into the durable balance exactly once, then remove the
     # calendar-month ledger entirely so it can never reset or be used again.
