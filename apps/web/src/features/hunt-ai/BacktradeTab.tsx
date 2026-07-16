@@ -4,6 +4,7 @@ import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ErrorCard, TickerEmptyPanel } from "../../components/ui/panels";
 import { loadBacktradeJob, startBacktrade, type BacktradeDecision, type BacktradeJob, type BacktradeResult } from "../../lib/api";
 import type { HuntAi } from "./useHuntAi";
+import { finishFlow, startFlow } from "../../lib/analytics";
 
 export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
   const symbol = hunt.watchlist.activeTicker;
@@ -21,10 +22,16 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
   });
   const job = jobQuery.data;
 
+  useEffect(() => {
+    if (job?.status === "complete") finishFlow("ai_replay", "success");
+    else if (job?.status === "failed") finishFlow("ai_replay", "failure");
+  }, [job?.status]);
+
   useEffect(() => setJobId(hunt.replay.savedJobId), [hunt.replay.savedJobId, symbol, hunt.activeAgentId]);
 
   async function run() {
     if (!symbol || starting) return;
+    startFlow("ai_replay");
     setStarting(true);
     setError("");
     try {
@@ -33,6 +40,7 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
       hunt.replay.persistJob(created.id);
     } catch (value) {
       setError(value instanceof Error ? value.message : "Could not start AI Replay.");
+      finishFlow("ai_replay", "failure");
     } finally {
       setStarting(false);
     }

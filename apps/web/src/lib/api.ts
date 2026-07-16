@@ -1,4 +1,5 @@
 import type { StockRecord } from "../data/market";
+import { trackedFetch } from "./analytics";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
@@ -53,7 +54,7 @@ export type AiDecisionHistoryItem = {
 export async function loadAiDecisionHistory(subject: string, agent: string): Promise<AiDecisionHistoryItem[]> {
   if (!subject) return [];
   const query = new URLSearchParams({ subject, agent, limit: "20" });
-  const response = await fetch(`${API_BASE}/ai/decision-history?${query}`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/ai/decision-history?${query}`, { credentials: "include" });
   if (response.status === 401) return [];
   if (!response.ok) throw new Error(`Could not load decision history (${response.status})`);
   return ((await response.json()) as { items: AiDecisionHistoryItem[] }).items;
@@ -70,32 +71,32 @@ export type AppBootstrap = {
 };
 
 export async function loadAppBootstrap(): Promise<AppBootstrap> {
-  const response = await fetch(`${API_BASE}/bootstrap`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/bootstrap`, { credentials: "include" });
   if (!response.ok) throw new Error(`Could not restore app shell (${response.status})`);
   return (await response.json()) as AppBootstrap;
 }
 
 export async function loadNotifications(): Promise<{ items: AppNotification[]; unread: number }> {
-  const response = await fetch(`${API_BASE}/notifications`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/notifications`, { credentials: "include" });
   if (response.status === 401) return { items: [], unread: 0 };
   if (!response.ok) throw new Error(`Could not load notifications (${response.status})`);
   return response.json();
 }
 
 export async function markNotificationRead(id: number): Promise<void> {
-  const response = await fetch(`${API_BASE}/notifications/${id}/read`, { method: "POST", credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/notifications/${id}/read`, { method: "POST", credentials: "include" });
   if (!response.ok) throw new Error(`Could not update notification (${response.status})`);
 }
 
 export async function loadAuthUser(): Promise<AuthUser | null> {
-  const response = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/auth/me`, { credentials: "include" });
   if (!response.ok) throw new Error(`Failed to restore account: ${response.status}`);
   const payload = (await response.json()) as { user?: AuthUser | null };
   return payload.user ?? null;
 }
 
 export async function saveLocaleSettings(settings: LocaleSettings): Promise<LocaleSettings> {
-  const response = await fetch(`${API_BASE}/settings`, {
+  const response = await trackedFetch(`${API_BASE}/settings`, {
     method: "PUT",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -106,14 +107,14 @@ export async function saveLocaleSettings(settings: LocaleSettings): Promise<Loca
 }
 
 export async function loadPremiumPromoActive(): Promise<boolean> {
-  const response = await fetch(`${API_BASE}/auth/me`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/auth/me`, { credentials: "include" });
   if (!response.ok) return true;
   const payload = (await response.json()) as { premiumPromoActive?: boolean };
   return payload.premiumPromoActive ?? true;
 }
 
 export async function redeemPremiumPromo(): Promise<AuthUser | null> {
-  const response = await fetch(`${API_BASE}/auth/redeem-premium`, { method: "POST", credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/auth/redeem-premium`, { method: "POST", credentials: "include" });
   if (!response.ok) {
     let message = `Could not redeem Pro (${response.status})`;
     try { message = ((await response.json()) as { detail?: string }).detail ?? message; } catch { /* HTTP fallback */ }
@@ -124,7 +125,7 @@ export async function redeemPremiumPromo(): Promise<AuthUser | null> {
 }
 
 export async function createAiCreditCheckout(credits: 25 | 75 | 200, returnPath: string, acceptCurrentLegal = false): Promise<string> {
-  const response = await fetch(`${API_BASE}/auth/credit-checkout`, {
+  const response = await trackedFetch(`${API_BASE}/auth/credit-checkout`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -140,7 +141,7 @@ export async function createAiCreditCheckout(credits: 25 | 75 | 200, returnPath:
 }
 
 export async function confirmAiCreditCheckout(sessionId: string): Promise<{ user: AuthUser; purchasedCredits: number }> {
-  const response = await fetch(`${API_BASE}/auth/credit-checkout/confirm`, {
+  const response = await trackedFetch(`${API_BASE}/auth/credit-checkout/confirm`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -155,13 +156,13 @@ export async function confirmAiCreditCheckout(sessionId: string): Promise<{ user
 }
 
 export async function loadGoogleAuthBootstrap(): Promise<{ configured: boolean; clientId?: string | null; nonce?: string | null }> {
-  const response = await fetch(`${API_BASE}/auth/google/bootstrap`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/auth/google/bootstrap`, { credentials: "include" });
   if (!response.ok) throw new Error(`Failed to initialize Google sign-in: ${response.status}`);
   return (await response.json()) as { configured: boolean; clientId?: string | null; nonce?: string | null };
 }
 
 export async function connectGoogleAccount({ credential, nonce, acceptTerms, acceptPrivacy }: { credential: string; nonce: string; acceptTerms: boolean; acceptPrivacy: boolean }): Promise<AuthUser> {
-  const response = await fetch(`${API_BASE}/auth/google`, {
+  const response = await trackedFetch(`${API_BASE}/auth/google`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -173,13 +174,13 @@ export async function connectGoogleAccount({ credential, nonce, acceptTerms, acc
 }
 
 export async function acceptCurrentLegal(): Promise<AuthUser> {
-  const response = await fetch(`${API_BASE}/auth/legal/accept`, { method: "POST", credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/auth/legal/accept`, { method: "POST", credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Could not accept account terms (${response.status})`));
   return ((await response.json()) as { user: AuthUser }).user;
 }
 
 export async function downloadAccountExport(): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/account/export`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/auth/account/export`, { credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Could not export account (${response.status})`));
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
@@ -191,7 +192,7 @@ export async function downloadAccountExport(): Promise<void> {
 }
 
 export async function deleteAccount(value: { confirmation: string; acknowledgeCreditForfeiture: boolean }): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/account`, {
+  const response = await trackedFetch(`${API_BASE}/auth/account`, {
     method: "DELETE",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -201,7 +202,7 @@ export async function deleteAccount(value: { confirmation: string; acknowledgeCr
 }
 
 export async function submitSupportRequest(value: { email: string; category: "support" | "account" | "privacy" | "refund" | "bug"; subject: string; message: string }): Promise<{ requestId: number; message: string }> {
-  const response = await fetch(`${API_BASE}/support`, {
+  const response = await trackedFetch(`${API_BASE}/support`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -212,7 +213,7 @@ export async function submitSupportRequest(value: { email: string; category: "su
 }
 
 export async function disconnectAccount(): Promise<void> {
-  const response = await fetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/auth/logout`, { method: "POST", credentials: "include" });
   if (!response.ok) throw new Error(`Sign-out failed: ${response.status}`);
 }
 
@@ -226,7 +227,7 @@ export type MarketCatalogStatus = {
 };
 
 export async function ensureMarketCatalog(): Promise<MarketCatalogStatus> {
-  const response = await fetch(`${API_BASE}/catalog`);
+  const response = await trackedFetch(`${API_BASE}/catalog`);
   if (!response.ok) throw new Error(`Failed to initialize market catalog: ${response.status}`);
   return (await response.json()) as MarketCatalogStatus;
 }
@@ -791,13 +792,13 @@ export type BacktradeJob = {
 };
 
 export async function startBacktrade(payload: { symbol: string; agent: string; years: number; monthlyContribution: number; mode: "monthly" | "event" | "weekly" }): Promise<BacktradeJob> {
-  const response = await fetch(`${API_BASE}/backtrade/jobs`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  const response = await trackedFetch(`${API_BASE}/backtrade/jobs`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   if (!response.ok) throw new Error(await backtradeApiError(response, `Could not start replay (${response.status})`));
   return (await response.json()) as BacktradeJob;
 }
 
 export async function loadBacktradeJob(jobId: string): Promise<BacktradeJob> {
-  const response = await fetch(`${API_BASE}/backtrade/jobs/${encodeURIComponent(jobId)}`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/backtrade/jobs/${encodeURIComponent(jobId)}`, { credentials: "include" });
   if (!response.ok) throw new Error(await backtradeApiError(response, `Could not load replay (${response.status})`));
   return (await response.json()) as BacktradeJob;
 }
@@ -1052,7 +1053,7 @@ export async function loadStockDetail(symbol: string, strategy?: string, mode?: 
   if (strategy) params.set("strategy", strategy);
   if (mode) params.set("mode", mode);
   const query = params.toString() ? `?${params}` : "";
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}${query}`);
+  const response = await trackedFetch(`${API_BASE}/details/${encodeURIComponent(symbol)}${query}`);
   if (!response.ok) {
     throw new Error(`Failed to load stock detail: ${response.status}`);
   }
@@ -1061,7 +1062,7 @@ export async function loadStockDetail(symbol: string, strategy?: string, mode?: 
 }
 
 export async function loadStockResearch(symbol: string): Promise<StockResearchResponse> {
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/financials`);
+  const response = await trackedFetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/financials`);
   if (!response.ok) throw new Error(`Failed to load stock research: ${response.status}`);
   return (await response.json()) as StockResearchResponse;
 }
@@ -1110,7 +1111,7 @@ export async function loadUpwardMoves(symbol: string, timeframe: "1D" | "1W", ag
   const query = new URLSearchParams({ timeframe });
   if (agent) query.set("agent", agent);
   if (force) query.set("force", "true");
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/upward-moves?${query}`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/upward-moves?${query}`, { credentials: "include" });
   if (!response.ok) {
     let detail = `Failed to load technical moves: ${response.status}`;
     try {
@@ -1125,7 +1126,7 @@ export async function loadUpwardMoves(symbol: string, timeframe: "1D" | "1W", ag
 }
 
 export async function loadMarketSnapshot(market: string): Promise<MarketSnapshot> {
-  const response = await fetch(`${API_BASE}/market/${encodeURIComponent(market)}`);
+  const response = await trackedFetch(`${API_BASE}/market/${encodeURIComponent(market)}`);
   if (!response.ok) throw new Error(`Failed to load market: ${response.status}`);
   return (await response.json()) as MarketSnapshot;
 }
@@ -1134,13 +1135,13 @@ export async function loadMarketCalendar(params?: { month?: string; region?: "al
   const query = new URLSearchParams();
   if (params?.month) query.set("month", params.month);
   if (params?.region) query.set("region", params.region);
-  const response = await fetch(`${API_BASE}/calendar${query.toString() ? `?${query}` : ""}`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/calendar${query.toString() ? `?${query}` : ""}`, { credentials: "include" });
   if (!response.ok) throw new Error(`Failed to load market calendar: ${response.status}`);
   return (await response.json()) as MarketCalendarResponse;
 }
 
 export async function loadMarketComparison(symbol: string): Promise<MarketComparisonResponse> {
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/market-comparison`);
+  const response = await trackedFetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/market-comparison`);
   if (!response.ok) throw new Error(`Failed to load market comparison: ${response.status}`);
   return (await response.json()) as MarketComparisonResponse;
 }
@@ -1272,7 +1273,7 @@ export type BuyTimingResponse = AIProductionMetadata & {
 };
 
 export async function loadDeepAnalysis(symbol: string): Promise<DeepAnalysisResponse> {
-  const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/deep`);
+  const response = await trackedFetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/deep`);
   if (!response.ok) throw new Error(`Failed to load deep analysis: ${response.status}`);
   return (await response.json()) as DeepAnalysisResponse;
 }
@@ -1280,7 +1281,7 @@ export async function loadDeepAnalysis(symbol: string): Promise<DeepAnalysisResp
 export async function loadStockDetailsBatch(
   items: Array<{ symbol: string; strategy: string }>,
 ): Promise<Record<string, StockDetailResponse>> {
-  const response = await fetch(`${API_BASE}/details/batch`, {
+  const response = await trackedFetch(`${API_BASE}/details/batch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items }),
@@ -1291,7 +1292,7 @@ export async function loadStockDetailsBatch(
 }
 
 export async function loadAgents(): Promise<AgentProfile[]> {
-  const response = await fetch(`${API_BASE}/agents`);
+  const response = await trackedFetch(`${API_BASE}/agents`);
   if (!response.ok) throw new Error(`Failed to load agents: ${response.status}`);
   return (await response.json()) as AgentProfile[];
 }
@@ -1305,7 +1306,7 @@ export async function loadLatestAiResult<T>(params: {
 }): Promise<T | null> {
   const query = new URLSearchParams({ feature: params.feature, subject: params.subject, agent: params.agent });
   if (params.variantPrefix) query.set("variantPrefix", params.variantPrefix);
-  const response = await fetch(`${API_BASE}/ai/results/latest?${query}`, { credentials: "include", signal: params.signal });
+  const response = await trackedFetch(`${API_BASE}/ai/results/latest?${query}`, { credentials: "include", signal: params.signal });
   if (response.status === 204) return null;
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to restore saved AI result: ${response.status}`));
   return (await response.json()) as T;
@@ -1318,7 +1319,7 @@ export async function loadBuyTiming(symbol: string, agent?: string, force = fals
   const suffix = query.size ? `?${query}` : "";
   const startedAt = Date.now();
   while (Date.now() - startedAt < 60_000) {
-    const response = await fetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/buy-timing${suffix}`, { credentials: "include" });
+    const response = await trackedFetch(`${API_BASE}/details/${encodeURIComponent(symbol)}/buy-timing${suffix}`, { credentials: "include" });
     if (response.status === 202) {
       const pending = (await response.json()) as { retryAfterSeconds?: number };
       await new Promise((resolve) => window.setTimeout(resolve, Math.max(1, pending.retryAfterSeconds ?? 3) * 1_000));
@@ -1338,7 +1339,7 @@ export async function summarizeStock(symbol: string, strategy?: string, agent?: 
   if (agent) params.set("agent", agent);
   if (force) params.set("force", "true");
   const query = params.size ? `?${params}` : "";
-  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}${query}`, {
+  const response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}${query}`, {
     method: "POST",
     credentials: "include",
     headers: {
@@ -1381,7 +1382,7 @@ export async function loadAnalystReport(
     const timeout = window.setTimeout(() => controller.abort(), 35_000);
     let response: Response;
     try {
-      response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/report?${params}`, {
+      response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/report?${params}`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1420,7 +1421,7 @@ export async function loadQuantPerspective(symbol: string, strategy?: string, mo
   if (agent) params.set("agent", agent);
   if (force) params.set("force", "true");
   const query = params.size ? `?${params}` : "";
-  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/quant${query}`, {
+  const response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/quant${query}`, {
     method: "POST",
     credentials: "include",
     headers: {
@@ -1441,7 +1442,7 @@ export async function loadValuationVerdict(symbol: string, strategy?: string, ag
   if (agent) params.set("agent", agent);
   if (force) params.set("force", "true");
   const query = params.size ? `?${params}` : "";
-  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/valuation${query}`, {
+  const response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/valuation${query}`, {
     method: "POST",
     credentials: "include",
     headers: {
@@ -1462,7 +1463,7 @@ export async function loadTodayPerformance(symbol: string, strategy?: string, ag
   if (agent) params.set("agent", agent);
   if (force) params.set("force", "true");
   const query = params.size ? `?${params}` : "";
-  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/today${query}`, {
+  const response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/today${query}`, {
     method: "POST",
     credentials: "include",
     headers: {
@@ -1489,7 +1490,7 @@ export async function loadTechnicalAnalysis(symbol: string, agent?: string, forc
   const params = new URLSearchParams();
   if (agent) params.set("agent", agent);
   if (force) params.set("force", "true");
-  const response = await fetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/technical?${params}`, {
+  const response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/technical?${params}`, {
     method: "POST",
     credentials: "include",
   });
@@ -1509,7 +1510,7 @@ export async function loadStrategyPlaybook(params: { strategy: string; region?: 
   if (params.agent) queryParams.set("agent", params.agent);
   if (params.force) queryParams.set("force", "true");
   const query = queryParams.size ? `?${queryParams}` : "";
-  const response = await fetch(`${API_BASE}/strategy/recommendations${query}`, {
+  const response = await trackedFetch(`${API_BASE}/strategy/recommendations${query}`, {
     method: "POST",
     credentials: "include",
     headers: {
@@ -1535,32 +1536,32 @@ export async function loadPortfolioReview(agent?: string, force = false): Promis
   if (agent) params.set("agent", agent);
   if (force) params.set("force", "true");
   const query = params.size ? `?${params}` : "";
-  const response = await fetch(`${API_BASE}/analysis/portfolio/review${query}`, { method: "POST", credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/analysis/portfolio/review${query}`, { method: "POST", credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load portfolio review: ${response.status}`));
   return (await response.json()) as PortfolioReviewResponse;
 }
 
 export async function loadPortfolio(): Promise<PortfolioDashboard> {
-  const response = await fetch(`${API_BASE}/portfolio`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/portfolio`, { credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load portfolio: ${response.status}`));
   return (await response.json()) as PortfolioDashboard;
 }
 
 export async function loadPortfolioQuotes(): Promise<PortfolioQuotesResponse> {
-  const response = await fetch(`${API_BASE}/portfolio/quotes`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/portfolio/quotes`, { credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load portfolio quotes: ${response.status}`));
   return (await response.json()) as PortfolioQuotesResponse;
 }
 
 export async function loadPortfolioWatchlist(): Promise<string[]> {
-  const response = await fetch(`${API_BASE}/portfolio/watchlist`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/portfolio/watchlist`, { credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load watchlist: ${response.status}`));
   const payload = (await response.json()) as { symbols?: string[] };
   return payload.symbols ?? [];
 }
 
 export async function addPortfolioWatchlistSymbols(symbols: string[]): Promise<string[]> {
-  const response = await fetch(`${API_BASE}/portfolio/watchlist`, {
+  const response = await trackedFetch(`${API_BASE}/portfolio/watchlist`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -1572,52 +1573,52 @@ export async function addPortfolioWatchlistSymbols(symbols: string[]): Promise<s
 }
 
 export async function deletePortfolioWatchlistSymbol(symbol: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/portfolio/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE", credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/portfolio/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE", credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to remove watchlist symbol: ${response.status}`));
 }
 
 export async function saveHolding(value: { symbol: string; shares: number; averageCost: number; strategy: string; monthlyDca: number }) {
-  const response = await fetch(`${API_BASE}/portfolio/holdings`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  const response = await trackedFetch(`${API_BASE}/portfolio/holdings`, { method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to save holding: ${response.status}`));
 }
 
 export async function buyHolding(value: { symbol: string; shares: number; price: number; fees?: number; currency?: string; occurredAt?: string; strategy?: string; monthlyDca?: number }) {
-  const response = await fetch(`${API_BASE}/portfolio/holdings/buy`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  const response = await trackedFetch(`${API_BASE}/portfolio/holdings/buy`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to record buy: ${response.status}`));
   return (await response.json()) as PortfolioHolding;
 }
 
 export async function sellHolding(symbol: string, value: { shares: number; price: number; fees?: number; currency?: string; occurredAt?: string }): Promise<{ transaction: PortfolioTransaction; holding?: PortfolioHolding | null }> {
-  const response = await fetch(`${API_BASE}/portfolio/holdings/${encodeURIComponent(symbol)}/sell`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  const response = await trackedFetch(`${API_BASE}/portfolio/holdings/${encodeURIComponent(symbol)}/sell`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to record sale: ${response.status}`));
   return (await response.json()) as { transaction: PortfolioTransaction; holding?: PortfolioHolding | null };
 }
 
 export async function loadFxRates(): Promise<FxRatesResponse> {
-  const response = await fetch(`${API_BASE}/portfolio/fx`, { credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/portfolio/fx`, { credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load FX rates: ${response.status}`));
   return (await response.json()) as FxRatesResponse;
 }
 
 export async function deleteHolding(symbol: string) {
-  const response = await fetch(`${API_BASE}/portfolio/holdings/${encodeURIComponent(symbol)}`, { method: "DELETE", credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/portfolio/holdings/${encodeURIComponent(symbol)}`, { method: "DELETE", credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to delete holding: ${response.status}`));
 }
 
 export async function saveDcaOrder(value: { symbol: string; amount: number; scheduledFor: string; strategy: string; shares?: number }) {
-  const response = await fetch(`${API_BASE}/portfolio/dca-orders`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  const response = await trackedFetch(`${API_BASE}/portfolio/dca-orders`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to save DCA order: ${response.status}`));
   return (await response.json()) as DcaOrder;
 }
 
 export async function updateDcaOrderAmount(orderId: number, amount: number, shares?: number) {
-  const response = await fetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount, shares }) });
+  const response = await trackedFetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ amount, shares }) });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to update DCA order: ${response.status}`));
   return (await response.json()) as DcaOrder;
 }
 
 export async function deleteDcaOrder(orderId: number) {
-  const response = await fetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "DELETE", credentials: "include" });
+  const response = await trackedFetch(`${API_BASE}/portfolio/dca-orders/${orderId}`, { method: "DELETE", credentials: "include" });
   if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to delete DCA order: ${response.status}`));
 }
 
@@ -1652,7 +1653,7 @@ export async function loadStocks(params?: {
     query.set("limit", String(params.limit));
   }
 
-  const response = await fetch(`${API_BASE}/${endpoint}${query.toString() ? `?${query}` : ""}`);
+  const response = await trackedFetch(`${API_BASE}/${endpoint}${query.toString() ? `?${query}` : ""}`);
   if (!response.ok) {
     throw new Error(`Failed to load stocks: ${response.status}`);
   }
@@ -1691,7 +1692,7 @@ export async function loadDiscoveries(params?: {
     query.set("limit", String(params.limit));
   }
 
-  const response = await fetch(`${API_BASE}/discover${query.toString() ? `?${query}` : ""}`, {
+  const response = await trackedFetch(`${API_BASE}/discover${query.toString() ? `?${query}` : ""}`, {
     signal: params?.signal,
   });
   if (!response.ok) {
@@ -1705,13 +1706,13 @@ export async function loadTickerPresets(params?: { kind?: string; region?: strin
   const query = new URLSearchParams();
   if (params?.kind) query.set("kind", params.kind);
   if (params?.region) query.set("region", params.region);
-  const response = await fetch(`${API_BASE}/presets${query.toString() ? `?${query}` : ""}`);
+  const response = await trackedFetch(`${API_BASE}/presets${query.toString() ? `?${query}` : ""}`);
   if (!response.ok) throw new Error(`Failed to load ticker presets: ${response.status}`);
   return (await response.json()) as TickerPreset[];
 }
 
 export async function loadSectorInsight(key: string): Promise<SectorInsightResponse> {
-  const response = await fetch(`${API_BASE}/sectors/${encodeURIComponent(key)}`);
+  const response = await trackedFetch(`${API_BASE}/sectors/${encodeURIComponent(key)}`);
   if (!response.ok) {
     throw new Error(`Failed to load sector insight: ${response.status}`);
   }
@@ -1719,7 +1720,7 @@ export async function loadSectorInsight(key: string): Promise<SectorInsightRespo
 }
 
 export async function loadIndustryInsight(key: string): Promise<IndustryInsightResponse> {
-  const response = await fetch(`${API_BASE}/industries/${encodeURIComponent(key)}`);
+  const response = await trackedFetch(`${API_BASE}/industries/${encodeURIComponent(key)}`);
   if (!response.ok) {
     throw new Error(`Failed to load industry insight: ${response.status}`);
   }
@@ -1730,13 +1731,13 @@ export async function loadLiveTradeScreener(params?: { preset?: LiveTradePreset;
   const query = new URLSearchParams();
   if (params?.preset) query.set("preset", params.preset);
   if (typeof params?.limit === "number") query.set("limit", String(params.limit));
-  const response = await fetch(`${API_BASE}/live-trade/screener${query.toString() ? `?${query}` : ""}`);
+  const response = await trackedFetch(`${API_BASE}/live-trade/screener${query.toString() ? `?${query}` : ""}`);
   if (!response.ok) throw new Error(`Failed to load live trade screener: ${response.status}`);
   return (await response.json()) as LiveTradeScreenerResponse;
 }
 
 export async function loadLiveTradeQuote(symbol: string): Promise<LiveTradeQuoteResponse> {
-  const response = await fetch(`${API_BASE}/live-trade/quote?symbol=${encodeURIComponent(symbol)}`);
+  const response = await trackedFetch(`${API_BASE}/live-trade/quote?symbol=${encodeURIComponent(symbol)}`);
   if (!response.ok) throw new Error(`Failed to load live trade quote: ${response.status}`);
   return (await response.json()) as LiveTradeQuoteResponse;
 }

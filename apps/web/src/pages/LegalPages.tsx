@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { loadAuthUser, submitSupportRequest } from "../lib/api";
+import { AnalyticsPreference } from "../components/analytics/Analytics";
 
-const EFFECTIVE_DATE = "July 15, 2026";
+const EFFECTIVE_DATE = "July 16, 2026";
 
 export function TermsPage() {
   return <LegalPage title="Terms of Use" intro="Short terms for a research-and-notes product—not a trading account.">
@@ -22,7 +23,8 @@ export function PrivacyPage() {
     <Section title="Data we collect">When you sign in with Google, we receive your Google account identifier, name, email, and profile picture. We store the portfolio entries, transactions, watchlists, AI requests/results, token balance, support requests, and account settings you choose to use.</Section>
     <Section title="Payments and market data">Stripe processes checkout and card details; AlphaWolf stores a payment/session reference, token quantity, amount, currency, and fulfillment time. Public market information comes from external providers such as Yahoo Finance and is not personal data.</Section>
     <Section title="How we use data">We use account data to isolate your portfolio, restore saved research, calculate balances, prevent duplicate payment fulfillment, provide support, secure sessions, and operate the product.</Section>
-    <Section title="Processors">Necessary data may be handled by Google for sign-in, Stripe for payments, OpenAI for requested AI analysis, and our hosting/database providers. We do not sell personal information or use portfolio data to execute trades.</Section>
+    <Section title="Optional product analytics">If you choose Allow analytics, Google Firebase Analytics and Performance record page routes, coarse device/browser information, workflow success or failure, loading time, and request-performance metadata. We send an internal account identifier and coarse properties such as plan and locale—not your name, email, holdings, ticker searches, form input, AI request contents, or AI results. You can decline without losing product functionality.<AnalyticsPreference /></Section>
+    <Section title="Processors">Necessary data may be handled by Google for sign-in and, when you allow product analytics, Firebase Analytics and Performance; Stripe for payments; OpenAI for requested AI analysis; and our hosting/database providers. We do not sell personal information or use portfolio data to execute trades.</Section>
     <Section title="Retention and control">Account data remains until you delete the account or retention is required to resolve security, fraud, payment, or legal issues. From Your account you can download a JSON copy and permanently delete account-scoped product data.</Section>
     <Section title="Security and children">We use secure, HTTP-only sessions and account-scoped storage, but no online service is risk-free. AlphaWolf is not intended for children under 18.</Section>
     <Section title="Questions">Use the Privacy category on Support for access, correction, export, or deletion questions.</Section>

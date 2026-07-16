@@ -15,6 +15,8 @@ import { LiveTradePage } from "./pages/LiveTradePage";
 import { PrivacyPage, RefundPage, SupportPage, TermsPage } from "./pages/LegalPages";
 import { loadAppBootstrap, loadAuthUser } from "./lib/api";
 import { LocaleGate } from "./components/settings/LocalePreferences";
+import { AnalyticsConsentBanner, AnalyticsTracker } from "./components/analytics/Analytics";
+import { trackEvent } from "./lib/analytics";
 
 const VISITED_STORAGE_KEY = "aw_visited_app";
 
@@ -65,6 +67,7 @@ function HomeRoute() {
       <LandingPage
         onEnter={() => {
           if (typeof window !== "undefined") window.localStorage.setItem(VISITED_STORAGE_KEY, "1");
+          trackEvent("success_dashboard_opened");
           setEntered(true);
         }}
       />
@@ -117,7 +120,10 @@ function BootstrapGate() {
 
 export default function App() {
   return (
-    <Routes>
+    <>
+      <AnalyticsTracker />
+      <AnalyticsConsentBanner />
+      <Routes>
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/refunds" element={<RefundPage />} />
@@ -136,6 +142,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>
-    </Routes>
+      </Routes>
+    </>
   );
 }
