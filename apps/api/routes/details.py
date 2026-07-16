@@ -18,15 +18,12 @@ from internal.market.detail import build_detail_bundle, get_domain_insights, get
 from internal.market.data_trust import YAHOO_PROVIDER_POLICY
 from internal.market.patterns import signed_moves_from_points
 from internal.market.scoring import StrategyKey
-from internal.store.cache import cache_compute_lock, cache_get, cache_set
+from internal.store.cache import cache_compute_lock, cache_get
 from internal.store.ai_results import AIResultKey, AIResultQualityError, load_ai_result, save_ai_result
 from internal.store.ai_audit import record_ai_failure
 from models import MarketComparison, TechnicalMovesPredictionResponse
 
 router = APIRouter()
-
-UPWARD_MOVES_TTL_SECONDS = 900
-
 
 def _publish_ai_result(
     key: AIResultKey,
@@ -254,7 +251,6 @@ def details_buy_timing(
                 detail="The Agent response was incomplete. Please retry Buy Timing.",
             ) from exc
         response = _publish_ai_result(result_key, response, cached, usage_user_id, context={"buyTiming": agent_result}, data_trust=result.get("dataTrust"))
-        cache_set("analysis", ai_cache_key, response, UPWARD_MOVES_TTL_SECONDS)
         return response
 
 
@@ -318,5 +314,4 @@ def details_upward_moves(
     result["historicalMoves"] = historical.get("moves", [])[:10]
     result["dataTrust"] = bundle.get("dataTrust")
     result = _publish_ai_result(result_key, result, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
-    cache_set("analysis", cache_key, result, UPWARD_MOVES_TTL_SECONDS)
     return result

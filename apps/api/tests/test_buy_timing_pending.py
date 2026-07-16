@@ -47,14 +47,12 @@ class BuyTimingPendingTests(unittest.TestCase):
             patch.object(details, "claim_ai_run", return_value=(1, None)),
             patch.object(details, "release_ai_run") as release,
             patch.object(details, "analyze_buy_timing_with_openai", side_effect=details.OpenAIAnalysisError("invalid plan")),
-            patch.object(details, "cache_set") as cache_set,
         ):
             with self.assertRaises(HTTPException) as caught:
                 details.details_buy_timing("AAPL", _request(), "stable_dca", "vera", True)
 
         self.assertEqual(caught.exception.status_code, 503)
         release.assert_called_once_with(1)
-        cache_set.assert_not_called()
 
 
 if __name__ == "__main__":
