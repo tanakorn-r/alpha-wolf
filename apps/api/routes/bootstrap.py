@@ -6,10 +6,11 @@ from typing import Any
 from fastapi import APIRouter, Request
 
 from internal.ai.agents import public_agents
+from internal.auth_context import session_token_from_request
 from internal.store.auth import user_for_session
 from internal.store.notifications import list_notifications
 from internal.store.portfolio import list_watchlist
-from routes.auth import SESSION_COOKIE, premium_promo_active
+from routes.auth import premium_promo_active
 
 router = APIRouter()
 _ACCOUNT_READ_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="bootstrap-read")
@@ -18,7 +19,7 @@ _ACCOUNT_READ_EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="b
 @router.get("/api/bootstrap")
 def app_bootstrap(request: Request) -> dict[str, Any]:
     """Restore the small, shared app shell state in one network round trip."""
-    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    user = user_for_session(session_token_from_request(request))
     notifications: dict[str, Any] = {"items": [], "unread": 0}
     watchlist: list[str] = []
 

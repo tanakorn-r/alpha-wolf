@@ -5,11 +5,17 @@ from fastapi import HTTPException, Request
 from internal.store.auth import user_for_session
 
 SESSION_COOKIE = "aw_session"
+HOST_SESSION_COOKIE = "__Host-aw_session"
 GUEST_USER_ID = 0
 
 
+def session_token_from_request(request: Request) -> str | None:
+    """Prefer the hardened HTTPS cookie while accepting pre-migration sessions."""
+    return request.cookies.get(HOST_SESSION_COOKIE) or request.cookies.get(SESSION_COOKIE)
+
+
 def user_id_from_request(request: Request) -> int:
-    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    user = user_for_session(session_token_from_request(request))
     return int(user["id"]) if user else GUEST_USER_ID
 
 

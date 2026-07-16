@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from internal.legal import legal_versions
 from internal.store.account_lifecycle import create_support_request
+from internal.auth_context import session_token_from_request
 from internal.store.auth import user_for_session
 
 router = APIRouter(prefix="/api", tags=["legal-account"])
@@ -41,7 +42,7 @@ def legal_info() -> dict[str, Any]:
 def submit_support(payload: SupportRequest, request: Request) -> dict[str, Any]:
     if payload.website:
         raise HTTPException(status_code=400, detail="Invalid support request")
-    user = user_for_session(request.cookies.get("aw_session"))
+    user = user_for_session(session_token_from_request(request))
     request_id = create_support_request(
         user_id=int(user["id"]) if user else None,
         email=payload.email,

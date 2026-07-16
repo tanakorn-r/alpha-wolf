@@ -1,5 +1,3 @@
-const DEFAULT_API_ORIGIN = "https://alpha-wolf-api-6r4m3zptwq-an.a.run.app";
-
 export default {
   async fetch(request, env) {
     const incoming = new URL(request.url);
@@ -11,14 +9,17 @@ export default {
 };
 
 async function proxyApiRequest(request, env, incoming) {
+  if (!env.API_ORIGIN) {
+    return jsonError("API_ORIGIN is not configured", 503);
+  }
   let apiOrigin;
   try {
-    apiOrigin = new URL(String(env.API_ORIGIN || DEFAULT_API_ORIGIN).replace(/\/+$/, ""));
+    apiOrigin = new URL(String(env.API_ORIGIN).replace(/\/+$/, ""));
   } catch {
-    return new Response("API proxy is misconfigured", { status: 500 });
+    return jsonError("API proxy is misconfigured", 500);
   }
   if (apiOrigin.protocol !== "https:") {
-    return new Response("API proxy requires HTTPS", { status: 500 });
+    return jsonError("API proxy requires HTTPS", 500);
   }
 
   const upstream = new URL(`${incoming.pathname}${incoming.search}`, `${apiOrigin.origin}/`);
@@ -26,7 +27,19 @@ async function proxyApiRequest(request, env, incoming) {
   headers.delete("host");
   headers.set("x-forwarded-host", incoming.host);
   headers.set("x-forwarded-proto", "https");
+  headers.set("x-alpha-wolf-proxy", "first-party");
 
   const upstreamRequest = new Request(upstream, request);
-  return fetch(new Request(upstreamRequest, { headers }));
+  const upstreamResponse = await fetch(new Request(upstreamRequest, { headers }));
+  const response = new Response(upstreamResponse.body, upstreamResponse);
+  response.headers.set("cache-control", "no-store");
+  response.headers.set("pragma", "no-cache");
+  return response;
+}
+
+function jsonError(detail, status) {
+  return Response.json(
+    { detail },
+    { status, headers: { "cache-control": "no-store" } },
+  );
 }

@@ -90,6 +90,9 @@ export async function markNotificationRead(id: number): Promise<void> {
 export async function loadAuthUser(): Promise<AuthUser | null> {
   const response = await trackedFetch(`${API_BASE}/auth/me`, { credentials: "include" });
   if (!response.ok) throw new Error(`Failed to restore account: ${response.status}`);
+  if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
+    throw new Error("Authentication endpoint returned a non-JSON response. Check the /api proxy deployment.");
+  }
   const payload = (await response.json()) as { user?: AuthUser | null };
   return payload.user ?? null;
 }

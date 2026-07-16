@@ -104,6 +104,49 @@ class GoogleAuthTests(unittest.TestCase):
             self.assertTrue(auth._secure_cookie(request))
             self.assertEqual(auth._cookie_samesite(request), "none")
 
+    def test_first_party_proxy_uses_host_cookie_and_lax_samesite(self) -> None:
+        nonce = "proxy-nonce-value-1234567890"
+        claims = {
+            "sub": "proxy-user",
+            "email": "proxy@example.com",
+            "email_verified": True,
+            "nonce": nonce,
+        }
+        request = _request(headers={
+            "x-forwarded-proto": "https",
+            "x-alpha-wolf-proxy": "first-party",
+        })
+
+        with (
+            patch.dict("os.environ", {"AUTH_COOKIE_SECURE": "", "AUTH_COOKIE_SAMESITE": "none"}),
+            patch("routes.auth._verify_google_token", return_value=claims),
+        ):
+            response = Response()
+            auth.google_login(
+                auth.GoogleCredential(
+                    credential="x" * 40,
+                    nonce=nonce,
+                    acceptTerms=True,
+                    acceptPrivacy=True,
+                ),
+                request,
+                response,
+            )
+
+        set_cookie_headers = [value.decode() for key, value in response.raw_headers if key == b"set-cookie"]
+        host_cookie = next(value for value in set_cookie_headers if value.startswith(f"{auth.HOST_SESSION_COOKIE}="))
+        self.assertIn("HttpOnly", host_cookie)
+        self.assertIn("Secure", host_cookie)
+        self.assertIn("SameSite=lax", host_cookie)
+        self.assertIn("Path=/", host_cookie)
+        self.assertNotIn("Domain=", host_cookie)
+
+    def test_host_cookie_takes_precedence_over_legacy_cookie(self) -> None:
+        user = auth.upsert_google_user(google_sub="host-cookie", email="host@example.com", name="Host", picture_url=None)
+        token, _expires_at = auth.create_session(user["id"])
+        request = _request({auth.SESSION_COOKIE: "invalid", auth.HOST_SESSION_COOKIE: token})
+        self.assertEqual(auth.auth_me(request)["user"]["email"], "host@example.com")
+
     def test_authenticated_settings_round_trip_through_auth_me(self) -> None:
         user = auth.upsert_google_user(google_sub="settings-user", email="locale@example.com", name="Locale", picture_url=None)
         token, _expires_at = auth.create_session(user["id"])

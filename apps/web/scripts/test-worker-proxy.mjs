@@ -15,6 +15,7 @@ globalThis.fetch = async (request) => {
 
 try {
   const env = {
+    API_ORIGIN: "https://api.example",
     ASSETS: {
       fetch: async (request) => new Response(`asset:${new URL(request.url).pathname}`),
     },
@@ -28,11 +29,20 @@ try {
     env,
   );
   assert.equal(apiResponse.headers.get("content-type"), "application/json");
+  assert.equal(apiResponse.headers.get("cache-control"), "no-store");
   assert.match(apiResponse.headers.get("set-cookie") || "", /aw_session=test/);
   assert.equal(upstreamRequests.length, 1);
-  assert.equal(upstreamRequests[0].url, "https://alpha-wolf-api-6r4m3zptwq-an.a.run.app/api/auth/me?source=test");
+  assert.equal(upstreamRequests[0].url, "https://api.example/api/auth/me?source=test");
   assert.equal(upstreamRequests[0].method, "POST");
+  assert.equal(upstreamRequests[0].headers.get("x-alpha-wolf-proxy"), "first-party");
   assert.equal(await upstreamRequests[0].text(), "{}");
+
+  const missingOrigin = await worker.fetch(
+    new Request("https://alpha-wolf.example/api/auth/me"),
+    { ASSETS: env.ASSETS },
+  );
+  assert.equal(missingOrigin.status, 503);
+  assert.equal((await missingOrigin.json()).detail, "API_ORIGIN is not configured");
 
   const assetResponse = await worker.fetch(new Request("https://alpha-wolf.example/hunt-ai"), env);
   assert.equal(await assetResponse.text(), "asset:/hunt-ai");

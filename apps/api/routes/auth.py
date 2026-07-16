@@ -9,13 +9,13 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
+from internal.auth_context import HOST_SESSION_COOKIE, SESSION_COOKIE, session_token_from_request
 from internal.store.auth import account_exists, create_session, delete_session, upsert_google_user, user_for_session
 from internal.store.entitlements import fulfill_stripe_ai_credits, redeem_pro_trial
 from internal.store.account_lifecycle import delete_account_data, export_account_data, legal_acceptance_status, record_current_legal_acceptance
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-SESSION_COOKIE = "aw_session"
 NONCE_COOKIE = "aw_google_nonce"
 SESSION_TTL_DAYS = 30
 
@@ -52,7 +52,7 @@ CREDIT_PACKS = {
 @router.get("/me")
 def auth_me(request: Request) -> dict[str, Any]:
     return {
-        "user": user_for_session(request.cookies.get(SESSION_COOKIE)),
+        "user": user_for_session(session_token_from_request(request)),
         "premiumPromoActive": premium_promo_active(),
     }
 
@@ -61,16 +61,16 @@ def auth_me(request: Request) -> dict[str, Any]:
 def redeem_premium_route(request: Request) -> dict[str, Any]:
     if not premium_promo_active():
         raise HTTPException(status_code=409, detail="The free Pro promo is no longer available")
-    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    user = user_for_session(session_token_from_request(request))
     if not user:
         raise HTTPException(status_code=401, detail="Sign in before redeeming Pro")
     redeem_pro_trial(int(user["id"]))
-    return {"user": user_for_session(request.cookies.get(SESSION_COOKIE))}
+    return {"user": user_for_session(session_token_from_request(request))}
 
 
 @router.post("/credit-checkout")
 def create_credit_checkout(payload: CreditCheckout, request: Request) -> dict[str, Any]:
-    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    user = user_for_session(session_token_from_request(request))
     if not user:
         raise HTTPException(status_code=401, detail="Sign in before adding AI credits")
     if not user.get("legalAccepted"):
@@ -108,7 +108,7 @@ def create_credit_checkout(payload: CreditCheckout, request: Request) -> dict[st
 
 @router.post("/credit-checkout/confirm")
 def confirm_credit_checkout(payload: CreditCheckoutConfirmation, request: Request) -> dict[str, Any]:
-    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    user = user_for_session(session_token_from_request(request))
     if not user:
         raise HTTPException(status_code=401, detail="Sign in before confirming AI credits")
     stripe = _configured_stripe()
@@ -118,7 +118,7 @@ def confirm_credit_checkout(payload: CreditCheckoutConfirmation, request: Reques
         raise HTTPException(status_code=502, detail="Stripe could not verify this Checkout Session") from exc
     purchased_credits = _fulfill_checkout_session(session, event_key=f"return:{payload.sessionId}", expected_user_id=int(user["id"]))
     return {
-        "user": user_for_session(request.cookies.get(SESSION_COOKIE)),
+        "user": user_for_session(session_token_from_request(request)),
         "purchasedCredits": purchased_credits,
     }
 
@@ -268,32 +268,36 @@ def google_login(payload: GoogleCredential, request: Request, response: Response
     record_current_legal_acceptance(int(user["id"]), source="google_signup")
     user = {**user, **legal_acceptance_status(int(user["id"]))}
     raw_session, expires_at = create_session(user["id"], ttl_days=SESSION_TTL_DAYS)
+    secure_cookie = _secure_cookie(request)
+    cookie_name = HOST_SESSION_COOKIE if secure_cookie else SESSION_COOKIE
     response.set_cookie(
-        SESSION_COOKIE,
+        cookie_name,
         raw_session,
         max_age=SESSION_TTL_DAYS * 86_400,
         expires=expires_at,
         httponly=True,
-        secure=_secure_cookie(request),
+        secure=secure_cookie,
         samesite=_cookie_samesite(request),
         path="/",
     )
+    if cookie_name == HOST_SESSION_COOKIE:
+        response.delete_cookie(SESSION_COOKIE, path="/", secure=True, samesite="lax")
     response.delete_cookie(NONCE_COOKIE, path="/api/auth")
     return {"user": user}
 
 
 @router.post("/legal/accept")
 def accept_current_legal(request: Request) -> dict[str, Any]:
-    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    user = user_for_session(session_token_from_request(request))
     if not user:
         raise HTTPException(status_code=401, detail="Sign in before accepting account terms")
     record_current_legal_acceptance(int(user["id"]), source="account_settings")
-    return {"user": user_for_session(request.cookies.get(SESSION_COOKIE))}
+    return {"user": user_for_session(session_token_from_request(request))}
 
 
 @router.get("/account/export")
 def account_export(request: Request) -> Response:
-    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    user = user_for_session(session_token_from_request(request))
     if not user:
         raise HTTPException(status_code=401, detail="Sign in to export your account data")
     payload = json.dumps(export_account_data(int(user["id"])), ensure_ascii=False, indent=2, default=str)
@@ -306,7 +310,7 @@ def account_export(request: Request) -> Response:
 
 @router.delete("/account")
 def account_delete(payload: AccountDeletion, request: Request, response: Response) -> dict[str, bool]:
-    user = user_for_session(request.cookies.get(SESSION_COOKIE))
+    user = user_for_session(session_token_from_request(request))
     if not user:
         raise HTTPException(status_code=401, detail="Sign in to delete your account")
     if payload.confirmation.strip() != "DELETE":
@@ -315,15 +319,15 @@ def account_delete(payload: AccountDeletion, request: Request, response: Respons
     if remaining > 0 and not payload.acknowledgeCreditForfeiture:
         raise HTTPException(status_code=409, detail=f"This account still has {remaining} unused AI tokens. Confirm that deletion forfeits them, or contact support first.")
     delete_account_data(int(user["id"]))
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    _clear_session_cookies(response)
     response.delete_cookie(NONCE_COOKIE, path="/api/auth")
     return {"ok": True}
 
 
 @router.post("/logout")
 def logout(request: Request, response: Response) -> dict[str, bool]:
-    delete_session(request.cookies.get(SESSION_COOKIE))
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    delete_session(session_token_from_request(request))
+    _clear_session_cookies(response)
     response.delete_cookie(NONCE_COOKIE, path="/api/auth")
     return {"ok": True}
 
@@ -351,7 +355,16 @@ def _secure_cookie(request: Request) -> bool:
 
 
 def _cookie_samesite(request: Request) -> str:
+    if request.headers.get("x-alpha-wolf-proxy", "").strip().lower() == "first-party":
+        return "lax"
     configured = os.getenv("AUTH_COOKIE_SAMESITE", "").strip().lower()
     if configured in {"lax", "strict", "none"}:
         return configured
     return "none" if _secure_cookie(request) else "lax"
+
+
+def _clear_session_cookies(response: Response) -> None:
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    # __Host- cookies are accepted by browsers only when the deletion header also preserves
+    # Secure and Path=/ with no Domain attribute.
+    response.delete_cookie(HOST_SESSION_COOKIE, path="/", secure=True, samesite="lax")

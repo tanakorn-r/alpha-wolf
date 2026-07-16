@@ -45,8 +45,7 @@ Build command: npm run build
 Deploy command: npx wrangler deploy
 ```
 
-The Worker entrypoint proxies browser `/api/*` requests to the current Cloud Run
-service by default. If the service URL changes, set this optional Worker variable:
+Set this required Worker runtime variable to the Cloud Run origin:
 
 ```txt
 API_ORIGIN=https://YOUR-CLOUD-RUN-URL.a.run.app
@@ -56,6 +55,9 @@ Browser builds deliberately call same-origin `/api`; `apps/web/worker.js` proxie
 those requests to `API_ORIGIN` before the static asset fallback runs. This keeps the
 HttpOnly session cookie first-party for Safari. Do not set `VITE_API_BASE` for browser
 requests; that variable is reserved for packaged Capacitor builds, which have no edge proxy.
+
+The Worker intentionally returns 503 when `API_ORIGIN` is absent instead of silently
+falling back to a hardcoded deployment URL.
 
 The frontend build uses the standalone `apps/web/package.json`, so Cloudflare never scans the Nx workspace root.
 
