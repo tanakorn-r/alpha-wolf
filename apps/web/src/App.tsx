@@ -24,7 +24,7 @@ const VISITED_STORAGE_KEY = "aw_visited_app";
 // Native (Capacitor) users already installed the app to use it — never show marketing there.
 // On web, a brand-new anonymous visitor sees the landing page once; anyone signed in, or who has
 // already been through the app once on this device, goes straight to the Dashboard like before.
-type HomeDestination = "pending" | "landing" | "app";
+type HomeDestination = "landing" | "app";
 
 function AppLoading() {
   return <div className="grid min-h-screen place-items-center bg-[#0e0e10] text-[#3ecf8e]" role="status" aria-label="Loading Alpha Wolf"><LoadingSpinner size={22} /></div>;
@@ -33,7 +33,13 @@ function AppLoading() {
 function useHomeDestination(): HomeDestination {
   const native = Capacitor.isNativePlatform();
   const [visited, setVisited] = useState(() => typeof window !== "undefined" && window.localStorage.getItem(VISITED_STORAGE_KEY) === "1");
-  const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
+  const authQuery = useQuery({
+    queryKey: ["auth-user"],
+    queryFn: loadAuthUser,
+    staleTime: 300_000,
+    retry: 0,
+    placeholderData: null,
+  });
   const signedIn = Boolean(authQuery.data);
 
   // Only lock in "visited" once we KNOW they qualify to skip landing (native shell or a
@@ -47,12 +53,10 @@ function useHomeDestination(): HomeDestination {
     }
   }, [native, signedIn, visited]);
 
-  // Native never needs the auth round-trip to decide. On web, always wait for auth to resolve
-  // before mounting the Dashboard — jumping straight there on a stale "visited" flag (before we
-  // know the session is still valid) is what caused the visible skeleton-then-content blink on
-  // every hard refresh, since Dashboard's own skeleton is a different shape from its real layout.
+  // Session restoration is background hydration, never a reason to block the whole shell.
+  // Existing visitors can enter immediately; a new signed-in visitor moves from the landing
+  // page to the app as soon as the session response arrives.
   if (native) return "app";
-  if (authQuery.isPending) return "pending";
   if (visited || signedIn) return "app";
   return "landing";
 }
@@ -60,9 +64,6 @@ function useHomeDestination(): HomeDestination {
 function HomeRoute() {
   const destination = useHomeDestination();
   const [entered, setEntered] = useState(false);
-  if (destination === "pending") {
-    return <AppLoading />;
-  }
   if (destination === "landing" && !entered) {
     return (
       <LandingPage
@@ -95,7 +96,7 @@ function AppShell() {
 
 function BootstrapGate() {
   const queryClient = useQueryClient();
-  const bootstrap = useQuery({
+  useQuery({
     queryKey: ["app-bootstrap"],
     queryFn: async () => {
       const data = await loadAppBootstrap();
@@ -108,14 +109,11 @@ function BootstrapGate() {
       return data;
     },
     staleTime: 300_000,
-    retry: 1,
+    retry: 0,
   });
 
-  if (bootstrap.isPending) {
-    return <AppLoading />;
-  }
-  // A rolling frontend/API deploy must not strand the app if one side reaches production
-  // first. Existing feature queries remain the graceful fallback when bootstrap fails.
+  // Bootstrap is only a round-trip optimization. Feature queries remain the source-of-truth
+  // fallback, so a slow or failed aggregate response must never blank the application.
   return <Outlet />;
 }
 

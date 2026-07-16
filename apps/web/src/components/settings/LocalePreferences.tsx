@@ -1,7 +1,6 @@
 import { useEffect, useId, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { LoadingSpinner } from "../LoadingSpinner";
 import { loadAuthUser, saveLocaleSettings, type AuthUser, type LocaleSettings, type MarketPreference } from "../../lib/api";
 import { configureLocale, COUNTRY_CHOICES, CURRENCY_CHOICES, defaultsForCountry, detectLocaleSettings, LANGUAGE_CHOICES, LOCALE_CHOICES, MARKET_CHOICES, TIMEZONE_CHOICES } from "../../lib/locale";
 import { lockBodyScroll } from "../../lib/bodyScrollLock";
@@ -12,10 +11,13 @@ const label = "mb-2 block text-[13px] font-bold text-[#9a9aa3]";
 const primary = "rounded-[12px] bg-[#42d19a] px-8 py-3.5 text-[15px] font-black text-[#07110d] transition hover:bg-[#54dfaa] disabled:opacity-45";
 
 export function LocaleGate({ children }: { children: ReactNode }) {
-  const account = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
-  if (account.isPending) {
-    return <div className="grid min-h-screen place-items-center bg-[#0e0e10] text-[#3ecf8e]"><LoadingSpinner size={22} /></div>;
-  }
+  const account = useQuery({
+    queryKey: ["auth-user"],
+    queryFn: loadAuthUser,
+    staleTime: 300_000,
+    retry: 0,
+    placeholderData: null,
+  });
   const user = account.data ?? null;
   if (user && !user.settings) return <LocaleWizard initial={detectLocaleSettings()} />;
   configureLocale(user?.settings);

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from internal.store.telemetry import list_operational_telemetry, record_operational_telemetry
+from internal.store.db import _is_terminal_libsql_error
 
 router = APIRouter(prefix="/api/telemetry", tags=["operational-telemetry"])
 
@@ -86,7 +87,13 @@ class TelemetryBatch(BaseModel):
 def submit_telemetry(payload: TelemetryBatch) -> Response:
     # Deliberately accept no Request object: cookies, account/session identifiers,
     # IP addresses, user agents, and referrers are not read or persisted here.
-    record_operational_telemetry([event.model_dump() for event in payload.events])
+    try:
+        record_operational_telemetry([event.model_dump() for event in payload.events])
+    except Exception as exc:
+        # Operational telemetry is explicitly best-effort. A stale Turso stream must not
+        # create more client retries or compete with account restoration during recovery.
+        if not _is_terminal_libsql_error(exc):
+            raise
     return Response(status_code=204)
 
 

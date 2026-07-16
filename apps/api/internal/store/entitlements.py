@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from internal.store.db import connect
+from internal.store.db import _is_terminal_libsql_error, connect
 
 FREE_STARTING_TOKENS = max(0, int(os.getenv("FREE_AI_STARTING_TOKENS", "30")))
 PRO_TRIAL_TOKENS = max(1, int(os.getenv("PRO_TRIAL_TOKENS", "100")))
@@ -54,24 +54,17 @@ def entitlement_status(user_id: int) -> dict[str, Any]:
     pro_active = bool(expires_at and expires_at > now)
     initial_tokens = PRO_TRIAL_TOKENS if pro_active else FREE_STARTING_TOKENS
     with connect() as db:
-        db.execute(
-            """INSERT OR IGNORE INTO ai_credit_balances(
-                   user_id, balance, used_total, starter_tokens_granted, updated_at
-               ) VALUES(?, ?, 0, ?, ?)""",
-            (user_id, initial_tokens, FREE_STARTING_TOKENS, now.isoformat()),
-        )
-        # Existing accounts received the old three-token starter grant. Raise their
-        # lifetime starter allowance to the current target exactly once without
-        # resetting usage or disturbing purchased/trial tokens.
-        db.execute(
-            """UPDATE ai_credit_balances
-               SET balance = balance + (? - starter_tokens_granted),
-                   starter_tokens_granted = ?, updated_at = ?
-               WHERE user_id = ? AND starter_tokens_granted < ?""",
-            (FREE_STARTING_TOKENS, FREE_STARTING_TOKENS, now.isoformat(), user_id, FREE_STARTING_TOKENS),
-        )
-        db.commit()
-        token_row = db.execute("SELECT balance, used_total FROM ai_credit_balances WHERE user_id = ?", (user_id,)).fetchone()
+        token_row = db.execute(
+            "SELECT balance, used_total, starter_tokens_granted FROM ai_credit_balances WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+    # Normal session restoration is read-only. Only old or brand-new accounts need the
+    # idempotent balance maintenance transaction, which is retried once if Turso expires
+    # the Hrana stream between statements.
+    if not token_row or int(token_row[2] or 0) < FREE_STARTING_TOKENS:
+        token_row = _ensure_credit_balance(user_id, initial_tokens, now.isoformat())
+
     tokens = max(0, int(token_row[0])) if token_row else 0
     used = max(0, int(token_row[1])) if token_row else 0
     return {
@@ -85,6 +78,40 @@ def entitlement_status(user_id: int) -> dict[str, Any]:
             "remaining": tokens,
         },
     }
+
+
+def _ensure_credit_balance(user_id: int, initial_tokens: int, now_iso: str):
+    for attempt in range(2):
+        try:
+            return _ensure_credit_balance_once(user_id, initial_tokens, now_iso)
+        except Exception as exc:
+            if attempt == 0 and _is_terminal_libsql_error(exc):
+                continue
+            raise
+    raise RuntimeError("Credit balance maintenance retry exhausted")
+
+
+def _ensure_credit_balance_once(user_id: int, initial_tokens: int, now_iso: str):
+    with connect() as db:
+        db.execute(
+            """INSERT OR IGNORE INTO ai_credit_balances(
+                   user_id, balance, used_total, starter_tokens_granted, updated_at
+               ) VALUES(?, ?, 0, ?, ?)""",
+            (user_id, initial_tokens, FREE_STARTING_TOKENS, now_iso),
+        )
+        # Existing accounts received the old three-token starter grant. Raise their
+        # lifetime starter allowance to the current target exactly once without
+        # resetting usage or disturbing purchased/trial tokens.
+        db.execute(
+            """UPDATE ai_credit_balances
+               SET balance = balance + (? - starter_tokens_granted),
+                   starter_tokens_granted = ?, updated_at = ?
+               WHERE user_id = ? AND starter_tokens_granted < ?""",
+            (FREE_STARTING_TOKENS, FREE_STARTING_TOKENS, now_iso, user_id, FREE_STARTING_TOKENS),
+        )
+        db.commit()
+        token_row = db.execute("SELECT balance, used_total FROM ai_credit_balances WHERE user_id = ?", (user_id,)).fetchone()
+    return token_row
 
 
 def fulfill_stripe_ai_credits(
