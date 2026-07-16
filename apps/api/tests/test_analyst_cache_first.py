@@ -107,17 +107,58 @@ class AnalystCacheFirstTests(unittest.TestCase):
             patch.object(analysis, "_position_context", return_value={}),
             patch.object(analysis, "_position_cache_key", return_value="none"),
             patch.object(analysis, "cache_get", return_value=None),
-            patch.object(analysis, "_fetch_analysis_data", return_value=(pending_bundle, {}, {}, {})),
-            patch.object(analysis, "analyze_with_openai") as openai,
+            patch.object(analysis, "_fetch_analysis_data", return_value=(pending_bundle, {}, {}, {})) as fetch,
+            patch.object(analysis, "analyze_brief_with_openai") as openai,
         ):
             response = analysis.analyst_report("AAPL", _request(), {"strategy": "capitalized"}, "vera", False)
 
         self.assertIsInstance(response, JSONResponse)
         self.assertEqual(response.status_code, 202)
+        self.assertTrue(fetch.call_args.kwargs["refresh_market_tape"])
+        openai.assert_not_called()
+
+    def test_technical_refresh_waits_for_fresh_tape_before_openai(self) -> None:
+        stale_bundle = {
+            "stock": {"symbol": "AAPL", "price": 100},
+            "history": [{"close": 100}] * 20,
+            "dataTrust": {
+                "datasets": [
+                    {"name": "quote", "available": True, "stale": False},
+                    {"name": "history", "available": True, "stale": True},
+                ]
+            },
+        }
+        with (
+            patch.object(analysis, "require_ai_account"),
+            patch.object(analysis, "user_id_from_request", return_value=1),
+            patch.object(analysis, "account_cache_scope", return_value="user:1"),
+            patch.object(analysis, "_position_context", return_value={}),
+            patch.object(analysis, "_position_cache_key", return_value="none"),
+            patch.object(analysis, "load_ai_result", return_value=None),
+            patch.object(analysis, "cache_get", return_value=None),
+            patch.object(analysis, "build_detail_bundle", return_value=stale_bundle) as build,
+            patch.object(analysis, "claim_ai_run") as claim,
+            patch.object(analysis, "analyze_technicals_with_openai") as openai,
+        ):
+            response = analysis.technical_analysis("AAPL", _request(), "vera", True)
+
+        self.assertIsInstance(response, JSONResponse)
+        self.assertEqual(response.status_code, 202)
+        build.assert_called_once_with("AAPL", "momentum", refresh_stale=True)
+        claim.assert_not_called()
         openai.assert_not_called()
 
     def test_failed_refresh_returns_last_saved_analyst_report(self) -> None:
-        bundle = {"stock": {"symbol": "AAPL", "price": 100}, "history": [{"close": 100}] * 10}
+        bundle = {
+            "stock": {"symbol": "AAPL", "price": 100},
+            "history": [{"close": 100}] * 10,
+            "dataTrust": {
+                "datasets": [
+                    {"name": "quote", "available": True, "stale": False},
+                    {"name": "history", "available": True, "stale": False},
+                ]
+            },
+        }
         saved = {
             "signal": "HOLD",
             "confidence": 52,

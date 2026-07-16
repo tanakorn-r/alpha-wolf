@@ -168,7 +168,7 @@
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Made every active AI regeneration database-first: `force=true` now reruns only OpenAI against persisted evidence, detail context batch-loads modules/quote/5Y history/news/dividends in one Turso read, stale stored evidence does not trigger Yahoo, market comparison persists for one day, and single-stock AI context no longer rebuilds `/portfolio`.
+- Added `code.md` as the repository-wide engineering contract for architecture boundaries, coding style, financial/AI invariants, security, testing, and review workflow; linked it from `docs/CODEMAP.md`.
 
 **Recent Context**
 - Fixed a live crash (`Uncaught RangeError: Invalid currency code : null` in `StockDetailDrawer`'s `DrawerHeader`, `formatCurrency`). Root cause: `formatCurrency(value, currency = "USD")`'s default parameter only covers `undefined`, not an explicit `null` — and `detail.stock.currency` can genuinely be `null` now that the backend's cache-first fallback (prior entries) returns empty fields immediately for a freshly-uncached symbol instead of blocking until real data arrives. Fixed `formatCurrency` (`apps/web/src/lib/format.ts`) to coalesce `currency || "USD"` so `null` and `undefined` both fall back correctly. Checked the file for the same gap elsewhere: `formatMoneyAs` requires a non-optional `"USD" | "THB"` literal union, so TypeScript already catches a stray `null` there at compile time — `formatCurrency` was the only vulnerable one. tsc clean.

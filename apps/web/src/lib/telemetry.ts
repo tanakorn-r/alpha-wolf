@@ -1,3 +1,5 @@
+import { API_BASE } from "./apiBase";
+
 export type FlowOutcome = "success" | "failure" | "abandoned";
 
 type OperationalEvent = {
@@ -9,7 +11,6 @@ type OperationalEvent = {
   durationMs?: number;
 };
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 const TELEMETRY_ENDPOINT = `${API_BASE.replace(/\/+$/, "")}/telemetry`;
 const FLUSH_DELAY_MS = 1_500;
 const MAX_BATCH_SIZE = 25;

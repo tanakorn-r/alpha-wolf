@@ -3,6 +3,9 @@
 Token-lean directory + pattern map. If a path here is missing on disk, trust
 disk and fix this file. Update the map whenever files are added/moved/deleted.
 
+Repository engineering rules: [`code.md`](../code.md). Current product state
+and active work: [`claude.md`](../claude.md).
+
 ## Monorepo layout
 
 ```

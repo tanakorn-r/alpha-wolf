@@ -25,7 +25,16 @@ class DetailPendingCacheTests(unittest.TestCase):
         self.assertEqual(cache_set.call_args.args[3], detail.PENDING_DETAIL_TTL_SECONDS)
 
     def test_ready_bundle_uses_normal_cache_ttl(self) -> None:
-        ready = {"stock": {"symbol": "TEST"}, "dataPending": False}
+        ready = {
+            "stock": {"symbol": "TEST"},
+            "dataPending": False,
+            "dataTrust": {
+                "datasets": [
+                    {"name": "quote", "available": True, "stale": False},
+                    {"name": "history", "available": True, "stale": False},
+                ]
+            },
+        }
 
         with (
             patch.object(detail, "cache_get", return_value=None),
@@ -35,6 +44,27 @@ class DetailPendingCacheTests(unittest.TestCase):
             detail.build_detail_bundle("TEST", "capitalized")
 
         self.assertEqual(cache_set.call_args.args[3], detail.DETAIL_TTL_SECONDS)
+
+    def test_stale_tape_bundle_uses_short_cache_ttl(self) -> None:
+        stale = {
+            "stock": {"symbol": "TEST"},
+            "dataPending": False,
+            "dataTrust": {
+                "datasets": [
+                    {"name": "quote", "available": True, "stale": False},
+                    {"name": "history", "available": True, "stale": True},
+                ]
+            },
+        }
+
+        with (
+            patch.object(detail, "cache_get", return_value=None),
+            patch.object(detail, "_build_detail_bundle_uncached", return_value=stale),
+            patch.object(detail, "cache_set") as cache_set,
+        ):
+            detail.build_detail_bundle("TEST", "momentum")
+
+        self.assertEqual(cache_set.call_args.args[3], detail.PENDING_DETAIL_TTL_SECONDS)
 
 
 if __name__ == "__main__":

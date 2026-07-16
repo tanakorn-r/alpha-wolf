@@ -21,12 +21,32 @@ YAHOO_PROVIDER_POLICY: dict[str, Any] = {
     ],
     "cacheWindows": {
         "quote": "60 seconds",
-        "history": "1 day",
+        "history": "15 minutes",
         "news": "15 minutes",
         "dividends": "1 day",
         "fundamentals": "90 days",
     },
 }
+
+
+def market_tape_needs_refresh(data_trust: dict[str, Any] | None) -> bool:
+    """Return whether quote or daily-history evidence is absent or expired.
+
+    Fundamentals, news, and dividends have independent freshness contracts. Technical AI
+    should wait only for the two datasets that can change its current-price/chart reading.
+    """
+    datasets = data_trust.get("datasets") if isinstance(data_trust, dict) else None
+    if not isinstance(datasets, list):
+        return True
+    tape = {
+        str(item.get("name") or "").lower(): item
+        for item in datasets
+        if isinstance(item, dict) and str(item.get("name") or "").lower() in {"quote", "history"}
+    }
+    return any(
+        name not in tape or not bool(tape[name].get("available")) or bool(tape[name].get("stale"))
+        for name in ("quote", "history")
+    )
 
 
 def yahoo_dataset_meta(

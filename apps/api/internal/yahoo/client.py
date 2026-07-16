@@ -15,8 +15,12 @@ from internal.store.yahoo_cache import YahooCacheEntry, load_yahoo_data, save_ya
 
 QUOTE_TTL_SECONDS = 60
 MODULES_TTL_SECONDS = 90 * 86_400
-HISTORY_TTL_SECONDS = 86_400
-LONG_HISTORY_TTL_SECONDS = 86_400
+# Daily candles are mutable while a market session is open. A rolling 24-hour TTL can
+# therefore keep yesterday's last candle "fresh" through all of today's session. Refresh
+# accessed histories every 15 minutes; long histories still download only the latest month
+# and merge it into the stored frame, with a full backfill limited to once per week.
+HISTORY_TTL_SECONDS = 900
+LONG_HISTORY_TTL_SECONDS = 900
 FULL_HISTORY_REFRESH_SECONDS = 604_800
 NEWS_TTL_SECONDS = 900
 DIVIDENDS_TTL_SECONDS = 86_400
@@ -28,6 +32,7 @@ DIVIDENDS_TTL_SECONDS = 86_400
 MIN_REFRESH_ATTEMPT_INTERVAL_SECONDS = 60
 YAHOO_BACKGROUND_WORKERS = max(1, int(os.getenv("YAHOO_BACKGROUND_WORKERS", "6")))
 _YAHOO_EXECUTOR = ThreadPoolExecutor(max_workers=YAHOO_BACKGROUND_WORKERS, thread_name_prefix="yahoo-refresh")
+_INCREMENTAL_HISTORY_PERIODS = {"3mo", "6mo", "1y", "2y", "5y", "10y", "max"}
 
 
 def ticker(symbol: str) -> yf.Ticker:
@@ -332,9 +337,9 @@ def fetch_history(
             # Re-read inside the task (not the value captured above) since some time may
             # have passed between scheduling and actually running on the background thread.
             current = load_yahoo_data(symbol, dataset, period)
-            is_long_history = period.lower() in {"5y", "10y", "max"}
-            full_refresh = load_yahoo_data(symbol, f"{dataset}_full_refresh", period) if is_long_history else None
-            live_period = "1mo" if current and is_long_history and full_refresh and full_refresh.is_fresh else period
+            supports_incremental = period.lower() in _INCREMENTAL_HISTORY_PERIODS
+            full_refresh = load_yahoo_data(symbol, f"{dataset}_full_refresh", period) if supports_incremental else None
+            live_period = "1mo" if current and supports_incremental and full_refresh and full_refresh.is_fresh else period
             try:
                 result = normalize_history_frame(t.history(period=live_period, interval="1d", auto_adjust=auto_adjust))
             except Exception:
@@ -344,7 +349,7 @@ def fetch_history(
             if live_period != period and current:
                 result = _merge_history(_history_from_payload(current.payload), result)
             save_yahoo_data(symbol, dataset, _history_to_payload(result), period=period, ttl_seconds=_history_ttl(period))
-            if live_period == period and is_long_history:
+            if live_period == period and supports_incremental:
                 save_yahoo_data(
                     symbol,
                     f"{dataset}_full_refresh",

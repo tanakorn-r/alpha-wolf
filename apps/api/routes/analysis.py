@@ -16,7 +16,7 @@ from internal.ai.context import build_analysis_context, build_technical_context,
 from internal.ai.production_gate import attach_run_context, build_decision_state
 from internal.ai.openai_client import OpenAIAnalysisError, analyze_brief_with_openai, analyze_quant_with_openai, analyze_technicals_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
 from internal.market.detail import build_detail_bundle, get_ai_financials, get_domain_insights, get_market_comparison
-from internal.market.data_trust import build_universe_data_trust
+from internal.market.data_trust import build_universe_data_trust, market_tape_needs_refresh
 from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
 from internal.market.universe import build_market_page
@@ -26,7 +26,7 @@ from internal.store.ai_audit import list_ai_decision_history, record_ai_failure
 from internal.store.db import connect
 from internal.store.portfolio import list_holdings
 from internal.store.utils import as_float
-from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TechnicalAnalysisResponse, TodayPerformanceResponse, ValuationVerdictResponse
+from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TodayPerformanceResponse, ValuationVerdictResponse
 
 router = APIRouter()
 
@@ -211,6 +211,7 @@ def _fetch_analysis_data(
     include_financials: bool = True,
     include_market: bool = True,
     include_insights: bool = True,
+    refresh_market_tape: bool = False,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Fetch bundle + financials + market comparison + domain insights in parallel.
 
@@ -223,10 +224,10 @@ def _fetch_analysis_data(
     insights: dict[str, Any] = {}
 
     def _bundle() -> dict[str, Any] | None:
-        # AI generation is database-first even when force=true. Force regenerates only the
-        # OpenAI answer; stale persisted market evidence remains valid input and Yahoo refresh
-        # is scheduled only for a dataset that has never been stored.
-        return build_detail_bundle(symbol, strategy, mode=mode, refresh_stale=False)
+        # Every AI path remains database-first. The Stock Analyst can explicitly prime stale
+        # quote/history rows in background and return 202 before OpenAI; other callers preserve
+        # their existing stored-evidence behavior.
+        return build_detail_bundle(symbol, strategy, mode=mode, refresh_stale=refresh_market_tape)
 
     def _financials() -> dict[str, Any]:
         try:
@@ -374,10 +375,11 @@ def analyst_report(
         include_financials=include_financials,
         include_market=include_market,
         include_insights=include_insights,
+        refresh_market_tape=True,
     )
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
-    if bundle.get("dataPending"):
+    if bundle.get("dataPending") or market_tape_needs_refresh(bundle.get("dataTrust")):
         return JSONResponse(status_code=202, content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3})
 
     context = build_analysis_context(
@@ -646,8 +648,13 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     return result
 
 
-@router.post("/api/analysis/{symbol}/technical", response_model=TechnicalAnalysisResponse)
-def technical_analysis(symbol: str, request: Request, agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
+@router.post("/api/analysis/{symbol}/technical", response_model=None)
+def technical_analysis(
+    symbol: str,
+    request: Request,
+    agent: str = Query("vera"),
+    force: bool = Query(False),
+) -> dict[str, Any] | JSONResponse:
     require_ai_account(request, premium_required=True)
     normalized = symbol.upper().strip()
     agent_id = normalize_agent_id(agent)
@@ -661,9 +668,17 @@ def technical_analysis(symbol: str, request: Request, agent: str = Query("vera")
     if cached is not None and not force:
         return cached
 
-    bundle = build_detail_bundle(normalized, "momentum", refresh_stale=False)
+    # Generating a new technical read first primes the cache-first quote/history refresh. If
+    # either snapshot is stale, return before claiming quota or calling OpenAI; the browser
+    # polls this endpoint and the next request consumes the newly persisted market evidence.
+    bundle = build_detail_bundle(normalized, "momentum", refresh_stale=True)
     if not bundle:
         raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    if bundle.get("dataPending") or market_tape_needs_refresh(bundle.get("dataTrust")):
+        return JSONResponse(
+            status_code=202,
+            content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3},
+        )
     _require_ai_market_data(bundle, normalized)
     context = build_technical_context(bundle, position_context=position_context)
     context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))

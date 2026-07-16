@@ -53,6 +53,16 @@ function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentI
   return data?.agent?.id === agentId;
 }
 
+function technicalTapeNeedsRefresh(detail: StockDetailResponse | undefined): boolean {
+  if (!detail) return false;
+  if (detail.dataPending) return true;
+  const datasets = detail.dataTrust?.datasets ?? [];
+  return ["quote", "history"].some((name) => {
+    const dataset = datasets.find((item) => item.name.toLowerCase() === name);
+    return !dataset?.available || dataset.stale;
+  });
+}
+
 export function useHuntAi() {
   const queryClient = useQueryClient();
   const [tab, setTabState] = useState<HuntTab>("signals");
@@ -282,6 +292,7 @@ export function useHuntAi() {
     queryFn: () => loadStockDetail(activeTicker, "momentum"),
     enabled: tab === "technical" && Boolean(activeTicker),
     staleTime: 300_000,
+    refetchInterval: (query) => technicalTapeNeedsRefresh(query.state.data) ? 3_000 : 300_000,
   });
   const savedIntradayQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "stock-analysis", activeTicker, activeAgentId, "momentum"],

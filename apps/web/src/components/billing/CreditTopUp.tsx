@@ -28,6 +28,7 @@ export function CreditTopUpButton({ label = "Refill AI tokens", className = "" }
 }
 
 function CreditTopUpModal({ onClose }: { onClose: () => void }) {
+  const isProduction = import.meta.env.PROD;
   const [selected, setSelected] = useState<25 | 75 | 200>(75);
   const [buying, setBuying] = useState(false);
   const [error, setError] = useState("");
@@ -69,7 +70,11 @@ function CreditTopUpModal({ onClose }: { onClose: () => void }) {
     <Modal title="Refill AI tokens" onClose={onClose}>
       <>
           <div className="rounded-[var(--aw-radius-control)] border border-[#f5c451]/25 bg-[#f5c451]/[0.06] px-3 py-2.5 text-[10.5px] leading-[1.5] text-[#d5c28c]">
-            <b className="text-[#f5c451]">Stripe test checkout.</b> You will continue to Stripe&apos;s hosted sandbox. Use a Stripe test card; purchased tokens stay on your account until used, but do not unlock Pro-only tabs.
+            {isProduction ? (
+              <><b className="text-[#f5c451]">Secure Stripe checkout.</b> You will continue to Stripe to complete a real payment. Purchased tokens stay on your account until used, but do not unlock Pro-only tabs.</>
+            ) : (
+              <><b className="text-[#f5c451]">Stripe test checkout.</b> You will continue to Stripe&apos;s hosted sandbox. Use a Stripe test card; purchased tokens stay on your account until used, but do not unlock Pro-only tabs.</>
+            )}
           </div>
           <div className="mt-3 grid gap-2">
             {PACKS.map((item) => (

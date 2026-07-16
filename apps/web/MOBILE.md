@@ -18,7 +18,8 @@ cp apps/web/.env.production.example apps/web/.env.production
 ```
 
 `.env.production` is gitignored. An empty `VITE_API_BASE` breaks fetches
-(api.ts uses `?? "/api"`, so "" counts as set) — use a real URL or delete the line.
+for the native shell—use a real absolute URL. Browser production ignores this value
+and uses the same-origin Cloudflare Pages Function documented in `docs/DEPLOY.md`.
 
 ## Everyday workflow (run from `apps/web/`)
 

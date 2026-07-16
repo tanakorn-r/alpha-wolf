@@ -1,7 +1,6 @@
 import type { StockRecord } from "../data/market";
+import { API_BASE } from "./apiBase";
 import { trackedFetch } from "./telemetry";
-
-const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 
 export type MarketPreference = "us" | "europe" | "japan" | "hong-kong-china" | "thailand";
 
@@ -1487,22 +1486,34 @@ export async function loadTodayPerformance(symbol: string, strategy?: string, ag
 }
 
 export async function loadTechnicalAnalysis(symbol: string, agent?: string, force = false): Promise<TechnicalAnalysisResponse> {
-  const params = new URLSearchParams();
-  if (agent) params.set("agent", agent);
-  if (force) params.set("force", "true");
-  const response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/technical?${params}`, {
-    method: "POST",
-    credentials: "include",
-  });
-  if (!response.ok) {
-    let detail = `Failed to load Technical Analysis: ${response.status}`;
-    try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) detail = payload.detail;
-    } catch { /* keep status fallback */ }
-    throw new Error(detail);
+  const startedAt = Date.now();
+  const deadlineMs = 60_000;
+
+  while (Date.now() - startedAt < deadlineMs) {
+    const params = new URLSearchParams();
+    if (agent) params.set("agent", agent);
+    if (force) params.set("force", "true");
+    const response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/technical?${params}`, {
+      method: "POST",
+      credentials: "include",
+    });
+    if (response.status === 202) {
+      const pending = (await response.json()) as { retryAfterSeconds?: number };
+      await new Promise((resolve) => window.setTimeout(resolve, Math.max(1, pending.retryAfterSeconds ?? 3) * 1_000));
+      continue;
+    }
+    if (!response.ok) {
+      let detail = `Failed to load Technical Analysis: ${response.status}`;
+      try {
+        const payload = (await response.json()) as { detail?: string };
+        if (payload.detail) detail = payload.detail;
+      } catch { /* keep status fallback */ }
+      throw new Error(detail);
+    }
+    return (await response.json()) as TechnicalAnalysisResponse;
   }
-  return (await response.json()) as TechnicalAnalysisResponse;
+
+  throw new Error("Fresh market data did not become ready within one minute. Please retry.");
 }
 
 export async function loadStrategyPlaybook(params: { strategy: string; region?: "all" | "us" | "th"; limit?: number; candidateLimit?: number; agent?: string; force?: boolean }): Promise<StrategyPlaybookResponse> {

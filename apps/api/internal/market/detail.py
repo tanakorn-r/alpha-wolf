@@ -16,7 +16,7 @@ from internal.market.technicals import (
 )
 from internal.market.catalog import get_industry_peers
 from internal.market.company_structure import classify_company_structure
-from internal.market.data_trust import build_yahoo_data_trust
+from internal.market.data_trust import build_yahoo_data_trust, market_tape_needs_refresh
 from internal.market.records import build_entry_from_info, fetch_record_from_ticker, merge_ticker_info
 from internal.store.cache import cache_compute_lock, cache_get, cache_set
 from internal.store.yahoo_cache import load_yahoo_data, load_yahoo_data_batch, save_yahoo_data
@@ -59,7 +59,14 @@ def build_detail_bundle(
             # A placeholder must expire quickly so the next poll can observe rows written by
             # the background refresh. Caching it for the normal detail TTL traps the UI in the
             # pending state even after the database has real data.
-            ttl = PENDING_DETAIL_TTL_SECONDS if result.get("dataPending") else DETAIL_TTL_SECONDS
+            # Stale tape snapshots schedule quote/history refreshes in the background. Keep the
+            # derived bundle only briefly so a bounded browser/API poll can observe those new
+            # cache rows instead of being trapped behind this separate 60-second cache.
+            ttl = (
+                PENDING_DETAIL_TTL_SECONDS
+                if result.get("dataPending") or market_tape_needs_refresh(result.get("dataTrust"))
+                else DETAIL_TTL_SECONDS
+            )
             cache_set(DETAIL_CACHE_NAMESPACE, cache_key, result, ttl)
         return result
 

@@ -103,6 +103,21 @@ class YahooPersistentCacheTests(unittest.TestCase):
         self.assertEqual(ticker.periods, ["5y", "1mo"])
         self.assertEqual(len(refreshed), 2)
 
+    def test_expired_one_year_history_only_fetches_recent_increment(self) -> None:
+        ticker = FakeHistoryTicker()
+        fetch_history(ticker, "1y")
+        with store_db.connect() as db:
+            db.execute(
+                "UPDATE yahoo_data_cache SET expires_at = ? WHERE cache_key = ?",
+                ("2000-01-01T00:00:00+00:00", "CACHE:history:1y"),
+            )
+            db.commit()
+
+        refreshed = fetch_history(ticker, "1y")
+
+        self.assertEqual(ticker.periods, ["1y", "1mo"])
+        self.assertEqual(len(refreshed), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
