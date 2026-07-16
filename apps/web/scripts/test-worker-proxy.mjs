@@ -1,5 +1,15 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import worker from "../worker.js";
+
+const wrangler = JSON.parse(
+  await readFile(new URL("../wrangler.json", import.meta.url), "utf8"),
+);
+assert.equal(
+  wrangler.vars?.API_ORIGIN,
+  "https://alpha-wolf-api-6r4m3zptwq-an.a.run.app",
+  "The production Worker must declare its API_ORIGIN binding",
+);
 
 const upstreamRequests = [];
 const originalFetch = globalThis.fetch;

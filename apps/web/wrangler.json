@@ -3,6 +3,9 @@
   "name": "alpha-wolf",
   "compatibility_date": "2026-07-07",
   "main": "./worker.js",
+  "vars": {
+    "API_ORIGIN": "https://alpha-wolf-api-6r4m3zptwq-an.a.run.app"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

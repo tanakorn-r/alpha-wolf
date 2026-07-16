@@ -45,10 +45,11 @@ Build command: npm run build
 Deploy command: npx wrangler deploy
 ```
 
-Set this required Worker runtime variable to the Cloud Run origin:
+The production Cloud Run origin is versioned in `apps/web/wrangler.json` as the
+non-secret `API_ORIGIN` Worker variable:
 
 ```txt
-API_ORIGIN=https://YOUR-CLOUD-RUN-URL.a.run.app
+API_ORIGIN=https://alpha-wolf-api-6r4m3zptwq-an.a.run.app
 ```
 
 Browser builds deliberately call same-origin `/api`; `apps/web/worker.js` proxies
@@ -57,7 +58,8 @@ HttpOnly session cookie first-party for Safari. Do not set `VITE_API_BASE` for b
 requests; that variable is reserved for packaged Capacitor builds, which have no edge proxy.
 
 The Worker intentionally returns 503 when `API_ORIGIN` is absent instead of silently
-falling back to a hardcoded deployment URL.
+falling back to a URL embedded in application code. When the Cloud Run service URL
+changes, update the Wrangler variable in the same change that switches production.
 
 The frontend build uses the standalone `apps/web/package.json`, so Cloudflare never scans the Nx workspace root.
 
@@ -84,8 +86,8 @@ The production defaults deliberately co-locate Cloud Run in Tokyo (`asia-northea
 with the Turso `nrt` database, keep one instance warm, allow eight concurrent requests,
 and leave CPU available after a response so stale Yahoo cache refreshes can finish.
 
-After the first Tokyo deploy, update Cloudflare's production `API_ORIGIN` to the
-new URL printed by the deploy script (without adding `/api`), then trigger a frontend
+After the first Tokyo deploy, update `vars.API_ORIGIN` in `apps/web/wrangler.json` to
+the new URL printed by the deploy script (without adding `/api`), then trigger a frontend
 deployment. Keep the Jakarta service for rollback until the live Worker has been checked.
 
 Current Tokyo service URL:
