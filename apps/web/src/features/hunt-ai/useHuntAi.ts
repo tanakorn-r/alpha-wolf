@@ -29,7 +29,7 @@ import {
 import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useWolfStore } from "../../store/useWolfStore";
 import { STRAT_CARDS, type HuntTab, type N100Timeframe, type StratMode } from "./lib";
-import { finishFlow, startFlow } from "../../lib/analytics";
+import { finishFlow, startFlow } from "../../lib/telemetry";
 
 export type HuntAi = ReturnType<typeof useHuntAi>;
 

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { confirmAiCreditCheckout, createAiCreditCheckout, loadAuthUser } from "../../lib/api";
 import { Modal } from "../ui/Modal";
 import { Link } from "react-router-dom";
-import { trackEvent } from "../../lib/analytics";
+import { trackEvent } from "../../lib/telemetry";
 
 const PACKS = [
   { credits: 25 as const, price: "$2.99", note: "A few extra Agent reads" },
@@ -119,7 +119,6 @@ export function CreditPurchaseReturn({ onConfirmed }: { onConfirmed?: () => void
       params.delete("credit_purchase");
       params.delete("session_id");
       window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}${window.location.hash}`);
-      window.dispatchEvent(new Event("aw:sensitive-url-cleared"));
     };
     if (status === "cancelled") {
       setNotice({ kind: "cancelled", title: "Checkout cancelled", body: "No payment was taken. Your AI token balance is unchanged." });

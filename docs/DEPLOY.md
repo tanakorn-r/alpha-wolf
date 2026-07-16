@@ -28,6 +28,10 @@ cp .env.production.example .env.production
 
 Cloud Run env vars are built from `.env.production`. Do not commit that file.
 
+Set a long random `TELEMETRY_ADMIN_TOKEN` in `.env.production` to enable the
+private aggregate operational-metrics endpoint. This is server-only and must
+never be added to Cloudflare or any `VITE_*` variable.
+
 ## Cloudflare Pages
 
 Cloudflare should build the frontend from git after each commit/push.

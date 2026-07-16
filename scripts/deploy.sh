@@ -132,6 +132,12 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   echo "${key}: \"$(yaml_escape "$value")\"" >> "$ENV_YAML"
 done < "$ENV_FILE"
 
+# Structured application errors use this value to correlate their detailed log entry
+# with Cloud Run's terse request log through X-Cloud-Trace-Context.
+if ! grep -q '^GOOGLE_CLOUD_PROJECT:' "$ENV_YAML"; then
+  echo "GOOGLE_CLOUD_PROJECT: \"$(yaml_escape "$GCP_PROJECT")\"" >> "$ENV_YAML"
+fi
+
 # -- Authenticate Docker with Artifact Registry -----------------------------
 log "Authenticating Docker with Artifact Registry..."
 gcloud auth configure-docker "${GCP_REGION}-docker.pkg.dev" --quiet

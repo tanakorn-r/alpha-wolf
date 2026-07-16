@@ -15,8 +15,8 @@ import { LiveTradePage } from "./pages/LiveTradePage";
 import { PrivacyPage, RefundPage, SupportPage, TermsPage } from "./pages/LegalPages";
 import { loadAppBootstrap, loadAuthUser } from "./lib/api";
 import { LocaleGate } from "./components/settings/LocalePreferences";
-import { AnalyticsConsentBanner, AnalyticsTracker } from "./components/analytics/Analytics";
-import { trackEvent } from "./lib/analytics";
+import { OperationalTelemetry } from "./components/telemetry/OperationalTelemetry";
+import { trackEvent } from "./lib/telemetry";
 
 const VISITED_STORAGE_KEY = "aw_visited_app";
 
@@ -121,8 +121,7 @@ function BootstrapGate() {
 export default function App() {
   return (
     <>
-      <AnalyticsTracker />
-      <AnalyticsConsentBanner />
+      <OperationalTelemetry />
       <Routes>
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />

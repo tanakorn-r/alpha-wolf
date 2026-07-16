@@ -4,7 +4,7 @@ import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { ErrorCard, TickerEmptyPanel } from "../../components/ui/panels";
 import { loadBacktradeJob, startBacktrade, type BacktradeDecision, type BacktradeJob, type BacktradeResult } from "../../lib/api";
 import type { HuntAi } from "./useHuntAi";
-import { finishFlow, startFlow } from "../../lib/analytics";
+import { finishFlow, startFlow } from "../../lib/telemetry";
 
 export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
   const symbol = hunt.watchlist.activeTicker;

@@ -13,6 +13,18 @@ DB_PATH = DATA_DIR / "alpha_wolf.sqlite3"
 DATABASE_URL = os.getenv("LIBSQL_DATABASE_URL") or os.getenv("TURSO_DATABASE_URL") or os.getenv("TURSO_URL")
 DATABASE_AUTH_TOKEN = os.getenv("LIBSQL_AUTH_TOKEN") or os.getenv("TURSO_AUTH_TOKEN")
 LIBSQL_POOL_SIZE = max(1, int(os.getenv("LIBSQL_POOL_SIZE", "4")))
+_TERMINAL_LIBSQL_ERROR_MARKERS = (
+    "stream not found",
+    "stream has been closed",
+    "client is closed",
+)
+
+
+def _is_terminal_libsql_error(exc: BaseException | None) -> bool:
+    if exc is None:
+        return False
+    message = str(exc).lower()
+    return any(marker in message for marker in _TERMINAL_LIBSQL_ERROR_MARKERS)
 
 
 class LibsqlCursor:
@@ -35,12 +47,28 @@ class LibsqlCursor:
 
 class LibsqlConnection:
     def __init__(self):
+        self._conn: Any | None = None
+        self._has_pending_work = False
+        self._reconnect()
+
+    @staticmethod
+    def _open_connection() -> Any:
         import libsql
 
-        self._conn = libsql.connect(
+        return libsql.connect(
             database=DATABASE_URL,
             auth_token=DATABASE_AUTH_TOKEN or "",
         )
+
+    def _reconnect(self) -> None:
+        previous = self._conn
+        self._conn = self._open_connection()
+        self._has_pending_work = False
+        if previous is not None:
+            try:
+                previous.close()
+            except Exception:
+                pass
 
     def __enter__(self):
         return self
@@ -50,14 +78,40 @@ class LibsqlConnection:
         return False
 
     def execute(self, sql: str, params: tuple[Any, ...] | list[Any] | None = None) -> LibsqlCursor:
-        result = self._conn.execute(sql, list(params or []))
+        values = list(params or [])
+        try:
+            result = self._conn.execute(sql, values)
+        except Exception as exc:
+            # A Hrana stream is server-side state and may disappear while a Cloud Run
+            # instance remains warm. A read (or the first statement in a unit of work)
+            # is safe to replay once on a fresh stream. Never replay after a successful
+            # write because doing so could split one logical transaction across streams.
+            if self._has_pending_work or not _is_terminal_libsql_error(exc):
+                raise
+            self._reconnect()
+            result = self._conn.execute(sql, values)
+
+        if _statement_has_pending_work(sql):
+            self._has_pending_work = True
         return LibsqlCursor(result)
 
     def commit(self) -> None:
         self._conn.commit()
+        self._has_pending_work = False
 
     def close(self) -> None:
-        pass  # libsql connections are managed by the library
+        connection = self._conn
+        self._conn = None
+        self._has_pending_work = False
+        if connection is not None:
+            connection.close()
+
+
+def _statement_has_pending_work(sql: str) -> bool:
+    statement = sql.lstrip().split(None, 1)
+    if not statement:
+        return False
+    return statement[0].upper() not in {"SELECT", "PRAGMA", "EXPLAIN"}
 
 
 # Remote connections are expensive to establish but a single shared connection turns
@@ -79,7 +133,10 @@ class _PooledLibsqlConnection:
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         if self._conn is not None:
-            _libsql_pool.put(self._conn)
+            if _is_terminal_libsql_error(exc):
+                _discard_libsql_connection(self._conn)
+            else:
+                _libsql_pool.put(self._conn)
             self._conn = None
         return False
 
@@ -98,6 +155,18 @@ def _acquire_libsql_connection() -> LibsqlConnection:
             return connection
 
     return _libsql_pool.get()
+
+
+def _discard_libsql_connection(connection: LibsqlConnection) -> None:
+    global _libsql_pool_created
+    try:
+        connection.close()
+    except Exception:
+        # Preserve the original database exception that caused eviction.
+        pass
+    finally:
+        with _libsql_pool_create_lock:
+            _libsql_pool_created = max(0, _libsql_pool_created - 1)
 
 
 class ClosingSQLiteConnection(sqlite3.Connection):
@@ -310,6 +379,24 @@ def migrate() -> None:
             """
         )
         db.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_user ON auth_sessions(user_id)")
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS operational_telemetry_daily (
+                day TEXT NOT NULL,
+                event TEXT NOT NULL,
+                dimension TEXT NOT NULL DEFAULT '',
+                outcome TEXT NOT NULL DEFAULT '',
+                method TEXT NOT NULL DEFAULT '',
+                status_group TEXT NOT NULL DEFAULT '',
+                duration_bucket TEXT NOT NULL DEFAULT '',
+                event_count INTEGER NOT NULL DEFAULT 0,
+                total_duration_ms INTEGER NOT NULL DEFAULT 0,
+                max_duration_ms INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(day, event, dimension, outcome, method, status_group, duration_bucket)
+            )
+            """
+        )
+        db.execute("CREATE INDEX IF NOT EXISTS idx_operational_telemetry_day ON operational_telemetry_daily(day DESC)")
         _migrate_account_tables(db)
         db.execute("DROP TABLE IF EXISTS market_presets")
         db.execute("DROP TABLE IF EXISTS snapshots")
