@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build",
     "test:worker": "node scripts/test-worker-proxy.mjs",
+    "test:service-worker": "node scripts/test-service-worker-retirement.mjs",
     "seo:submit": "node scripts/submit-indexnow.mjs",
     "test:seo": "node scripts/test-seo.mjs",
     "dev": "vite --host localhost --port 4200",

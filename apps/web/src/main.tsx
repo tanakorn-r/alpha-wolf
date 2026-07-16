@@ -11,14 +11,21 @@ const queryClient = new QueryClient({
   }
 });
 
-// Register service worker for PWA install support. Skipped in dev — a cache-first SW there
-// means every source edit gets masked by a stale cached response, making fixes look like
-// they never took effect no matter how many times the page is refreshed.
-if (import.meta.env.PROD && "serviceWorker" in navigator) {
+// Alpha Wolf previously shipped a cache-first service worker that could strand Safari on
+// an obsolete application bundle. The replacement /sw.js retires existing workers, while
+// this cleanup covers browsers that already loaded the current bundle.
+if (import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch(() => {
-      // SW registration failing is non-fatal — app works fine without it
-    });
+    if ("serviceWorker" in navigator) {
+      void navigator.serviceWorker.getRegistrations()
+        .then((registrations) => Promise.all(registrations.map((registration) => registration.unregister())))
+        .catch(() => undefined);
+    }
+    if ("caches" in window) {
+      void caches.keys()
+        .then((keys) => Promise.all(keys.filter((key) => key.startsWith("alpha-wolf-")).map((key) => caches.delete(key))))
+        .catch(() => undefined);
+    }
   });
 }
 

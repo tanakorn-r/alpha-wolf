@@ -2,6 +2,22 @@ import type { StockRecord } from "../data/market";
 import { API_BASE } from "./apiBase";
 import { trackedFetch } from "./telemetry";
 
+const SESSION_RESTORE_TIMEOUT_MS = 12_000;
+
+async function trackedSessionFetch(path: string): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), SESSION_RESTORE_TIMEOUT_MS);
+  try {
+    return await trackedFetch(`${API_BASE}${path}`, {
+      credentials: "include",
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 export type MarketPreference = "us" | "europe" | "japan" | "hong-kong-china" | "thailand";
 
 export type LocaleSettings = {
@@ -70,7 +86,7 @@ export type AppBootstrap = {
 };
 
 export async function loadAppBootstrap(): Promise<AppBootstrap> {
-  const response = await trackedFetch(`${API_BASE}/bootstrap`, { credentials: "include" });
+  const response = await trackedSessionFetch("/bootstrap");
   if (!response.ok) throw new Error(`Could not restore app shell (${response.status})`);
   return (await response.json()) as AppBootstrap;
 }
@@ -88,7 +104,7 @@ export async function markNotificationRead(id: number): Promise<void> {
 }
 
 export async function loadAuthUser(): Promise<AuthUser | null> {
-  const response = await trackedFetch(`${API_BASE}/auth/me`, { credentials: "include" });
+  const response = await trackedSessionFetch("/auth/me");
   if (!response.ok) throw new Error(`Failed to restore account: ${response.status}`);
   if (!response.headers.get("content-type")?.toLowerCase().includes("application/json")) {
     throw new Error("Authentication endpoint returned a non-JSON response. Check the /api proxy deployment.");
