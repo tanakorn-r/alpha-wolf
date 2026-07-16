@@ -1,6 +1,6 @@
 # Deploy AlphaWolf
 
-Backend deploys to Google Cloud Run. Frontend deploys automatically through the Cloudflare Pages Git pipeline.
+Backend deploys to Google Cloud Run. Frontend deploys automatically through the Cloudflare Workers Git pipeline.
 
 ## One-time setup
 
@@ -32,31 +32,30 @@ Set a long random `TELEMETRY_ADMIN_TOKEN` in `.env.production` to enable the
 private aggregate operational-metrics endpoint. This is server-only and must
 never be added to Cloudflare or any `VITE_*` variable.
 
-## Cloudflare Pages
+## Cloudflare Workers
 
-Cloudflare should build the frontend from git after each commit/push.
+Cloudflare should build and deploy the frontend Worker from git after each commit/push.
 
-Do not use Wrangler for the frontend deploy. This repo is an Nx workspace, and Wrangler's app detection can fail when it scans the workspace root.
-
-Use these Pages settings:
+Run the frontend commands from `apps/web` so Wrangler reads the colocated config:
 
 ```txt
 Framework preset: None
 Root directory: apps/web
 Build command: npm run build
-Build output directory: dist
+Deploy command: npx wrangler deploy
 ```
 
-Set this Cloudflare Pages Function environment variable:
+The Worker entrypoint proxies browser `/api/*` requests to the current Cloud Run
+service by default. If the service URL changes, set this optional Worker variable:
 
 ```txt
 API_ORIGIN=https://YOUR-CLOUD-RUN-URL.a.run.app
 ```
 
-Browser builds deliberately call same-origin `/api`; `apps/web/functions/api/[[path]].js`
-proxies those requests to `API_ORIGIN`. This keeps the HttpOnly session cookie
-first-party for Safari. Do not set `VITE_API_BASE` for the browser deployment; that
-variable is reserved for packaged Capacitor builds, which have no Pages Function.
+Browser builds deliberately call same-origin `/api`; `apps/web/worker.js` proxies
+those requests to `API_ORIGIN` before the static asset fallback runs. This keeps the
+HttpOnly session cookie first-party for Safari. Do not set `VITE_API_BASE` for browser
+requests; that variable is reserved for packaged Capacitor builds, which have no edge proxy.
 
 The frontend build uses the standalone `apps/web/package.json`, so Cloudflare never scans the Nx workspace root.
 

@@ -1,6 +1,16 @@
 const DEFAULT_API_ORIGIN = "https://alpha-wolf-api-6r4m3zptwq-an.a.run.app";
 
-export async function onRequest({ request, env }) {
+export default {
+  async fetch(request, env) {
+    const incoming = new URL(request.url);
+    if (incoming.pathname === "/api" || incoming.pathname.startsWith("/api/")) {
+      return proxyApiRequest(request, env, incoming);
+    }
+    return env.ASSETS.fetch(request);
+  },
+};
+
+async function proxyApiRequest(request, env, incoming) {
   let apiOrigin;
   try {
     apiOrigin = new URL(String(env.API_ORIGIN || DEFAULT_API_ORIGIN).replace(/\/+$/, ""));
@@ -11,7 +21,6 @@ export async function onRequest({ request, env }) {
     return new Response("API proxy requires HTTPS", { status: 500 });
   }
 
-  const incoming = new URL(request.url);
   const upstream = new URL(`${incoming.pathname}${incoming.search}`, `${apiOrigin.origin}/`);
   const headers = new Headers(request.headers);
   headers.delete("host");
