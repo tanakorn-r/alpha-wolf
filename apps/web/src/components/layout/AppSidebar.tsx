@@ -5,14 +5,9 @@ import { Money } from "../Money";
 import { formatPercent } from "../../lib/format";
 import { loadAgents, loadAuthUser } from "../../lib/api";
 import { useWolfStore } from "../../store/useWolfStore";
-import { NavIcon, type NavIconKind } from "./NavIcon";
+import { NavIcon } from "./NavIcon";
 import { CreditTopUpButton } from "../billing/CreditTopUp";
-
-const items: Array<{ to: string; label: string; kind: NavIconKind }> = [
-  { to: "/", label: "Dashboard", kind: "dashboard" },
-  { to: "/scanner", label: "Stock Hunt", kind: "search" },
-  // { to: "/calendar", label: "Dividend Hunt", kind: "discover" }
-];
+import { APP_NAVIGATION } from "./navigation";
 
 export function AppSidebar() {
   const portfolioValue = useWolfStore((state) => state.portfolioValue);
@@ -23,7 +18,7 @@ export function AppSidebar() {
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
   const activeAgent = agentsQuery.data?.find((agent) => agent.id === activeAgentId) ?? agentsQuery.data?.[0];
   return (
-    <aside className="aw-sidebar fixed inset-y-0 left-0 z-20 flex flex-none flex-col border-r border-[#2a2a31] px-3.5 py-4 max-[719px]:hidden">
+    <aside className="aw-sidebar fixed inset-y-0 left-0 z-20 flex flex-none flex-col border-r border-[#2a2a31] px-3.5 py-4 max-[899px]:hidden">
       <div className="flex items-center gap-2.5 px-2 pb-4 pt-0.5">
         <div className="grid h-9 w-9 place-items-center overflow-hidden rounded-[9px] border border-[#2a2a31] bg-[#08090b]">
           <img src={alphaWolfIcon} alt="Alpha Wolf" className="h-full w-full object-cover" />
@@ -35,10 +30,11 @@ export function AppSidebar() {
       </div>
 
       <nav className="flex flex-col gap-[2px]">
-        {items.map((item) => (
+        {APP_NAVIGATION.filter((item) => !item.premium).map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
+            end={item.end}
             className={({ isActive }) => `relative flex items-center gap-[10px] rounded-lg px-[10px] py-2 text-[13px] font-medium transition-colors ${isActive ? "bg-[#1c1c20] text-[#ececee] before:absolute before:bottom-[8px] before:left-0 before:top-[8px] before:w-[2.5px] before:rounded-sm before:bg-[#3ecf8e]" : "text-[#8c8c95] hover:bg-[#1c1c20] hover:text-[#ececee]"}`}
           >
             <NavIcon kind={item.kind} />

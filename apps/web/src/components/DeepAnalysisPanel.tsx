@@ -36,9 +36,9 @@ export function DeepAnalysisPanel() {
   const shares = plan && plan.entry > 0 ? deployAmount / plan.entry : 0;
 
   return (
-    <div className="fixed inset-0 z-[55] flex items-end justify-center overflow-hidden px-0 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] min-[720px]:items-start min-[720px]:overflow-y-auto min-[720px]:px-5 min-[720px]:py-6">
+    <div className="fixed inset-0 z-[55] flex items-end justify-center overflow-hidden px-0 pb-[var(--aw-safe-bottom)] pt-[var(--aw-safe-top)] min-[720px]:items-start min-[720px]:overflow-y-auto min-[720px]:px-5 min-[720px]:py-6">
       <button type="button" aria-label="Close deep analysis" onClick={closeDeepAnalysis} className="absolute inset-0 bg-[#060608]/60 backdrop-blur-[3px]" />
-      <div ref={dialogRef as React.Ref<HTMLDivElement>} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="aw-deep-panel deep-panel-in relative flex h-[calc(100dvh-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-[940px] max-w-full flex-col overflow-hidden rounded-t-2xl border border-[#2a2a31] bg-[#141417] shadow-[0_30px_90px_rgba(0,0,0,0.62)] outline-none min-[720px]:h-[calc(100vh-48px)] min-[720px]:rounded-2xl">
+      <div ref={dialogRef as React.Ref<HTMLDivElement>} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="aw-deep-panel deep-panel-in relative flex h-[calc(100dvh-var(--aw-safe-top)-var(--aw-safe-bottom))] w-[940px] max-w-full flex-col overflow-hidden rounded-t-2xl border border-[#2a2a31] bg-[#141417] shadow-[0_30px_90px_rgba(0,0,0,0.62)] outline-none min-[720px]:h-[calc(100vh-48px)] min-[720px]:rounded-2xl">
         <div className="deep-rainbow-bar h-[3px] flex-none" />
 
         <div className="flex flex-none items-center justify-between gap-4 border-b border-[#2a2a31] bg-[#141417] px-5 py-4 min-[720px]:gap-5 min-[720px]:px-8 min-[720px]:py-6">

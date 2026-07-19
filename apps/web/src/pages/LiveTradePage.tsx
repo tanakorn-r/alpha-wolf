@@ -190,7 +190,7 @@ export function LiveTradePage() {
       {/* Ticker bar */}
       <div className="flex flex-col gap-[11px]">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative max-w-[360px] flex-1">
+          <div className="relative min-w-[180px] max-w-[360px] flex-1">
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" className="absolute left-[11px] top-1/2 -translate-y-1/2"><circle cx="7" cy="7" r="4.5" stroke="#5a5a62" strokeWidth="1.4" /><path d="M10.5 10.5L14 14" stroke="#5a5a62" strokeWidth="1.4" strokeLinecap="round" /></svg>
             <input
               value={input}
@@ -234,8 +234,8 @@ export function LiveTradePage() {
       {/* Main grid: TradingView + AI intelligence */}
       <div className="grid items-start gap-[14px] min-[1180px]:grid-cols-[minmax(0,1fr)_366px]">
         <section className="overflow-hidden rounded-[12px] border border-[#2a2a31] bg-[#161619]">
-          <div className="flex items-center justify-between border-b border-[#1f1f24] px-4 py-3">
-            <div className="flex items-baseline gap-[11px]">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1f1f24] px-3 py-3 min-[480px]:px-4">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-[11px] gap-y-1">
               <span className="font-mono text-[20px] font-extrabold tracking-[-0.4px] text-[#ececee]">{selected}</span>
               {selectedRow?.price != null ? <span className="font-mono text-[15px] font-bold text-[#ececee]">{formatLivePrice(selectedRow.price)}</span> : null}
               {selectedRow?.changePct != null ? (
@@ -244,9 +244,9 @@ export function LiveTradePage() {
                 </span>
               ) : null}
             </div>
-            <span className="font-mono text-[10.5px] text-[#5a5a62]">1-min · real-time candles</span>
+            <span className="font-mono text-[10.5px] text-[#5a5a62]">1-min candles</span>
           </div>
-          <div ref={chartRef} className="h-[544px] w-full bg-[#0e0e10]" />
+          <div ref={chartRef} className="h-[400px] w-full bg-[#0e0e10] min-[720px]:h-[544px]" />
         </section>
 
         <aside className="flex flex-col gap-3">
@@ -359,14 +359,14 @@ export function LiveTradePage() {
             <span className="font-mono text-[10.5px] text-[#5a5a62]">This session only</span>
           </div>
           {tradeLog.map((entry, index) => (
-            <div key={`${entry.ts}-${index}`} className="flex items-center gap-3 border-b border-[#1a1a1e] px-4 py-[10px] text-[12px] last:border-b-0">
+            <div key={`${entry.ts}-${index}`} className="grid grid-cols-[auto_auto_1fr] items-center gap-x-3 gap-y-1.5 border-b border-[#1a1a1e] px-3 py-[10px] text-[12px] last:border-b-0 min-[620px]:flex min-[620px]:px-4">
               <span className="w-[54px] flex-none font-mono text-[10px] text-[#5a5a62]">{entry.ts}</span>
               <span className="flex-none rounded-[4px] bg-[#0e0e10] px-[7px] py-0.5 text-[10px] font-bold text-[#ececee]">{entry.type}</span>
               <span className="flex-none font-mono font-semibold text-[#ececee]">{entry.ticker}</span>
-              <span className="flex-none text-[#8c8c95]">{entry.side}</span>
-              <span className="flex-none font-mono text-[#ececee]">@ {formatLivePrice(entry.price)}</span>
+              <span className="flex-none text-[#8c8c95] max-[619px]:col-start-2">{entry.side}</span>
+              <span className="flex-none font-mono text-[#ececee] max-[619px]:col-start-3">@ {formatLivePrice(entry.price)}</span>
               {entry.pnl != null ? (
-                <span className={`ml-auto font-mono font-bold ${entry.pnl >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{entry.pnl >= 0 ? "+" : ""}{entry.pnl.toFixed(2)}</span>
+                <span className={`ml-auto font-mono font-bold max-[619px]:col-start-3 ${entry.pnl >= 0 ? "text-[#3ecf8e]" : "text-[#f2575c]"}`}>{entry.pnl >= 0 ? "+" : ""}{entry.pnl.toFixed(2)}</span>
               ) : null}
             </div>
           ))}
@@ -608,7 +608,7 @@ function StrategyBuilder({ ticker, config, onChange, signal }: { ticker: string;
           <span className="text-[13.5px] font-bold tracking-[-0.2px] text-[#ececee]">Strategy Builder</span>
           <span className="font-mono text-[10px] text-[#5a5a62]">{ticker} · live · 1-min</span>
         </div>
-        <div className="ml-auto flex gap-[3px] rounded-[9px] border border-[#23232a] bg-[#0e0e10] p-[3px]">
+        <div className="ml-auto flex max-w-full gap-[3px] overflow-x-auto rounded-[9px] border border-[#23232a] bg-[#0e0e10] p-[3px] max-[699px]:order-3 max-[699px]:ml-0 max-[699px]:w-full [scrollbar-width:none]">
           {[...Object.entries(STRAT_PRESETS).map(([key, preset]) => ({ key, label: preset.label, click: () => setPreset(key) })), { key: "custom", label: "Custom", click: () => {} }].map((preset) => {
             const sel = config.preset === preset.key;
             return (
@@ -672,12 +672,12 @@ function StrategyBuilder({ ticker, config, onChange, signal }: { ticker: string;
               const stateColor = row.bias === 0 ? "#8c8c95" : agree ? "#3ecf8e" : "#f2575c";
               const barColor = row.bias > 0 ? "#3ecf8e" : row.bias < 0 ? "#f2575c" : "#5a5a62";
               return (
-                <div key={row.key} className="flex items-center gap-[14px] rounded-[10px] border border-[#1f1f24] bg-[#0e0e10] px-[13px] py-[11px]">
-                  <div className="w-[150px] flex-none">
+                <div key={row.key} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-[10px] border border-[#1f1f24] bg-[#0e0e10] px-[13px] py-[11px] min-[700px]:flex min-[700px]:gap-[14px]">
+                  <div className="min-w-0 min-[700px]:w-[150px] min-[700px]:flex-none">
                     <div className="text-[12.5px] font-semibold text-[#ececee]">{row.name}</div>
                     <div className="mt-0.5 text-[9.5px] uppercase tracking-[0.4px] text-[#5a5a62]">{row.tag}</div>
                   </div>
-                  <div className="min-w-0 flex-1">
+                  <div className="col-span-2 row-start-2 min-w-0 min-[700px]:flex-1">
                     <div className="mb-1 flex items-baseline justify-between">
                       <span className="font-mono text-[12px] font-bold text-[#ececee]">{row.reading}</span>
                       <span className="text-[10.5px] text-[#8c8c95]">{row.note}</span>
@@ -687,10 +687,10 @@ function StrategyBuilder({ ticker, config, onChange, signal }: { ticker: string;
                       <div className="h-full rounded-[3px] transition-[width] duration-500" style={{ width: `${row.fill}%`, background: barColor }} />
                     </div>
                   </div>
-                  <div className="w-[74px] flex-none text-right">
+                  <div className="col-start-1 row-start-3 min-[700px]:w-[74px] min-[700px]:flex-none min-[700px]:text-right">
                     <span className="text-[10px] font-extrabold tracking-[0.5px]" style={{ color: stateColor }}>{state}</span>
                   </div>
-                  <button type="button" onClick={() => toggleRule(row.key)} className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-[6px] border border-[#2a2a31] bg-[#1a1a1e] text-[14px] text-[#5a5a62] hover:border-[#f2575c] hover:text-[#f2575c]">×</button>
+                  <button type="button" onClick={() => toggleRule(row.key)} className="col-start-2 row-start-1 flex h-[22px] w-[22px] flex-none items-center justify-center justify-self-end rounded-[6px] border border-[#2a2a31] bg-[#1a1a1e] text-[14px] text-[#5a5a62] hover:border-[#f2575c] hover:text-[#f2575c]">×</button>
                 </div>
               );
             })

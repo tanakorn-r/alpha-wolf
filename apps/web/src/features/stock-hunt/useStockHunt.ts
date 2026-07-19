@@ -173,11 +173,13 @@ export function useStockHunt() {
     getNextPageParam: (lastPage) => (lastPage.page < lastPage.totalPages ? lastPage.page + 1 : undefined),
     staleTime: 60_000,
     refetchOnMount: false,
+    refetchInterval: (activeQuery) => activeQuery.state.data?.pages[0]?.warming ? 2_500 : false,
     retry: 1,
     enabled: discoveryReady && !detailOpen,
   });
   const items = useMemo(() => discoveryQuery.data?.pages.flatMap((page) => page.live) ?? [], [discoveryQuery.data]);
   const total = discoveryQuery.data?.pages[0]?.total ?? 0;
+  const isWarming = discoveryQuery.data?.pages[0]?.warming === true;
 
   const sectors = SECTORS;
 
@@ -282,6 +284,7 @@ export function useStockHunt() {
     analyzingSymbol,
     loadMoreRef,
     isPending: discoveryQuery.isPending,
+    isWarming,
     isError: discoveryQuery.isError,
     isFetching: discoveryQuery.isFetching,
     isUpdating: discoveryQuery.isFetching && !discoveryQuery.isPending && !discoveryQuery.isFetchingNextPage,

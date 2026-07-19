@@ -67,10 +67,10 @@ class CommodityPresetTests(unittest.TestCase):
     def test_discover_scopes_all_to_configured_markets(self) -> None:
         with (
             patch("routes.discover.cache_get", return_value=None),
-            patch("routes.discover.cache_set"),
+            patch("routes.discover.cache_set") as cache,
             patch("routes.discover.build_market_page", return_value=([], 1, 0)) as build,
         ):
-            discover(
+            result = discover(
                 q=None,
                 kind=DiscoveryKind.all,
                 strategy="stable_dca",
@@ -85,6 +85,8 @@ class CommodityPresetTests(unittest.TestCase):
 
         self.assertEqual(build.call_args.kwargs["region"], "all")
         self.assertEqual(build.call_args.kwargs["markets"], ("japan", "us"))
+        self.assertTrue(result.warming)
+        self.assertEqual(cache.call_args.args[3], 2)
 
     def test_additional_market_catalog_is_built_with_its_filter_key(self) -> None:
         quote = {

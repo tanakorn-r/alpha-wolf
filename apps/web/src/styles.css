@@ -67,6 +67,12 @@
   --aw-radius-control: 10px;
   --aw-radius-card: 16px;
   --aw-radius-frame: 22px;
+  /* Capacitor injects --safe-area-inset-* on Android WebViews where env()
+     can be inaccurate; iOS and normal browsers fall back to the CSS env. */
+  --aw-safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --aw-safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --aw-safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --aw-safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
 }
 
 html,
@@ -78,8 +84,8 @@ body,
 
 /* Native (Capacitor) shell: the dark background fills the notch / home-indicator
    safe areas, and rubber-band overscroll must not flash white. Individual fixed
-   chrome (header/sidebar) can inset itself with `env(safe-area-inset-*)`, which
-   `viewport-fit=cover` in index.html enables. */
+   chrome (header/sidebar) uses the shared `--aw-safe-*` values, with Capacitor's
+   Android values preferred over the `viewport-fit=cover` CSS environment. */
 html {
   background: #0e0e10;
 }
@@ -90,10 +96,10 @@ body {
 
 /* App is designed in hardcoded px; a root zoom scales every font + spacing
    proportionally up to web-standard sizing without touching each class.
-   Mobile widths (<720px, matching the sidebar/bottom-nav breakpoint) already
+   Mobile/tablet widths (<900px, matching the sidebar/bottom-nav breakpoint) already
    get their own tighter classes below — stacking a 10% zoom on top of those
    made everything (especially the header) oversized on phones. */
-@media (min-width: 720px) {
+@media (min-width: 900px) {
   #root {
     zoom: var(--aw-root-zoom);
   }
@@ -181,27 +187,11 @@ select:disabled,
   margin-inline: auto;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 899px) {
   .aw-shell {
     width: 100%;
     height: auto;
-    min-height: calc(100vh - 40px);
-  }
-
-  .aw-sidebar {
-    width: var(--aw-sidebar-rail-width);
-  }
-
-  .aw-sidebar > div:not(:first-child) span,
-  .aw-sidebar nav a:not(.active),
-  .aw-sidebar nav button {
-    font-size: 0;
-  }
-}
-
-@media (min-width: 720px) {
-  .aw-content {
-    padding-left: var(--aw-sidebar-rail-width);
+    min-height: 100dvh;
   }
 }
 
@@ -245,17 +235,11 @@ select:disabled,
 .aw-drawer .text-violet-500,
 .aw-drawer .text-violet-600 { color: #3ecf8e !important; }
 
-@media (max-width: 719px) {
-  /* Mobile overlays live under #root, which is zoomed to 1.1 for the app UI.
-     Compensate their vertical size so fixed sheets fit the real device viewport. */
+@media (max-width: 899px) {
   .aw-detail-panel,
   .aw-deep-panel {
-    max-height: calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) / 1.1) !important;
-  }
-
-  .aw-detail-panel,
-  .aw-deep-panel {
-    height: calc((100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) / 1.1) !important;
+    max-height: calc(100dvh - var(--aw-safe-top) - var(--aw-safe-bottom)) !important;
+    height: calc(100dvh - var(--aw-safe-top) - var(--aw-safe-bottom)) !important;
   }
 }
 

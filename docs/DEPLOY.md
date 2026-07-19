@@ -83,8 +83,23 @@ ALLOW_DIRTY=1 ./scripts/deploy-all.sh
 ```
 
 The production defaults deliberately co-locate Cloud Run in Tokyo (`asia-northeast1`)
-with the Turso `nrt` database, keep one instance warm, allow eight concurrent requests,
-and leave CPU available after a response so stale Yahoo cache refreshes can finish.
+with the Turso `nrt` database and optimize for Cloud Run's monthly free allowance:
+
+- request-based billing with CPU throttled outside requests
+- scale to zero, with at most one instance
+- 1 vCPU, 512 MiB memory, four concurrent requests, and no startup CPU boost
+- an Artifact Registry cleanup policy that retains the three newest image versions
+
+These defaults bound resource use and avoid idle-instance charges, but they cannot
+guarantee a zero bill: Cloud Run's free allowance is usage-based, network egress and
+other Google Cloud products have separate pricing, and traffic can exceed the monthly
+allowance. Set a billing budget/alert in Google Cloud and monitor actual usage.
+
+The free-tier defaults can be tuned with `CLOUD_RUN_CONCURRENCY`,
+`CLOUD_RUN_MIN_INSTANCES`, `CLOUD_RUN_MAX_INSTANCES`, `CLOUD_RUN_CPU`, and
+`CLOUD_RUN_MEMORY`. Setting a nonzero minimum or disabling request-based CPU behavior
+will add idle compute charges. Set `CONFIGURE_ARTIFACT_CLEANUP=0` only if repository
+cleanup is managed elsewhere.
 
 After the first Tokyo deploy, update `vars.API_ORIGIN` in `apps/web/wrangler.json` to
 the new URL printed by the deploy script (without adding `/api`), then trigger a frontend

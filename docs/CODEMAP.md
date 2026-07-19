@@ -51,7 +51,7 @@ export function FooPage() {
 | `components/ui/` | Shared atoms: `Surface.tsx` (tokenized card/inset/frame shells), `panels.tsx` (LoadingPanel/LoadingStrip/EmptyPanel/RetryPanel/ErrorBanner/ErrorCard), `Badge.tsx` (Badge/SignalChip/TagPill), `PillTabs.tsx`, `icons.tsx` (Spark/Search/ArrowUp), `Modal.tsx` |
 | `components/agents/` | Shared agent presentation: `AgentCall` canonical verdict anatomy, `AgentThinking` canonical progress state, plus `AgentCard`, `AgentByline`, and `AgentRecap` |
 | `components/settings/` | Authenticated locale gate, three-step first-login wizard, and consolidated region/currency reconfiguration dialog |
-| `components/` | Cross-feature: DeepAnalysisPanel, AiVerdictCard, PremiumAiButton, Money, Sparkline, LoadingSpinner, `charts/`, `layout/` (AppLayout/Sidebar/Header) |
+| `components/` | Cross-feature: DeepAnalysisPanel, AiVerdictCard, PremiumAiButton, Money, Sparkline, LoadingSpinner, `charts/`, `layout/` (AppLayout/Sidebar/Header/MobileNav plus shared `navigation.ts`) |
 | `lib/api.ts` | ALL backend calls + response types (loadPortfolio, loadStockDetail, loadDeepAnalysis, loadUpwardMoves, summarizeStock, loadStrategyPlaybook, loadDiscoveries…) |
 | `lib/` | `locale.ts` (detected/persisted locale choices + date helpers), `format.ts` (locale-aware portfolio/native money and numbers), `chart.ts`, `cn.ts`, `symbolColor.ts` |
 | `store/useWolfStore.ts` | Zustand + localStorage: holdings UI state, deepExtras watchlist, premium flag, n100 quota + report cache, openDetail drawer |

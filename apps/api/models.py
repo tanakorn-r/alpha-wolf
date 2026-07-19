@@ -61,6 +61,7 @@ class DiscoverResponse(BaseModel):
     total: int = 0
     totalPages: int = 1
     count: int = 0
+    warming: bool = False
     sections: list[LookupSection] = Field(default_factory=list)
     items: list[LookupItem] = Field(default_factory=list)
     live: list[dict[str, object]] = Field(default_factory=list)

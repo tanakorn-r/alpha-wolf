@@ -25,8 +25,8 @@ export function AgentPickerModal({ activeAgentId, onUse, onClose }: Props) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/75 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-[calc(0.75rem+env(safe-area-inset-top))] min-[720px]:items-center min-[720px]:p-4">
-      <div ref={dialogRef as React.Ref<HTMLDivElement>} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="flex max-h-[calc(100dvh-1.5rem-env(safe-area-inset-top)-env(safe-area-inset-bottom))] w-full max-w-[1080px] flex-col overflow-hidden rounded-t-[16px] border border-[#34343c] bg-[#111114] shadow-2xl outline-none min-[720px]:max-h-[calc(100dvh-32px)] min-[720px]:rounded-[14px]">
+    <div className="fixed inset-0 z-[80] isolate flex items-end justify-center overflow-hidden bg-black/75 px-3 pb-[calc(0.75rem+var(--aw-safe-bottom))] pt-[calc(0.75rem+var(--aw-safe-top))] min-[720px]:items-center min-[720px]:p-4">
+      <div ref={dialogRef as React.Ref<HTMLDivElement>} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="flex max-h-[calc(100dvh-1.5rem-var(--aw-safe-top)-var(--aw-safe-bottom))] w-full max-w-[1080px] flex-col overflow-hidden rounded-t-[16px] border border-[#34343c] bg-[#111114] shadow-2xl outline-none min-[720px]:max-h-[calc(100dvh-32px)] min-[720px]:rounded-[14px]">
         <div className="flex flex-none items-center justify-between border-b border-[#2a2a31] bg-[#161619] px-5 py-3.5">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-[#5a5a62]">AlphaWolf</div>

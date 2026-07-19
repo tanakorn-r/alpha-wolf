@@ -32,13 +32,13 @@ export function AppHeader() {
       : { title: "Strategy Dashboard", subtitle: "Everything happening with your money, in one view" };
 
   return (
-    <header className="aw-header sticky top-0 z-10 flex items-end justify-between gap-4 border-b border-[#2a2a31] bg-[#0e0e10] px-6 pb-3.5 pt-4 max-[719px]:items-center max-[719px]:gap-2 max-[719px]:px-4 max-[719px]:py-2.5 max-[719px]:pt-[calc(0.625rem_+_env(safe-area-inset-top))]">
+    <header className="aw-header sticky top-0 z-10 flex items-end justify-between gap-4 border-b border-[#2a2a31] bg-[#0e0e10] px-6 pb-3.5 pt-4 max-[899px]:items-center max-[899px]:gap-2 max-[899px]:px-3.5 max-[899px]:pb-2.5 max-[899px]:pt-[calc(0.625rem_+_var(--aw-safe-top))]">
       <div className="min-w-0">
-        <h1 className="m-0 truncate text-[20px] font-bold tracking-[-0.3px] text-[#ececee] max-[719px]:text-[15px]">{page.title}</h1>
-        <p className="mt-[3px] max-w-[760px] truncate text-[13px] text-[#8c8c95] max-[719px]:hidden">{page.subtitle}</p>
+        <h1 className="m-0 truncate text-[20px] font-bold tracking-[-0.3px] text-[#ececee] max-[899px]:text-[15px]">{page.title}</h1>
+        <p className="mt-[3px] max-w-[760px] truncate text-[13px] text-[#8c8c95] max-[899px]:hidden">{page.subtitle}</p>
       </div>
-      <div className="flex flex-none flex-wrap items-center justify-end gap-2.5 max-[719px]:gap-1.5">
-        <button type="button" onClick={() => setNotificationsOpen(true)} className="relative grid h-[38px] w-[38px] place-items-center rounded-[8px] border border-[#2a2a31] bg-[#161619] text-[#bcbcc2]" aria-label={`${notifications.data?.unread ?? 0} unread research notifications`}>
+      <div className="flex flex-none flex-nowrap items-center justify-end gap-2.5 max-[899px]:gap-1.5">
+        <button type="button" onClick={() => setNotificationsOpen(true)} className="relative grid h-[38px] w-[38px] place-items-center rounded-[8px] border border-[#2a2a31] bg-[#161619] text-[#bcbcc2] max-[899px]:h-[34px] max-[899px]:w-[34px]" aria-label={`${notifications.data?.unread ?? 0} unread research notifications`}>
           <svg aria-hidden="true" width="17" height="17" viewBox="0 0 24 24" fill="none">
             <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9Z" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             <path d="M10 21h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -46,19 +46,19 @@ export function AppHeader() {
           {(notifications.data?.unread ?? 0) > 0 ? <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#f2575c]" /> : null}
         </button>
         {activeAgent ? (
-          <button type="button" onClick={() => setAgentOpen(true)} className="flex h-[38px] items-center gap-2 rounded-[8px] border border-[#2a2a31] bg-[#161619] px-2.5 text-left text-[#bcbcc2] hover:border-[#5a5a62] max-[719px]:h-[30px] max-[719px]:px-1.5" aria-label={`Choose agent, active ${activeAgent.name}`}>
-            <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-[6px] border font-mono text-[9.5px] font-extrabold max-[719px]:h-5 max-[719px]:w-5" style={{ color: activeAgent.color, borderColor: `${activeAgent.color}55`, background: `${activeAgent.color}18` }}>
+          <button type="button" onClick={() => setAgentOpen(true)} className="flex h-[38px] items-center gap-2 rounded-[8px] border border-[#2a2a31] bg-[#161619] px-2.5 text-left text-[#bcbcc2] hover:border-[#5a5a62] max-[899px]:h-[34px] max-[899px]:px-1" aria-label={`Choose agent, active ${activeAgent.name}`}>
+            <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-[6px] border font-mono text-[9.5px] font-extrabold" style={{ color: activeAgent.color, borderColor: `${activeAgent.color}55`, background: `${activeAgent.color}18` }}>
               {activeAgent.avatarUrl ? <img src={activeAgent.avatarUrl} alt="" className="h-full w-full object-cover" /> : activeAgent.mono}
             </span>
             <span className="hidden min-w-0 sm:block">
               <span className="block text-[8.5px] font-bold uppercase tracking-[0.14em] text-[#5a5a62]">{activeAgent.premium ? "Pro Agent" : "Agent"}</span>
               <span className="block max-w-[118px] truncate text-[11.5px] font-bold leading-[1.1] text-[#ececee]">{activeAgent.name}</span>
             </span>
-            <span className="text-[10px] text-[#5a5a62] max-[719px]:hidden">⌄</span>
+            <span className="text-[10px] text-[#5a5a62] max-[899px]:hidden">⌄</span>
           </button>
         ) : null}
         <GoogleAccount />
-        <span className="font-mono text-[11px] text-[#5a5a62] max-[719px]:hidden">{formatLocalDate(new Date(), { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
+        <span className="font-mono text-[11px] text-[#5a5a62] max-[899px]:hidden">{formatLocalDate(new Date(), { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
       </div>
       {agentOpen ? (
         <AgentPickerModal

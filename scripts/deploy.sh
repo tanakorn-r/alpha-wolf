@@ -19,10 +19,16 @@ TURSO_LOCATION="${TURSO_LOCATION:-nrt}"
 GCP_REGION="${GCP_REGION:-asia-northeast1}"
 REPO="${ARTIFACT_REPOSITORY:-alpha-wolf-be}"
 SERVICE="${CLOUD_RUN_SERVICE:-alpha-wolf-api}"
-CLOUD_RUN_CONCURRENCY="${CLOUD_RUN_CONCURRENCY:-8}"
-CLOUD_RUN_MIN_INSTANCES="${CLOUD_RUN_MIN_INSTANCES:-1}"
-CLOUD_RUN_MAX_INSTANCES="${CLOUD_RUN_MAX_INSTANCES:-20}"
-CLOUD_RUN_MEMORY="${CLOUD_RUN_MEMORY:-1Gi}"
+CLOUD_RUN_CONCURRENCY="${CLOUD_RUN_CONCURRENCY:-4}"
+# Free-tier defaults: request-based billing, scale to zero, and cap the service
+# at one small instance. These settings bound the rate of spend, but Cloud Run's
+# monthly free allowance is usage-based, so sufficiently heavy traffic can still
+# exceed it.
+CLOUD_RUN_MIN_INSTANCES="${CLOUD_RUN_MIN_INSTANCES:-0}"
+CLOUD_RUN_MAX_INSTANCES="${CLOUD_RUN_MAX_INSTANCES:-1}"
+CLOUD_RUN_CPU="${CLOUD_RUN_CPU:-1}"
+CLOUD_RUN_MEMORY="${CLOUD_RUN_MEMORY:-512Mi}"
+CLEANUP_POLICY="${ARTIFACT_CLEANUP_POLICY:-$ROOT_DIR/scripts/cloudrun-artifact-cleanup-policy.json}"
 
 # GENERATE UNIQUE VERSION TAG (Fixes the Artifact Registry Immutability error)
 TAG=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d-%H%M%S)
@@ -156,6 +162,19 @@ else
     --quiet
 fi
 
+# Artifact Registry has its own small free storage allowance. Keep a few recent
+# versions for rollback and prune older image versions instead of accumulating a
+# permanently growing bill with every deploy. Cleanup is applied asynchronously.
+if [[ "${CONFIGURE_ARTIFACT_CLEANUP:-1}" == "1" ]]; then
+  [[ -f "$CLEANUP_POLICY" ]] || die "Artifact cleanup policy not found: $CLEANUP_POLICY"
+  log "Configuring Artifact Registry cleanup policy..."
+  gcloud artifacts repositories set-cleanup-policies "$REPO" \
+    --project "$GCP_PROJECT" \
+    --location "$GCP_REGION" \
+    --policy "$CLEANUP_POLICY" \
+    --quiet
+fi
+
 docker buildx inspect >/dev/null
 
 # -- Build for linux/amd64 and push -----------------------------------------
@@ -179,8 +198,9 @@ gcloud run deploy "$SERVICE" \
   --concurrency "$CLOUD_RUN_CONCURRENCY" \
   --min "$CLOUD_RUN_MIN_INSTANCES" \
   --max "$CLOUD_RUN_MAX_INSTANCES" \
-  --cpu-boost \
-  --no-cpu-throttling \
+  --cpu "$CLOUD_RUN_CPU" \
+  --cpu-throttling \
+  --no-cpu-boost \
   --memory "$CLOUD_RUN_MEMORY" \
   --env-vars-file "$ENV_YAML" \
   --quiet

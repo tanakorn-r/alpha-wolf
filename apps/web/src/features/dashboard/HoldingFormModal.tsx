@@ -3,7 +3,7 @@ import { Modal } from "../../components/ui/Modal";
 import type { Dashboard } from "./useDashboard";
 import { localDateKey } from "../../lib/date";
 
-const input = "h-10 rounded-lg border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]";
+const input = "h-10 w-full min-w-0 rounded-lg border border-[#34343c] bg-[#0e0e10] px-3 text-sm text-[#ececee] outline-none focus:border-[#3ecf8e]";
 
 export function HoldingFormModal({ dash }: { dash: Dashboard }) {
   const form = dash.holdingForm;
@@ -20,12 +20,12 @@ export function HoldingFormModal({ dash }: { dash: Dashboard }) {
           Ticker
           <input required className={input} placeholder="e.g. KO or PTT.BK" value={form.value.symbol} onChange={(e) => form.set("symbol", e.target.value.toUpperCase())} />
         </label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="grid gap-1 text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">
+        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
+          <label className="grid min-w-0 gap-1 text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">
             Buy date
             <input required type="date" max={localDateKey()} className={input} value={form.value.occurredAt} onChange={(e) => form.set("occurredAt", e.target.value)} />
           </label>
-          <label className="grid gap-1 text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">
+          <label className="grid min-w-0 gap-1 text-[11px] uppercase tracking-[0.5px] text-[#8c8c95]">
             Fees
             <input type="number" min="0" step="any" className={input} value={form.value.fees} onChange={(e) => form.set("fees", e.target.value)} />
           </label>

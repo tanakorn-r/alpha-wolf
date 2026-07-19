@@ -14,7 +14,9 @@ const config: CapacitorConfig = {
   backgroundColor: "#0e0e10",
   ios: {
     backgroundColor: "#0e0e10",
-    contentInset: "always",
+    // The web shell owns notch/status-bar spacing through CSS safe-area insets.
+    // Adding a native scroll inset as well makes the sticky header double-stack.
+    contentInset: "never",
   },
   android: {
     backgroundColor: "#0e0e10",

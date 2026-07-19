@@ -1007,6 +1007,7 @@ export type DiscoveryResponse = {
   total: number;
   totalPages: number;
   count: number;
+  warming: boolean;
   items: DiscoveryItem[];
   sections: DiscoverySection[];
   live: StockRecord[];

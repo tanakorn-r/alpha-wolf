@@ -11,11 +11,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <div className="aw-shell min-h-screen">
         <CreditPurchaseReturn />
         <AppSidebar />
-        {/* Content offset is mobile-first so the media queries can't conflict:
-            0 (bottom-nav mobile) → 70px (collapsed rail) → 220px (full sidebar). */}
+        {/* One shell breakpoint keeps bottom-nav and sidebar layouts mutually exclusive. */}
         <div className="aw-content flex min-h-screen min-w-0 flex-1 flex-col">
           <AppHeader />
-          <main className="aw-main min-w-0 flex-1 px-6 pb-16 pt-4 max-[719px]:px-4 max-[719px]:pb-24">{children}</main>
+          <main className="aw-main min-w-0 flex-1 overflow-x-clip px-6 pb-16 pt-4 max-[899px]:px-3.5 max-[899px]:pb-24">{children}</main>
           <RiskDisclaimer />
         </div>
         <MobileNav />

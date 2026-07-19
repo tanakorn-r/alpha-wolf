@@ -77,6 +77,7 @@ def discover(
         live = [resolved] if resolved and _has_live_price(resolved) else []
         total = len(live)
         total_pages = 1
+    warming = not query and not sector and total == 0
     response = DiscoverResponse(
         query=query,
         kind=kind,
@@ -85,11 +86,14 @@ def discover(
         total=total,
         totalPages=total_pages,
         count=total,
+        warming=warming,
         sections=lookup.sections,
         items=lookup.items,
         live=live,
     )
-    cache_set("discover_response", cache_key, response.model_dump(), DISCOVERY_RESPONSE_TTL_SECONDS)
+    # A cold catalog returns quickly while its background warmer runs. Caching that empty
+    # response for the normal 30 seconds makes the scanner look dead even after data arrives.
+    cache_set("discover_response", cache_key, response.model_dump(), 2 if warming else DISCOVERY_RESPONSE_TTL_SECONDS)
     return response
 
 

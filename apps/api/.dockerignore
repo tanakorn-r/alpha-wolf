@@ -4,5 +4,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
-data/*.db
-data/*.sqlite
+data/
+tests/
+requirements-dev.txt

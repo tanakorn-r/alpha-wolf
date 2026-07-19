@@ -178,7 +178,7 @@ function RightNow({ verdict, theme, zone }: { verdict: ValuationVerdictResponse;
         <div className="text-[9.5px] font-bold uppercase tracking-[0.06em] text-[#8c8c95]">Right now · Today</div>
         <div className="text-[18px] font-extrabold tracking-[-0.3px]" style={{ color: actionColor }}>{action}</div>
       </div>
-      <div className="min-w-[180px] flex-1 text-[12.5px] leading-[1.55] text-[#bcbcc2]">{note}</div>
+      <div className="min-w-0 flex-1 basis-[180px] text-[12.5px] leading-[1.55] text-[#bcbcc2]">{note}</div>
       <div className="flex flex-none gap-3.5">
       <MiniMetric label={metricLabel} value={formatNullableMoney(verdict.rightNow.entryOnlyAt, verdict.currency)} note={pctAwayText(verdict.rightNow.pctAway)} color={theme.accent} />
       <MiniMetric label={`${verdict.agent?.name ?? "Agent"} perspective`} value={String(verdict.rightNow.conviction)} note="/ 100" color={theme.accent} />
@@ -206,12 +206,12 @@ type StructureBandModel = ReturnType<typeof buildStructureBand>;
 
 function StructureBand({ band }: { band: StructureBandModel }) {
   return (
-    <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] px-4 pb-3 pt-3.5">
+    <div className="overflow-x-auto rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] px-4 pb-3 pt-3.5 [scrollbar-width:thin]">
       <div className="flex flex-wrap items-baseline justify-between gap-[6px]">
         <div className="text-[12px] font-bold tracking-[0.02em] text-[#ececee]">Where the price sits vs structure</div>
         <div className="font-mono text-[10.5px] text-[#5a5a62]">{band.scaleLabel}</div>
       </div>
-      <div className="relative mx-1 mt-3 h-[78px]">
+      <div className="relative mx-1 mt-3 h-[78px] min-w-[520px]">
         <div className="absolute left-0 right-0 top-[34px] h-[14px] overflow-hidden rounded-[7px] border border-[#2a2a31] bg-[#161619]">
           <div className="absolute bottom-0 top-0 bg-[#3ecf8e]/35" style={{ left: `${band.deepDiscountLeft}%`, width: `${band.deepDiscountWidth}%` }} />
           <div className="absolute bottom-0 top-0 bg-[#78e6b8]/22" style={{ left: `${band.discountLeft}%`, width: `${band.discountWidth}%` }} />
@@ -270,7 +270,7 @@ function ThePlay({ verdict, theme }: { verdict: ValuationVerdictResponse; theme:
   const sub = addBackSub(verdict);
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border px-4 py-3.5" style={{ borderColor: theme.footBorder, background: theme.footBg }}>
-      <div className="min-w-[260px] flex-1">
+      <div className="min-w-0 flex-1 basis-[260px]">
         <div className="text-[10px] font-bold uppercase tracking-[0.06em]" style={{ color: theme.accent }}>The play this month</div>
       <div className="mt-[5px] text-[12px] leading-[1.55] text-[#ececee]">{verdict.thePlay.text}</div>
       </div>

@@ -140,7 +140,7 @@
   (`HoldingFormModal` + `useDashboard.holdingForm`: ticker + units + price →
   `holdings`, averages into an existing position), sell modal. No DCA/budget flow.
 - DCA Scanner (`pages/StockHuntPage.tsx` + `features/stock-hunt/*`, `/scanner`):
-  search/market/sector/sort filters, "In my plan" chip, AI top-5 rank + buy; discovery fetching pauses while Stock Detail is open so it cannot compete with the drawer request.
+  search/market/sector/sort filters, "In my plan" chip, AI top-5 rank + buy; discovery fetching pauses while Stock Detail is open, and a cold background-warming catalog shows a real spinner and auto-polls instead of caching an empty/dead result.
 - Income Calendar (`pages/DividendHuntPage.tsx` + `features/dividend-hunt/*`,
   `/calendar`): ex-date/payment-date month grid + side list.
 - Hunt AI (`pages/HuntAiPage.tsx` + `features/hunt-ai/*`, `/hunt-ai`; `/deep-ai`
@@ -164,11 +164,11 @@
   `watchlist/signals/timing/intraday/next100/strategy/analyst`); pure helpers in
   `features/hunt-ai/lib.ts`. Analyst uses one `/analysis/{symbol}/report` endpoint: database-first quote/research reads, `202` polling for cold quotes, 15-minute report reuse, explicit-refresh regeneration, and a one-minute UI deadline.
 - Stock detail drawer uses the reference 22/16/10 radius hierarchy in a compact 1040px frame, active-Agent Quick Read, equal six-tab navigation, reusable `DrawerMetric`, and grounded peer/Dow/Wyckoff/Elliott/Fibonacci/multi-timeframe cards via `AdvancedInsightCard`; opening uses only the detail service, cold-cache pending data gets six bounded backoff checks, and AI, portfolio, and research/market tabs remain local-cache or explicit-click work.
-- Mobile: `apps/web` is wrapped with Capacitor v8 (native projects `apps/web/ios`+`apps/web/android`, config `apps/web/capacitor.config.ts`, appId `com.alphawolf.app`, webDir `dist`). Scripts `cap:sync`/`cap:ios`/`cap:android`/`cap:add:*`. Native build needs `apps/web/.env.production` with absolute `VITE_API_BASE` (no dev proxy on device). Full workflow in `apps/web/MOBILE.md`.
+- Mobile: web/Capacitor share a <900px three-tab bottom navigation (Home/Hunt/Hunt AI) sourced with desktop from `layout/navigation.ts`; Income Calendar and Live Trade routes remain direct-link-only. Shared `--aw-safe-*` tokens prefer Capacitor's injected Android insets and fall back to iOS/browser `env()` values, while dialogs portal above shell chrome.
 - `apps/go-api`: Gin FinFeed POC, not on live path. Kept for reference.
 
 **Last Change**
-- Added `code.md` as the repository-wide engineering contract for architecture boundaries, coding style, financial/AI invariants, security, testing, and review workflow; linked it from `docs/CODEMAP.md`.
+- Hardened phone safe areas across the sticky header, bottom navigation, dialogs, and stock-detail panels by supporting Capacitor's Android inset variables alongside iOS/browser CSS environment insets.
 
 **Recent Context**
 - Fixed a live crash (`Uncaught RangeError: Invalid currency code : null` in `StockDetailDrawer`'s `DrawerHeader`, `formatCurrency`). Root cause: `formatCurrency(value, currency = "USD")`'s default parameter only covers `undefined`, not an explicit `null` — and `detail.stock.currency` can genuinely be `null` now that the backend's cache-first fallback (prior entries) returns empty fields immediately for a freshly-uncached symbol instead of blocking until real data arrives. Fixed `formatCurrency` (`apps/web/src/lib/format.ts`) to coalesce `currency || "USD"` so `null` and `undefined` both fall back correctly. Checked the file for the same gap elsewhere: `formatMoneyAs` requires a non-optional `"USD" | "THB"` literal union, so TypeScript already catches a stray `null` there at compile time — `formatCurrency` was the only vulnerable one. tsc clean.
@@ -188,8 +188,8 @@
 
 **Next Steps**
 - (open) The database-only forced-AI path is deployed to Tokyo (`alpha-wolf-api-00005-5wz`) and the currently routed Jakarta compatibility API (`alpha-wolf-api-00029-ms9`). Trigger one authenticated forced SIRI.BK valuation on the new revision and verify its data-preparation timing; switch Cloudflare `VITE_API_BASE` to Tokyo once authenticated.
-- (open) UI consistency sweep, going page-by-page per user review: still-unaudited files against the `--aw-radius-*` token scale — `AppHeader`/`AppSidebar`/`MobileNav`, `HoldingFormModal`/`SellModal`, `HuntFilters`/`Top5Panel`/`ChartTooltip`. Stock Detail drawer is now done; Stock Hunt and Dividend Hunt still need review. Needs a real logged-in session to verify gated AI results.
-- (open) Mobile: the portfolio glance is sidebar-only (dropped on mobile bottom-nav) — surface it somewhere reachable, then a real device/simulator run of the iOS+Android builds.
+- (open) UI consistency sweep: shell and dashboard modals are now audited; `HuntFilters`/`Top5Panel`/`ChartTooltip`, Stock Hunt, and Dividend Hunt still need reference-level visual review. Gated AI results still need a real logged-in session.
+- (open) Mobile: the portfolio glance remains sidebar-only; surface it somewhere reachable, then run the synced iOS+Android builds on real devices/simulators to validate OS status-bar and keyboard behavior.
 - (open) Optional: if DCA stays unused, delete the dormant `dca_orders` table/routes + cash-reserve store + Daily Brief DCA grouping in a later cleanup pass.
 - (open) Do a visual QA pass against AlphaWolfV6 screenshots once seeded holdings exist.
 - (open) Optional: `/api/details/{symbol}/upward-moves` return real currency

@@ -20,7 +20,7 @@ export function SellModal({ dash }: { dash: Dashboard }) {
       <p className="text-[13px] leading-[1.6] text-[#bcbcc2]">
         Record the actual units and execution price. This updates your position and calculates realized P/L using FIFO lots; it does not place a broker order.
       </p>
-      <div className="mt-4 grid grid-cols-2 gap-3">
+      <div className="mt-4 grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
         <Field label={`Units sold · max ${holding.shares}`} type="number" value={form.value.shares} min="0" max={String(holding.shares)} step="any" onChange={(value) => form.set("shares", value)} />
         <Field label="Execution price" type="number" value={form.value.price} min="0" step="any" onChange={(value) => form.set("price", value)} />
         <Field label="Sale date" type="date" value={form.value.occurredAt} max={localDateKey()} onChange={(value) => form.set("occurredAt", value)} />
@@ -34,7 +34,7 @@ export function SellModal({ dash }: { dash: Dashboard }) {
           <span className="font-mono text-[17px] font-semibold text-[#3ecf8e]"><Money value={proceeds} /></span>
         </div>
       </div>
-      <div className="mt-4 flex gap-2.5">
+      <div className="mt-4 grid grid-cols-1 gap-2.5 min-[380px]:grid-cols-2">
         <button type="button" disabled={dash.selling} onClick={dash.cancelSell} className="flex-1 rounded-[10px] border border-[#2a2a31] py-3 text-[13.5px] font-medium hover:border-[#8c8c95] disabled:opacity-60">
           Cancel
         </button>
@@ -48,9 +48,9 @@ export function SellModal({ dash }: { dash: Dashboard }) {
 
 function Field({ label, type, value, onChange, min, max, step }: { label: string; type: "number" | "date"; value: string; onChange: (value: string) => void; min?: string; max?: string; step?: string }) {
   return (
-    <label className="grid gap-1 text-[10px] uppercase tracking-[0.5px] text-[#8c8c95]">
+    <label className="grid min-w-0 gap-1 text-[10px] uppercase tracking-[0.5px] text-[#8c8c95]">
       {label}
-      <input required type={type} value={value} min={min} max={max} step={step} onChange={(event) => onChange(event.target.value)} className="h-10 rounded-[8px] border border-[#34343c] bg-[#0e0e10] px-3 font-mono text-[12px] text-[#ececee] outline-none focus:border-[#f2575c]" />
+      <input required type={type} value={value} min={min} max={max} step={step} onChange={(event) => onChange(event.target.value)} className="h-10 w-full min-w-0 rounded-[8px] border border-[#34343c] bg-[#0e0e10] px-3 font-mono text-[12px] text-[#ececee] outline-none focus:border-[#f2575c]" />
     </label>
   );
 }

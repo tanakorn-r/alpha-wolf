@@ -33,7 +33,7 @@ export function GoogleAccount() {
         type="button"
         onClick={() => setOpen(true)}
         title={label}
-        className="grid h-[38px] w-[38px] flex-none place-items-center rounded-[8px] border border-[#2a2a31] bg-[#161619] text-[#8c8c95] hover:border-[#5a5a62] hover:text-[#ececee]"
+        className="grid h-[38px] w-[38px] flex-none place-items-center rounded-[8px] border border-[#2a2a31] bg-[#161619] text-[#8c8c95] hover:border-[#5a5a62] hover:text-[#ececee] max-[899px]:h-[34px] max-[899px]:w-[34px]"
         aria-label={label}
       >
         <AccountAvatar user={user} />
@@ -84,7 +84,7 @@ export function GoogleAccountModal({ user, onClose }: { user: AuthUser | null; o
         <div className="text-center">
           <div className="mx-auto w-fit"><AccountAvatar user={user} large /></div>
           <div className="mt-3 text-[16px] font-extrabold text-[#ececee]">{user.name}</div>
-          <div className="mt-1 text-[12px] text-[#8c8c95]">{user.email}</div>
+          <div className="mt-1 break-all text-[12px] text-[#8c8c95]">{user.email}</div>
           <div className="mt-4 rounded-[9px] border border-[#2a2a31] bg-[#0e0e10] px-3 py-2.5 text-[11.5px] leading-[1.5] text-[#8c8c95]">
             Your Google identity is connected to AlphaWolf. AlphaWolf stores research notes and portfolio records; it does not hold assets or execute trades.
           </div>
@@ -150,13 +150,14 @@ function GoogleSignIn({ onConnected }: { onConnected: (user: AuthUser) => void }
         },
       });
       buttonRef.current.replaceChildren();
+      const buttonWidth = Math.min(320, Math.max(200, Math.floor(target.getBoundingClientRect().width)));
       window.google.accounts.id.renderButton(buttonRef.current, {
         type: "standard",
         theme: "filled_black",
         size: "large",
         shape: "rectangular",
         text: "continue_with",
-        width: 320,
+        width: buttonWidth,
       });
     }).catch(() => {
       if (active) setError("Google sign-in could not be loaded.");
