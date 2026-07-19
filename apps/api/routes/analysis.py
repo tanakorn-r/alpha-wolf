@@ -30,6 +30,8 @@ from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnaly
 
 router = APIRouter()
 
+_AI_FAILURE_DETAIL = "The Agent could not produce a reliable result. Your AI token was returned; please retry."
+
 SAVED_AI_FEATURES = {
     "stock-analysis",
     "analyst-report",
@@ -157,7 +159,11 @@ def _publish_ai_result(
         if previous is not None:
             print(f"Warning: AI refresh failed quality gate for {key.feature}/{key.subject}: {exc}")
             return previous
-        raise HTTPException(status_code=503, detail=f"AI response failed quality checks: {exc}") from exc
+        print(f"Warning: AI result failed quality gate for {key.feature}/{key.subject}: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail="The Agent could not produce a reliable result. Your AI token was returned; please retry.",
+        ) from exc
 
 
 def _load_saved_ai_result(key: AIResultKey, legacy_cache_key: str) -> dict[str, Any] | None:
@@ -325,7 +331,7 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
 
     result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     return result
@@ -401,9 +407,9 @@ def analyst_report(
                 "status": "ready",
                 "detail": bundle,
                 "analysis": cached_analysis,
-                "refreshWarning": str(exc),
+                "refreshWarning": _AI_FAILURE_DETAIL,
             }
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
     finally:
         print(f"Analyst OpenAI timing {normalized}: {time.monotonic() - openai_started_at:.3f}s")
 
@@ -455,7 +461,7 @@ def quant_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
 
     result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     return result
@@ -501,7 +507,7 @@ def valuation_analysis(symbol: str, request: Request, payload: dict[str, Any] | 
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
 
     # Keep objective valuation multiples authoritative even if the model omits an echo field.
     business = bundle.get("business") if isinstance(bundle.get("business"), dict) else {}
@@ -634,7 +640,7 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
 
     result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     return result
@@ -682,7 +688,7 @@ def technical_analysis(
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
     result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     return result
 
@@ -814,7 +820,7 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
         release_ai_run(usage_user_id)
         if cached is not None and not force:
             return cached
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
 
     strategy_trust = build_universe_data_trust(payload.region, candidates)
     result = _publish_ai_result(result_key, {**result, "dataTrust": strategy_trust}, cached, usage_user_id, context=context, data_trust=strategy_trust)
@@ -850,7 +856,7 @@ def portfolio_review(request: Request, agent: str = Query("vera"), force: bool =
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
 
     result = _publish_ai_result(result_key, {**result, "dataTrust": portfolio_data.get("dataTrust")}, cached, usage_user_id, context={"portfolioContext": context}, data_trust=portfolio_data.get("dataTrust"))
     return result

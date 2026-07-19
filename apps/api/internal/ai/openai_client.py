@@ -380,7 +380,6 @@ def analyze_today_with_openai(context: dict[str, Any], agent_id: str | None = No
                 "instruction": "Return the whole Daily Brief again with one coherent persona, horizon, score, capital action, evidence hierarchy, and exit rule.",
             },
         })
-    result = _align_today_action(context, result, agent_id)
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
@@ -400,9 +399,6 @@ def _today_action_issue(
     """Find capital, horizon, or persona contradictions before publishing the brief."""
     if not bool((context.get("positionContext") or {}).get("isHolding")):
         return None
-    score = int(result.buyScore)
-    if result.holdingAction not in _today_allowed_actions(score):
-        return f"{result.holdingAction} contradicts the {score}/100 existing-position action band."
     if result.horizonAlignment.status == "BROKEN" and result.holdingAction in {"HOLD", "NO_ACTION", "ADD", "ADD_SMALL"}:
         return "The plan is marked BROKEN but the capital action keeps or adds exposure."
     if result.horizonAlignment.status == "ALIGNED" and result.holdingAction == "SELL":
@@ -493,7 +489,16 @@ def analyze_buy_timing_with_openai(context: dict[str, Any], agent_id: str | None
             reasoning_effort=_fast_reasoning_effort(),
         )
 
-    result = _normalize_buy_timing_contract(context, _run(context), agent_id)
+    result = _run(context)
+    issue = _buy_timing_plan_issue(context, result, agent_id)
+    if issue:
+        result = _run({
+            **context,
+            "consistencyCorrection": {
+                "issue": issue,
+                "instruction": "Return the complete plan again. Resolve only the stated contradiction; do not add trades, purchases, or exits to satisfy a persona quota.",
+            },
+        })
     return {**result.model_dump(), "source": "openai", "model": model, "agent": agent_badge(agent_id), "generatedAt": datetime.now(timezone.utc).isoformat()}
 
 
@@ -895,10 +900,8 @@ def _buy_timing_plan_issue(
 ) -> str | None:
     """Report contradictions, not differences of investment judgment."""
     funded = [item for item in result.monthlyPlan if _is_funded_month(item)]
-    exits = [item for item in result.monthlyPlan if _is_exit_month(item)]
     agent = (agent_id or "").strip().lower()
     timing = context.get("buyTiming") if isinstance(context.get("buyTiming"), dict) else {}
-    structure = timing.get("businessStructure") if isinstance(timing.get("businessStructure"), dict) else {}
     evidence = timing.get("monthlyMap") if isinstance(timing.get("monthlyMap"), list) else []
     current_month = next(
         (str(item.get("month")) for item in evidence if isinstance(item, dict) and item.get("isCurrent")),
@@ -906,8 +909,6 @@ def _buy_timing_plan_issue(
     )
     current = next((item for item in result.monthlyPlan if item.month == current_month), None)
 
-    if result.action == "AVOID" and funded:
-        return "Today's AVOID call contradicts a monthly plan that still deploys new capital."
     if current is not None:
         if result.action == "BUY" and not _is_funded_month(current):
             return "Today's BUY call must fund the current month; future-only buying contradicts the action."
@@ -918,30 +919,8 @@ def _buy_timing_plan_issue(
         if result.action == "TRIM" and not _is_exit_month(current):
             return "Today's TRIM call must reduce the current position in the current month."
 
-    if agent in {"ben", "sam"} and structure.get("status") != "AT_RISK":
-        seasonal_words = (
-            "season", "calendar", "ex-div", "ex dividend", "pre-ex", "post-ex", "midyear", "month",
-        )
-        owner_reasons = (
-            "economics", "cash flow", "cash-flow", "funding", "payout", "coverage", "quality",
-            "valuation", "overvalu", "concentration", "thesis", "deterior", "capital",
-        )
-        seasonal_exits = [
-            item for item in exits
-            if any(word in str(item.reason).lower() for word in seasonal_words)
-            and not any(word in str(item.reason).lower() for word in owner_reasons)
-        ]
-        if seasonal_exits:
-            return (
-                f"The {agent} plan sells for calendar or seasonal reasons even though "
-                "the supplied business structure is not AT_RISK. Each sale needs an owner-economics, "
-                "income, valuation, funding, or portfolio reason beyond the month itself."
-            )
-
     if result.action == "BUY" and not funded:
         return "The top-level BUY action contradicts a twelve-month plan with no funded entry."
-    if agent in {"rex", "kai"} and funded and not exits:
-        return f"The {agent} plan funds a tactical entry but provides no later trim or exit."
     return None
 
 
@@ -1200,20 +1179,16 @@ Every month must include explicit sizing:
   later month. There is no separate SKIP action. If normal DCA should continue, use BUY or
   ADD_SMALL with the appropriate buyBudgetPct instead of HOLD.
 - Top-level WAIT means do not make an extra discretionary lump-sum purchase today. It does NOT
-  automatically cancel this month's normal strategic DCA or Nadia's benchmark-aware core. Vera,
-  Ben, Sam, Nadia, and AlphaWolf may therefore return WAIT while the current calendar month remains
-  ADD_SMALL/BUY at its routine size. Rex and Kai WAIT means no tactical entry and must remain HOLD.
-- This is a DCA timing plan with persona-specific capital mandates, not one universal quota. Fund the
-  months that pass YOUR Agent method. Use 25% sizing when conviction is incomplete but your core evidence
-  gate still passes; use HOLD when that gate fails. A strategic owner who accepts an ownable bull-regime
-  company must maintain its recurring owner core; a tactical Agent still has no participation quota.
+  automatically cancel or require a normal strategic contribution. Decide that contribution from
+  the Agent's evidence. Rex and Kai WAIT means no tactical entry in the current month.
+- This plan has no activity, participation, or cash-use quota. Fund only months that pass YOUR Agent
+  method. Use partial sizing when the evidence supports participation with uncertainty; use HOLD when
+  it does not. Zero funded months is valid when the Agent can name the controlling blocker.
 - EACH AGENT HAS A DIFFERENT BATTLEFIELD. Build the plan to express that mandate, and accept an honest
   loss when the evidence does not fit it:
-  * Vera, Ben, and Sam — ownership & compounding. When businessStructure.ownershipEligible is true,
-    participationContext is BULL, and the company fits the philosophy, full DCA is the real opponent.
-    Meaningful recurring participation is the prior: normally deploy 75-100% of monthly contributions,
-    reinvest dividends, and use lower sizes only for a named valuation, income, funding, or portfolio
-    reason. A low-exposure plan that merely looks good after normalization loses this battlefield.
+  * Vera, Ben, and Sam — ownership & compounding. Compare the proposed plan with ordinary DCA and
+    explain when business quality, valuation, income, funding, or portfolio evidence justifies buying,
+    waiting, or reducing. Do not infer a minimum number or size of purchases from their long horizon.
   * Rex and Kai — swing capture. They may use low exposure, but funded entries need live signal quality,
     favorable stop/reward geometry, and coherent exits. Their primary test is exposure-normalized edge
     with no worse drawdown, not matching DCA's raw long-term return.
@@ -1227,23 +1202,15 @@ Every month must include explicit sizing:
   genericLeverageIgnored before sizing. Positive ROE and margin can make a bank ownership-eligible even
   while capital adequacy, NPL, NIM, and liquidity remain incomplete. Treat missing specialist metrics as
   a confidence/size limitation—not a generic debt/equity rejection—and compare P/B with ROE and bank peers.
-- Read participationContext as the opportunity-cost side of risk. In a BULL regime, when the
-  businessStructure is not AT_RISK and the company is not against your philosophy, long-horizon
-  Agents should usually preserve a baseline participation path instead of hoarding nearly all cash.
-  Use small 25% installments when valuation is stretched or evidence is incomplete, then reserve
-  50/75/100% for stronger months. This is a sizing bias, not an automatic bullish override.
-- Audit the whole plan's annual participation. For a viable long-horizon holding in a bull regime,
-  ending with most delegated contributions idle requires a named hard blocker and an explicit
-  comparison of expected downside avoided versus compounding/upside forfeited. "Near a high,"
-  "could pull back," or "not perfect" alone are not sufficient hard blockers.
+- Read participationContext only as opportunity-cost evidence. A BULL regime can support buying but
+  never compels it. If the plan keeps cash idle, explain why the Agent believes the protection or
+  optionality is worth more than immediate participation.
 - A historical +1% to +3% average month is mild strength, not proof of overvaluation. When the
   Agent's core thesis is intact, treat such months as reasonable 25-50% DCA opportunities unless
   current valuation, momentum exhaustion, or a named risk rule specifically blocks buying.
-- Do not become so defensive that obvious supplied opportunity is ignored. When priceContext is in
-  the lower part of its five-year range, price is at/below entryBand with target upside remaining,
-  and businessStructure is not AT_RISK, ownership/value/income/balanced Agents should normally use
-  ADD_SMALL or BUY rather than HOLD. Missing perfect confirmation should reduce the first installment
-  to 10-25%, not erase a genuine discount. HOLD in that setup requires a named hard blocker.
+- When priceContext is in the lower part of its five-year range or inside the entry band, treat that
+  as favorable evidence—not an automatic purchase. The Agent may still HOLD when stronger valuation,
+  business, funding, portfolio, or signal evidence controls the decision.
 - Decide participation through the selected Agent's own mind. Ben should normally keep planned DCA
   working when owner economics remain intact; Sam should size around funded income durability; Vera
   needs a valuation margin of safety; Rex and Kai need their trend/acceleration evidence; Nadia needs
@@ -1251,21 +1218,15 @@ Every month must include explicit sizing:
   cadence on another, and do not force any action after the model has applied that persona's rules.
   A possibly stronger following month may support buying now, but seasonality is evidence rather than
   a promised future gain.
-- A twelve-month plan with zero BUY/ADD_SMALL allocations usually expresses a genuine rejection or
-  an unusually high hurdle. It can still be the Agent's honest conclusion, but name the controlling
-  blocker and compare the protection gained with the opportunity cost of unused cash. A lower range
-  position, discount to the five-year average, or price inside the entry band creates a starter-size
-  presumption for strategic Agents; it does not compel a purchase when stronger evidence disagrees.
+- A twelve-month plan with zero BUY/ADD_SMALL allocations is allowed. Name the controlling reason and
+  compare the protection gained with the opportunity cost of unused cash.
 - First decide agentFit, then rank the months through YOUR persona using monthlyMap, post-ex behavior,
   valuation/signal evidence, structure, and opportunity cost. Use 25/50/75/100 as an expressive sizing
   vocabulary—not a required ladder. The best month need not receive 100%, and the supplied monthlyMap
   leader need not win when the Agent's primary evidence points elsewhere; explain the override.
-- For accepted, ownable bull-regime Ben and Sam plans, ordinary DCA is the owner core: normally allocate
-  900-1100% across the twelve 100% monthly envelopes, with 75-100% in ordinary months. HOLD should be
-  exceptional and name a valuation, payout, funding, business-quality, or portfolio blocker—not merely
-  a preferred calendar month. Vera/AlphaWolf may be more selective around their controlling risks.
-  Nadia treats DCA as the benchmark and normally keeps a 25-75% systematic core with larger tilts only
-  when measured evidence is robust. Rex and Kai remain tactical and need not fill the calendar.
+- Compare strategic plans with ordinary DCA and Nadia's plan with matched-exposure risk efficiency,
+  but do not translate those benchmarks into minimum annual allocation, purchase counts, or required
+  sizing ladders. Every Agent may fill or leave empty any part of the calendar when the evidence supports it.
 - "Cheap" is not automatically free money. Rex and Kai still require their own signal, acceleration,
   volume, or trend confirmation; Nadia requires measurable edge before tilting away from DCA. But each must explicitly
   consider the discount as favorable risk/reward and state the exact failed trigger if choosing HOLD.

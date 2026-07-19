@@ -38,10 +38,17 @@ export function BuyTimingTab({ hunt }: { hunt: HuntAi }) {
   if (timing.loading) return <LoadingPanel title="Loading buy timing..." body="Reading dividend rhythm and price windows." />;
   if (!timing.rows.length || !row) return <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to open Buy Timing." />;
   if (requestLoading || forcedLoadingMatches) return <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "timing", row.symbol)} subject={row.symbol} agentId={hunt.activeAgentId} task="timing" />;
-  if (row.failed) return <RetryPanel label={row.error || `Could not load ${row.symbol} timing data.`} onRetry={() => runWithLoading(row.retry)} />;
+  if (row.failed) return <RetryPanel label={buyTimingFailureMessage(row.error, row.symbol)} onRetry={() => runWithLoading(row.retry)} />;
   if (!row.timing) return <TimingStart symbol={row.symbol} fetching={row.fetching} agentId={hunt.activeAgentId} onRun={() => runWithLoading(row.run)} />;
 
   return <TimingPage timing={row.timing} analyzedAt={row.analyzedAt} onRefresh={() => runWithLoading(row.retry)} />;
+}
+
+function buyTimingFailureMessage(error: string, symbol: string) {
+  if (/quality checks|cash drag|agent response (?:was incomplete|failed)|reliable result/i.test(error)) {
+    return `The Agent couldn't complete a reliable Buy Timing plan for ${symbol}. Your AI token was returned—please try again.`;
+  }
+  return error || `Could not load ${symbol} timing data.`;
 }
 
 function TimingStart({ symbol, fetching, agentId, onRun }: { symbol: string; fetching: boolean; agentId: string; onRun: () => void }) {

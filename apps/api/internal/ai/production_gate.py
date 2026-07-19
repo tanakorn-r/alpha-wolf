@@ -156,63 +156,64 @@ def build_decision_state(context: dict[str, Any], *, data_trust: dict[str, Any] 
 
 
 def enforce_production_gate(feature: str, agent_id: str, payload: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """Reject persona collapse and attach a guarded decision without inventing a trade."""
+    """Block unsafe claims, record persona diagnostics, and never invent or force a trade."""
     checked = dict(payload)
     state = checked.get("decisionState") if isinstance(checked.get("decisionState"), dict) else {}
     checks: list[dict[str, Any]] = []
     public_output = {key: value for key, value in checked.items() if not key.startswith("_run") and key not in {"decisionState", "dataTrust"}}
     text = json.dumps(public_output, ensure_ascii=False).lower()
 
-    if agent_id == "alphawolf" and any(phrase in text for phrase in _FORBIDDEN_PROMISES):
-        raise ValueError("AlphaWolf Prime made a prohibited certainty/always-win promise")
+    prohibited_promises = sorted(phrase for phrase in _FORBIDDEN_PROMISES if phrase in text)
+    if prohibited_promises:
+        raise ValueError("Agent made a prohibited certainty/always-win promise")
+    checks.append({"name": "no_performance_promise", "passed": True})
+
     if agent_id == "alphawolf":
         groups = sorted(name for name, words in _EVIDENCE_GROUPS.items() if any(word in text for word in words))
-        if len(groups) < 3:
-            raise ValueError("AlphaWolf Prime did not blend at least three independent evidence groups")
-        checks.append({"name": "hybrid_evidence_blend", "passed": True, "evidenceGroups": groups})
-    checks.append({"name": "no_performance_promise", "passed": True})
+        checks.append({"name": "hybrid_evidence_blend", "passed": len(groups) >= 3, "severity": "diagnostic", "evidenceGroups": groups})
 
     if agent_id in {"kai", "rex"}:
         used = sorted({word for word in _TACTICAL_WORDS if word in text})
-        if len(used) < 2:
-            raise ValueError("tactical Agent output lacks entry/exit or tape evidence")
-        checks.append({"name": "tactical_evidence", "passed": True, "evidence": used})
+        checks.append({"name": "tactical_evidence", "passed": len(used) >= 2, "severity": "diagnostic", "evidence": used})
     if agent_id == "nadia":
         used = sorted({word for word in _RISK_WORDS if word in text})
-        if len(used) < 2:
-            raise ValueError("Nadia output lacks risk-adjusted exposure evidence")
-        checks.append({"name": "risk_adjusted_evidence", "passed": True, "evidence": used})
+        checks.append({"name": "risk_adjusted_evidence", "passed": len(used) >= 2, "severity": "diagnostic", "evidence": used})
 
     plan = checked.get("agentMonthlyPlan")
     if isinstance(plan, list) and len(plan) == 12:
         actions = {str(item.get("action") or "") for item in plan if isinstance(item, dict)}
         sizes = {int(item.get("buyBudgetPct") or 0) for item in plan if isinstance(item, dict)}
-        if agent_id in {"kai", "rex"} and not (actions & {"BUY", "ADD_SMALL"} and actions & {"TRIM", "SELL"}):
-            raise ValueError("tactical monthly plan must contain both an entry and an exit/trim")
-        if agent_id == "nadia" and sizes.issubset({0, 100}):
-            raise ValueError("Nadia monthly plan is all-or-nothing instead of risk-scaled")
+        behavior_passed = True
+        behavior_evidence: dict[str, Any] = {"actions": sorted(actions), "sizes": sorted(sizes)}
+        if agent_id in {"kai", "rex"}:
+            behavior_passed = bool(actions & {"BUY", "ADD_SMALL"} and actions & {"TRIM", "SELL"})
+            behavior_evidence["expected"] = "entry_and_exit"
+        if agent_id == "nadia":
+            behavior_passed = not sizes.issubset({0, 100})
+            behavior_evidence["expected"] = "risk_scaled_sizes"
         if agent_id in {"ben", "vera"} and state.get("ownership") == "PARTICIPATE":
             funded = sum(1 for item in plan if isinstance(item, dict) and int(item.get("buyBudgetPct") or 0) > 0)
-            if funded < 7:
-                raise ValueError("long-term owner plan creates excessive cash drag in a sound company")
-        checks.append({"name": "persona_plan_behavior", "passed": True})
+            behavior_passed = funded > 0
+            behavior_evidence["fundedMonths"] = funded
+            behavior_evidence["expected"] = "eventual_participation"
+        checks.append({"name": "persona_plan_behavior", "passed": behavior_passed, "severity": "diagnostic", **behavior_evidence})
 
     verdict = str(checked.get("verdict") or "").upper()
     timing = str(state.get("timing") or "")
-    if timing == "BUILDING" and verdict == "CHASING":
-        checked["verdict"] = "BUILDING"
-        right_now = checked.get("rightNow") if isinstance(checked.get("rightNow"), dict) else {}
-        checked["rightNow"] = {**right_now, "action": "WAIT"}
-        checks.append({"name": "shared_state_consistency", "passed": True, "repaired": "CHASING->BUILDING"})
-    else:
-        checks.append({"name": "shared_state_consistency", "passed": True})
     signal = str(checked.get("signal") or "").upper()
+    consistency_notes: list[str] = []
+    if timing == "BUILDING" and verdict == "CHASING":
+        consistency_notes.append("state_building_vs_verdict_chasing")
     if timing == "BUILDING" and "CHASE" in signal:
-        checked["signal"] = "WAIT" if feature == "technical" else "BUILDING · WAIT"
-        checks[-1] = {"name": "shared_state_consistency", "passed": True, "repaired": "CHASE signal->BUILDING"}
+        consistency_notes.append("state_building_vs_signal_chase")
     elif timing == "CHASE" and "BUILD" in signal:
-        checked["signal"] = "WAIT" if feature == "technical" else "CHASE · PAUSE"
-        checks[-1] = {"name": "shared_state_consistency", "passed": True, "repaired": "BUILDING signal->CHASE"}
+        consistency_notes.append("state_chase_vs_signal_building")
+    checks.append({
+        "name": "shared_state_consistency",
+        "passed": not consistency_notes,
+        "severity": "diagnostic",
+        "observations": consistency_notes,
+    })
 
     sector_evidence = state.get("sectorEvidence") if isinstance(state.get("sectorEvidence"), dict) else {}
     checks.append({

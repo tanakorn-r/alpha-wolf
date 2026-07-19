@@ -324,7 +324,8 @@ class BuyTimingPlanIntegrityTests(unittest.TestCase):
         self.assertIn("actual values with your numeric gates", instructions)
         self.assertIn("companyStructureProfile.seasonalityRule", instructions)
         self.assertIn("hospitality/restaurant operator", instructions)
-        self.assertIn("Nadia treats DCA as the", instructions)
+        self.assertIn("no activity, participation, or cash-use quota", instructions)
+        self.assertIn("Nadia's plan with matched-exposure risk efficiency", instructions)
         self.assertIn("rules inform the decision", openai_client.compose_instructions("Test", "vera"))
         self.assertIn("Rex and Kai plans should describe a complete trade lifecycle", instructions)
         self.assertIn("evaluate BUY and SELL together as one fast-trade path", instructions)
@@ -336,7 +337,7 @@ class BuyTimingPlanIntegrityTests(unittest.TestCase):
         self.assertIn("Price resistance alone is insufficient for strategic owners", instructions)
         self.assertIn("must remain full-plan policies", instructions)
         self.assertIn("WAIT means do not make an extra discretionary lump-sum", instructions)
-        self.assertIn("automatically cancel this month's normal strategic DCA", instructions)
+        self.assertIn("automatically cancel or require a normal strategic contribution", instructions)
         self.assertIn("ownershipEligible", instructions)
         self.assertIn("risk-adjusted efficiency", instructions)
         backtrade = openai_client._backtrade_instructions()
@@ -401,27 +402,22 @@ class BuyTimingPlanIntegrityTests(unittest.TestCase):
     def test_rex_keeps_selective_calendar_without_utilization_floor(self) -> None:
         self.assertFalse(_buy_timing_needs_reconsideration(_context(), _narrative(), "rex"))
 
-    def test_ben_reconsiders_only_repeated_calendar_based_trims(self) -> None:
+    def test_ben_calendar_trims_are_not_rejected_by_keyword_heuristics(self) -> None:
         result = _narrative()
         _fund_long_horizon_plan(result)
         for item in result.monthlyPlan[6:8]:
             item.action = "TRIM"
             item.trimPositionPct = 10
             item.reason = "Seasonal calendar month is historically weak."
-        self.assertTrue(_buy_timing_needs_reconsideration(_context(structure="INTACT"), result, "ben"))
+        self.assertFalse(_buy_timing_needs_reconsideration(_context(structure="INTACT"), result, "ben"))
 
-    def test_ben_rejects_even_one_calendar_only_trim(self) -> None:
+    def test_ben_single_trim_is_preserved_for_agent_judgment(self) -> None:
         result = _narrative()
         _fund_long_horizon_plan(result)
         result.monthlyPlan[6].action = "TRIM"
         result.monthlyPlan[6].trimPositionPct = 10
         result.monthlyPlan[6].reason = "Seasonal month risk."
-        self.assertTrue(_buy_timing_needs_reconsideration(_context(structure="INTACT"), result, "ben"))
-
-        normalized = _normalize_buy_timing_contract(_context(structure="INTACT"), result, "ben").monthlyPlan
-        july = next(item for item in normalized if item.month == "Jul")
-        self.assertEqual(july.action, "HOLD")
-        self.assertEqual(july.trimPositionPct, 0)
+        self.assertFalse(_buy_timing_needs_reconsideration(_context(structure="INTACT"), result, "ben"))
 
     def test_ben_may_make_a_larger_company_specific_trim(self) -> None:
         result = _narrative()

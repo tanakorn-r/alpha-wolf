@@ -36,33 +36,57 @@ def _base(agent: str = "vera") -> dict:
 
 
 class AIProductionGateTests(unittest.TestCase):
-    def test_shared_state_repairs_building_chase_contradiction(self) -> None:
+    def test_shared_state_flags_but_does_not_rewrite_agent_judgment(self) -> None:
         payload = attach_run_context(
         {**_base("kai"), "verdict": "CHASING", "rightNow": {"action": "AVOID"},
          "summary": "Volume is low below resistance; wait for a breakout and use a stop."},
         feature="valuation", context=_context(), data_trust={"marketTimestamp": "2026-07-14T20:00:00Z"},
-    )
+        )
         guarded, checks = enforce_production_gate("valuation", "kai", payload)
-        self.assertEqual(guarded["verdict"], "BUILDING")
-        self.assertEqual(guarded["rightNow"]["action"], "WAIT")
+        self.assertEqual(guarded["verdict"], "CHASING")
+        self.assertEqual(guarded["rightNow"]["action"], "AVOID")
         self.assertEqual(guarded["guardedDecision"]["stateId"], guarded["decisionState"]["id"])
-        self.assertTrue(any(item.get("repaired") for item in checks))
+        consistency = next(item for item in checks if item["name"] == "shared_state_consistency")
+        self.assertFalse(consistency["passed"])
 
 
-    def test_tactical_agent_cannot_publish_generic_valuation_language(self) -> None:
+    def test_tactical_evidence_preference_is_diagnostic(self) -> None:
         payload = attach_run_context(_base("rex"), feature="stock-analysis", context=_context())
-        with self.assertRaisesRegex(ValueError, "tactical Agent"):
-            enforce_production_gate("stock-analysis", "rex", payload)
+        _, checks = enforce_production_gate("stock-analysis", "rex", payload)
+        tactical = next(item for item in checks if item["name"] == "tactical_evidence")
+        self.assertFalse(tactical["passed"])
 
 
-    def test_nadia_cannot_publish_all_or_nothing_calendar(self) -> None:
+    def test_nadia_sizing_preference_is_diagnostic(self) -> None:
         plan = [{"month": str(index), "action": "BUY", "buyBudgetPct": 100} for index in range(12)]
         payload = attach_run_context(
         {**_base("nadia"), "summary": "Risk exposure and drawdown edge", "agentMonthlyPlan": plan},
         feature="buy-timing", context=_context(),
     )
-        with self.assertRaisesRegex(ValueError, "all-or-nothing"):
-            enforce_production_gate("buy-timing", "nadia", payload)
+        _, checks = enforce_production_gate("buy-timing", "nadia", payload)
+        behavior = next(item for item in checks if item["name"] == "persona_plan_behavior")
+        self.assertFalse(behavior["passed"])
+
+    def test_patient_owner_can_publish_a_selective_calendar(self) -> None:
+        plan = [{"month": str(index), "action": "HOLD", "buyBudgetPct": 0} for index in range(12)]
+        plan[8] = {"month": "Sep", "action": "ADD_SMALL", "buyBudgetPct": 25}
+        payload = attach_run_context(
+            {**_base("ben"), "agentMonthlyPlan": plan},
+            feature="buy-timing", context=_context(),
+        )
+        guarded, checks = enforce_production_gate("buy-timing", "ben", payload)
+        self.assertEqual(guarded["agentMonthlyPlan"][8]["buyBudgetPct"], 25)
+        self.assertTrue(any(item["name"] == "persona_plan_behavior" for item in checks))
+
+    def test_owner_participation_preference_is_diagnostic(self) -> None:
+        plan = [{"month": str(index), "action": "HOLD", "buyBudgetPct": 0} for index in range(12)]
+        payload = attach_run_context(
+            {**_base("ben"), "agentMonthlyPlan": plan},
+            feature="buy-timing", context=_context(),
+        )
+        _, checks = enforce_production_gate("buy-timing", "ben", payload)
+        behavior = next(item for item in checks if item["name"] == "persona_plan_behavior")
+        self.assertFalse(behavior["passed"])
 
 
     def test_prime_cannot_promise_to_always_win(self) -> None:
@@ -73,13 +97,14 @@ class AIProductionGateTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "prohibited"):
             enforce_production_gate("stock-analysis", "alphawolf", payload)
 
-    def test_prime_must_actually_blend_evidence(self) -> None:
+    def test_prime_evidence_blend_preference_is_diagnostic(self) -> None:
         payload = attach_run_context(
             {**_base("alphawolf"), "summary": "The price looks interesting."},
             feature="stock-analysis", context=_context(),
         )
-        with self.assertRaisesRegex(ValueError, "three independent"):
-            enforce_production_gate("stock-analysis", "alphawolf", payload)
+        _, checks = enforce_production_gate("stock-analysis", "alphawolf", payload)
+        blend = next(item for item in checks if item["name"] == "hybrid_evidence_blend")
+        self.assertFalse(blend["passed"])
 
 
     def test_sector_native_requirements_and_full_run_audit_are_persisted(self) -> None:

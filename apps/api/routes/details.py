@@ -42,7 +42,11 @@ def _publish_ai_result(
         if previous is not None:
             print(f"Warning: AI refresh failed quality gate for {key.feature}/{key.subject}: {exc}")
             return previous
-        raise HTTPException(status_code=503, detail=f"AI response failed quality checks: {exc}") from exc
+        print(f"Warning: AI result failed quality gate for {key.feature}/{key.subject}: {exc}")
+        raise HTTPException(
+            status_code=503,
+            detail="The Agent could not produce a reliable result. Your AI token was returned; please retry.",
+        ) from exc
 
 
 def _load_saved_ai_result(key: AIResultKey, legacy_cache_key: str) -> dict[str, Any] | None:
@@ -308,7 +312,10 @@ def details_upward_moves(
         release_ai_run(usage_user_id)
         if cached is not None:
             return cached
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=503,
+            detail="The Agent could not produce a reliable result. Your AI token was returned; please retry.",
+        ) from exc
 
     result["history"] = historical.get("history", [])
     result["historicalMoves"] = historical.get("moves", [])[:10]
