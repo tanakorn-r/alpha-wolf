@@ -28,7 +28,7 @@ export function DashboardPage() {
         <GoogleAccount />
       </div>
       {dash.signInOpen ? <GoogleAccountModal user={dash.accountUser} onClose={dash.closeSignIn} /> : null}
-      {dash.portfolio?.fxRates.THB ? (
+      {dash.portfolio?.fxRates.THB && !dash.showEmptyHero ? (
         <div className={`rounded-[9px] border px-3 py-2 font-mono text-[10.5px] ${dash.portfolio.fxStale ? "border-[#f5c451]/35 bg-[#f5c451]/8 text-[#f5c451]" : "border-[#2a2a31] bg-[#121214] text-[#6f6f78]"}`}>
           Main currency {reportingCurrency}{reportingCurrency !== "USD" && reportingRate ? ` · USD/${reportingCurrency} ${reportingRate.toFixed(4)}` : ""} · {dash.portfolio.fxSource ?? "FX cache"}{dash.portfolio.fxFetchedAt ? ` · updated ${formatLocalDateTime(dash.portfolio.fxFetchedAt)}` : ""}{dash.portfolio.fxStale ? " · stale fallback—live refresh unavailable" : ""}
         </div>
@@ -41,7 +41,7 @@ export function DashboardPage() {
           ) : null}
 
           {dash.showEmptyHero ? (
-            <EmptyPortfolio onAdd={dash.holdingForm.show} />
+            <EmptyPortfolio dash={dash} />
           ) : (
             <>
               <AiAdvisor dash={dash} />

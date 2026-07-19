@@ -608,6 +608,11 @@ export type StrategyPlaybookResponse = {
   agentFitReason?: string | null;
 };
 
+export type ResearchShortlistResponse = {
+  symbols: string[];
+  updatedAt?: string | null;
+};
+
 export type QuantPerspectiveCheck = {
   label: string;
   value: string;
@@ -1536,7 +1541,7 @@ export async function loadTechnicalAnalysis(symbol: string, agent?: string, forc
   throw new Error("Fresh market data did not become ready within one minute. Please retry.");
 }
 
-export async function loadStrategyPlaybook(params: { strategy: string; region?: "all" | "us" | "th"; limit?: number; candidateLimit?: number; agent?: string; force?: boolean }): Promise<StrategyPlaybookResponse> {
+export async function loadStrategyPlaybook(params: { strategy: string; candidateSymbols: string[]; region?: "all" | "us" | "th"; limit?: number; candidateLimit?: number; agent?: string; force?: boolean }): Promise<StrategyPlaybookResponse> {
   const queryParams = new URLSearchParams();
   if (params.agent) queryParams.set("agent", params.agent);
   if (params.force) queryParams.set("force", "true");
@@ -1551,7 +1556,8 @@ export async function loadStrategyPlaybook(params: { strategy: string; region?: 
       strategy: params.strategy,
       region: params.region ?? "all",
       limit: params.limit ?? 5,
-      candidateLimit: params.candidateLimit ?? 40
+      candidateLimit: params.candidateLimit ?? 40,
+      candidateSymbols: params.candidateSymbols,
     })
   });
 
@@ -1560,6 +1566,32 @@ export async function loadStrategyPlaybook(params: { strategy: string; region?: 
   }
 
   return (await response.json()) as StrategyPlaybookResponse;
+}
+
+export async function loadResearchShortlist(): Promise<ResearchShortlistResponse> {
+  const response = await trackedFetch(`${API_BASE}/portfolio/research-shortlist`, { credentials: "include" });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to load research shortlist: ${response.status}`));
+  return (await response.json()) as ResearchShortlistResponse;
+}
+
+export async function saveResearchShortlist(symbols: string[]): Promise<ResearchShortlistResponse> {
+  const response = await trackedFetch(`${API_BASE}/portfolio/research-shortlist`, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ symbols }),
+  });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to save research shortlist: ${response.status}`));
+  return (await response.json()) as ResearchShortlistResponse;
+}
+
+export async function deleteResearchShortlist(): Promise<ResearchShortlistResponse> {
+  const response = await trackedFetch(`${API_BASE}/portfolio/research-shortlist`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!response.ok) throw new Error(await accountDataApiError(response, `Failed to remove research shortlist: ${response.status}`));
+  return (await response.json()) as ResearchShortlistResponse;
 }
 
 export async function loadPortfolioReview(agent?: string, force = false): Promise<PortfolioReviewResponse> {

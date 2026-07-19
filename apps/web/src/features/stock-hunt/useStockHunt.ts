@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { StockRecord, StrategyKey } from "../../data/market";
-import { buyHolding, loadAuthUser, loadDiscoveries, loadFxRates, summarizeStock, type MarketPreference, type StockAnalysisResponse } from "../../lib/api";
-import { formatCurrency, formatPercent, formatShortDate, priceToUsdBase } from "../../lib/format";
+import { loadAuthUser, loadDiscoveries, summarizeStock, type MarketPreference, type StockAnalysisResponse } from "../../lib/api";
+import { formatCurrency, formatPercent, formatShortDate } from "../../lib/format";
 import { DISCOVERY_DEBOUNCE_MS, useDebouncedValue } from "../../lib/useDebouncedValue";
 import { useWolfStore } from "../../store/useWolfStore";
 import type { StrategyIconKind } from "../../components/ui/icons";
@@ -11,7 +11,6 @@ import { getLocaleSettings } from "../../lib/locale";
 export type Market = "all" | "us" | "th" | "europe" | "japan" | "hong-kong-china";
 export type SortKey = "score" | "yield" | "change" | "name";
 export type StrategyMode = StrategyIconKind;
-export type Top5State = "idle" | "loading" | "open";
 
 const marketPreferenceFilters: Record<MarketPreference, Exclude<Market, "all">> = {
   us: "us",
@@ -126,10 +125,6 @@ export function useStockHunt() {
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzingSymbol, setAnalyzingSymbol] = useState("");
-  const [top5State, setTop5State] = useState<Top5State>("idle");
-  const [top5Applied, setTop5Applied] = useState<{ count: number; amount: number } | null>(null);
-  const [applyingTop5, setApplyingTop5] = useState(false);
-  const [applyTop5Error, setApplyTop5Error] = useState("");
   const [signInOpen, setSignInOpen] = useState(false);
   const [discoveryReady, setDiscoveryReady] = useState(false);
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
@@ -149,7 +144,6 @@ export function useStockHunt() {
   useEffect(() => {
     if (market !== "all" && !configuredMarkets.includes(market)) {
       setMarketState(preferredScannerMarket(configuredMarkets));
-      resetTop5();
     }
   }, [configuredMarkets, market]);
 
@@ -242,18 +236,8 @@ export function useStockHunt() {
     });
   }, [candidates, strategyMode]);
 
-  const top5 = useMemo(
-    () => candidates.slice(0, 5).map((item) => ({ item, amount: 200 })),
-    [candidates],
-  );
-
   const chip = strategyMode;
   const chipOptions = chipOrder.map((key) => ({ value: key, label: chipLabels[key], icon: key, color: chipColors[key] }));
-
-  function resetTop5() {
-    setTop5State("idle");
-    setTop5Applied(null);
-  }
 
   return {
     searchQuery,
@@ -270,12 +254,6 @@ export function useStockHunt() {
     matches,
     total,
     countLabel: `${matches.length === total ? `All ${matches.length}` : `${matches.length} of ${total}`} matches · sorted by ${sortLabels[sortBy]}`,
-    top5,
-    top5Label: chipLabels[strategyMode],
-    top5State,
-    top5Applied,
-    applyingTop5,
-    applyTop5Error,
     accountUser: authQuery.data ?? null,
     signInOpen,
     closeSignIn: () => setSignInOpen(false),
@@ -291,49 +269,15 @@ export function useStockHunt() {
     isFetchingNextPage: discoveryQuery.isFetchingNextPage,
     hasNextPage: discoveryQuery.hasNextPage,
     openDetail(symbol: string) { openDetail(symbol, strategyMode); },
-    setQuery(value: string) { setSearchQuery(value); resetTop5(); },
-    setMarket(value: Market) { setMarketState(value); resetTop5(); },
-    setSector(value: string) { setSectorState(value); resetTop5(); },
-    setSortBy(value: SortKey) { setSortByState(value); resetTop5(); },
+    setQuery(value: string) { setSearchQuery(value); },
+    setMarket(value: Market) { setMarketState(value); },
+    setSector(value: string) { setSectorState(value); },
+    setSortBy(value: SortKey) { setSortByState(value); },
     pickChip(value: StrategyMode) {
       setStrategyMode(value);
       setStrategy(modeToBaseStrategy[value]);
       setSelectedMode(value);
-      resetTop5();
     },
-    async rankTop5() {
-      setTop5State("loading");
-      setTop5Applied(null);
-      await new Promise((resolve) => setTimeout(resolve, 700));
-      setTop5State("open");
-    },
-    async applyTop5() {
-      if (!top5.length || applyingTop5) return;
-      if (!authQuery.data?.id) {
-        setSignInOpen(true);
-        return;
-      }
-      setApplyingTop5(true);
-      setApplyTop5Error("");
-      try {
-        const fx = await loadFxRates();
-        for (const pick of top5) {
-          if (!pick.item.price || pick.item.price <= 0) continue;
-          // pick.amount is a USD-base budget; convert the native price so share count is right for THB.
-          const price = priceToUsdBase(pick.item.price, pick.item.currency ?? pick.item.symbol, fx.rates);
-          const boughtShares = pick.amount / price;
-          await buyHolding({ symbol: pick.item.symbol, shares: boughtShares, price: pick.item.price, currency: pick.item.currency ?? undefined, strategy: baseStrategy });
-        }
-        const amount = top5.reduce((sum, pick) => sum + pick.amount, 0);
-        setTop5Applied({ count: top5.length, amount });
-        setTop5State("idle");
-      } catch {
-        setApplyTop5Error("Could not buy the full top-5 list — some buys may not have gone through.");
-      } finally {
-        setApplyingTop5(false);
-      }
-    },
-    dismissApplied() { setTop5Applied(null); },
     async askAi(symbol: string) {
       setAnalyzing(true);
       setAnalyzingSymbol(symbol);

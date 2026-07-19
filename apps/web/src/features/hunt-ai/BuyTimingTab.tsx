@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { LoadingPanel, RetryPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { AgentCall } from "../../components/agents/AgentCall";
-import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentActionButton } from "../../components/agents/AgentActionButton";
 import type { BuyTimingResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
 import { clamp, formatAnalyzedAt } from "./lib";
-import { agentLoadingTitle, PremiumLoading } from "./ui";
+import { agentLoadingTitle, agentName, PremiumLoading } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
 export function BuyTimingTab({ hunt }: { hunt: HuntAi }) {
@@ -39,19 +39,19 @@ export function BuyTimingTab({ hunt }: { hunt: HuntAi }) {
   if (!timing.rows.length || !row) return <TickerEmptyPanel body="Add or select an asset in the Hunt watchlist above to open Buy Timing." />;
   if (requestLoading || forcedLoadingMatches) return <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "timing", row.symbol)} subject={row.symbol} agentId={hunt.activeAgentId} task="timing" />;
   if (row.failed) return <RetryPanel label={row.error || `Could not load ${row.symbol} timing data.`} onRetry={() => runWithLoading(row.retry)} />;
-  if (!row.timing) return <TimingStart symbol={row.symbol} fetching={row.fetching} onRun={() => runWithLoading(row.run)} />;
+  if (!row.timing) return <TimingStart symbol={row.symbol} fetching={row.fetching} agentId={hunt.activeAgentId} onRun={() => runWithLoading(row.run)} />;
 
   return <TimingPage timing={row.timing} analyzedAt={row.analyzedAt} onRefresh={() => runWithLoading(row.retry)} />;
 }
 
-function TimingStart({ symbol, fetching, onRun }: { symbol: string; fetching: boolean; onRun: () => void }) {
+function TimingStart({ symbol, fetching, agentId, onRun }: { symbol: string; fetching: boolean; agentId: string; onRun: () => void }) {
   return (
     <section className="flex flex-wrap items-center gap-3 rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#1a1a1e] px-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="font-mono text-[15px] font-extrabold text-[#ececee]">{symbol}</div>
         <div className="mt-0.5 text-[11px] text-[#8c8c95]">Run the selected Agent&apos;s buy timing analysis when you are ready.</div>
       </div>
-      <PremiumAiButton label={fetching ? "Analyzing" : "AI Buy Timing"} sublabel="Timing" disabled={fetching} loading={fetching} onClick={onRun} size="xs" />
+      <AgentActionButton fallbackName={agentName(agentId)} label={fetching ? "Analyzing" : "Buy timing"} sublabel="Ask your Agent" disabled={fetching} loading={fetching} onClick={onRun} />
     </section>
   );
 }
@@ -172,17 +172,27 @@ function MonthlyBuyMap({ timing }: { timing: BuyTimingResponse }) {
   const evidenceOnly = !sizedAgentPlan;
   const map = sizedAgentPlan ? timing.agentMonthlyPlan : timing.narrativeSource === "openai" ? null : timing.monthlyMap;
   if (!map || !map.length) return <div className="mt-4 text-[12px] text-[#5a5a62]">Monthly buy/trim map needs a fresh sync.</div>;
+  const keyMonths = map.filter((month) => month.isCurrent || month.isExMonth || month.action !== "HOLD");
+  const holdMonths = map.filter((month) => !keyMonths.includes(month));
+  const year = timing.comparisonYear ?? new Date().getFullYear();
+  const tacticalSizing = ["rex", "kai"].includes(timing.agent?.id ?? "");
   return (
-    <div className="mt-5">
-      <div className="grid grid-cols-6 gap-1.5 min-[720px]:grid-cols-12">
-        {map.map((month) => <MonthCell key={month.month} month={month} year={timing.comparisonYear ?? new Date().getFullYear()} evidenceOnly={evidenceOnly} tacticalSizing={["rex", "kai"].includes(timing.agent?.id ?? "")} />)}
+    <div className="@container mt-5">
+      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.09em] text-[#686870]">Decision months</div>
+      <div className="grid grid-cols-2 gap-1.5 @min-[540px]:grid-cols-3">
+        {keyMonths.map((month) => <MonthCell key={month.month} month={month} year={year} evidenceOnly={evidenceOnly} tacticalSizing={tacticalSizing} />)}
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-[#8c8c95]">
+      {holdMonths.length ? (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-white/[0.06] pt-3">
+          <span className="mr-1 text-[8.5px] font-bold uppercase tracking-[0.08em] text-[#686870]">Hold months</span>
+          {holdMonths.map((month) => <MonthChip key={month.month} month={month} year={year} />)}
+        </div>
+      ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] text-[#777780]">
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#3ecf8e]" /> {evidenceOnly ? "Favorable evidence" : "Buy / add"}</span>
         <span className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${evidenceOnly ? "bg-[#f5c451]" : "bg-[#f2575c]"}`} /> {evidenceOnly ? "Caution evidence" : "Trim / sell"}</span>
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#f5c451]" /> Ex-dividend</span>
-        <span>Avg = historical monthly average · {timing.comparisonYear ?? new Date().getFullYear()} = actual return / current MTD</span>
-        <span className="ml-auto">{evidenceOnly ? "Refresh to generate the selected Agent’s executable plan" : ["rex", "kai"].includes(timing.agent?.id ?? "") ? "Tactical buy % = available strategy cash" : "Buy % sizes this month; high-conviction strategic owners may also redeploy reserve"}</span>
+        <span className="@min-[620px]:ml-auto">Avg = history · Y{year} = actual</span>
       </div>
     </div>
   );
@@ -198,20 +208,35 @@ function MonthCell({ month, year, evidenceOnly = false, tacticalSizing = false }
   const alignment = actual == null || month.returnPct === 0 ? "not available" : Math.sign(actual) === Math.sign(month.returnPct) ? "aligned" : "diverged";
   return (
     <div
-      className="relative flex flex-col items-center gap-1 rounded-[8px] border px-1 py-2.5"
+      className="relative rounded-[8px] border p-2.5"
       style={{ background: tone.bg, borderColor: month.isCurrent ? "#ececee" : tone.border }}
       title={`${month.month}: ${evidenceOnly ? "evidence only" : month.action}${sizeLabel ? ` ${sizeLabel}` : ""} · ${"reason" in month ? month.reason : month.note} · historical avg ${signed(month.returnPct)}% · ${year} ${actual == null ? "not available" : `${signed(actual)}% (${alignment})`}`}
     >
-      {month.isCurrent ? (
-        <span className="absolute -top-[7px] rounded-[4px] bg-[#ececee] px-1 py-[1px] text-[7px] font-bold uppercase tracking-[0.06em] text-[#0e0e10]">now</span>
-      ) : null}
-      {month.isExMonth ? <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#f5c451]" /> : null}
-      <span className="text-[9px] font-bold uppercase tracking-[0.05em]" style={{ color: tone.fg }}>{evidenceOnly ? (month.action === "BUY" ? "FAVORABLE" : month.action === "TRIM" ? "CAUTION" : "NEUTRAL") : month.action === "HOLD" ? "HOLD" : month.action === "ADD_SMALL" ? "ADD" : month.action}</span>
-      <span className="font-mono text-[12px] font-bold text-[#ececee]">{month.month}</span>
-      {sizeLabel ? <span className="text-[8px] font-semibold text-[#bcbcc2]">{sizeLabel}</span> : null}
-      <span className="font-mono text-[8.5px] text-[#8c8c95]">Avg {signed(month.returnPct)}%</span>
-      <span className="font-mono text-[8.5px]" style={{ color: actual == null ? "#5a5a62" : actual >= 0 ? "#3ecf8e" : "#f2575c" }}>Y{year} {actual == null ? "—" : `${signed(actual)}%`}</span>
+      {month.isCurrent ? <span className="absolute -top-[7px] left-3 rounded-[4px] bg-[#ececee] px-1.5 py-[1px] text-[7px] font-bold uppercase tracking-[0.06em] text-[#0e0e10]">Now</span> : null}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[9px] font-bold uppercase tracking-[0.05em]" style={{ color: tone.fg }}>{evidenceOnly ? (month.action === "BUY" ? "Favorable" : month.action === "TRIM" ? "Caution" : "Neutral") : month.action === "HOLD" ? "Hold" : month.action === "ADD_SMALL" ? "Add" : month.action}</span>
+        {month.isExMonth ? <span className="flex items-center gap-1 text-[7.5px] font-bold text-[#d6b36a]"><span className="h-1.5 w-1.5 rounded-full bg-[#f5c451]" />EX-DIV</span> : null}
+      </div>
+      <div className="mt-1 flex items-end justify-between gap-2">
+        <span className="font-mono text-[14px] font-bold text-[#ececee]">{month.month}</span>
+        {sizeLabel ? <span className="text-right text-[8px] font-semibold text-[#bcbcc2]">{sizeLabel}</span> : null}
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-2 font-mono text-[8px]">
+        <span className="text-[#8c8c95]">Avg {signed(month.returnPct)}%</span>
+        <span style={{ color: actual == null ? "#5a5a62" : actual >= 0 ? "#3ecf8e" : "#f2575c" }}>Y{year} {actual == null ? "—" : `${signed(actual)}%`}</span>
+      </div>
     </div>
+  );
+}
+
+function MonthChip({ month, year }: { month: MonthCellData; year: number }) {
+  const actual = month.currentYearReturnPct;
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-[6px] border border-[#2a2a31] bg-[#111113] px-2 py-1.5" title={`${month.month}: hold · historical avg ${signed(month.returnPct)}% · ${year} ${actual == null ? "not available" : `${signed(actual)}%`}`}>
+      <b className="font-mono text-[9px] text-[#bcbcc2]">{month.month}</b>
+      <span className="font-mono text-[8px] text-[#686870]">{signed(month.returnPct)}%</span>
+      {actual != null ? <span className="h-1 w-1 rounded-full" style={{ background: actual >= 0 ? "#3ecf8e" : "#f2575c" }} /> : null}
+    </span>
   );
 }
 

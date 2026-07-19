@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # AI decisions must take a side. The center band encouraged generic, balanced
@@ -449,8 +449,34 @@ class StrategyPlaybookResponse(StrategyPlaybook):
 class StrategyRecommendationRequest(BaseModel):
     strategy: str = Field(min_length=1, max_length=500)
     region: Literal["all", "us", "th"] = "all"
-    limit: int = Field(default=5, ge=1, le=5)
-    candidateLimit: int = Field(default=40, ge=5, le=50)
+    limit: Literal[5] = 5
+    candidateLimit: int = Field(default=40, ge=5, le=40)
+    candidateSymbols: list[str] = Field(default_factory=list, min_length=5, max_length=40)
+
+    @field_validator("candidateSymbols")
+    @classmethod
+    def normalize_candidate_symbols(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip().upper() for value in values if value.strip()]
+        if not 5 <= len(normalized) <= 40 or len(normalized) != len(set(normalized)):
+            raise ValueError("candidateSymbols must contain 5–40 unique symbols")
+        return normalized
+
+
+class ResearchShortlistInput(BaseModel):
+    symbols: list[str] = Field(min_length=5, max_length=5)
+
+    @field_validator("symbols")
+    @classmethod
+    def normalize_symbols(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip().upper() for value in values if value.strip()]
+        if len(normalized) != 5 or len(set(normalized)) != 5:
+            raise ValueError("Exactly five unique symbols are required")
+        return normalized
+
+
+class ResearchShortlistResponse(BaseModel):
+    symbols: list[str]
+    updatedAt: str | None = None
 
 
 class QuantCheck(BaseModel):

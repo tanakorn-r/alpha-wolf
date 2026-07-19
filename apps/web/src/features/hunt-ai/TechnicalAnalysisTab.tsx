@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { CartesianGrid, ComposedChart, Line, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AgentCall } from "../../components/agents/AgentCall";
-import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentActionButton } from "../../components/agents/AgentActionButton";
 import { LoadingPanel, RetryPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { formatCurrency } from "../../lib/format";
 import type { StockDetailResponse, TechnicalAnalysisResponse } from "../../lib/api";
-import { agentLoadingTitle, PremiumLoading } from "./ui";
+import { actionPositionFromSignal } from "../../lib/actionPosition";
+import { agentLoadingTitle, agentName, PremiumLoading } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
 const COLORS = { price: "#ff65c7", fib: "#d6b36a", dow: "#3ecf8e", phase: "#74a4ff" };
@@ -19,15 +20,15 @@ export function TechnicalAnalysisTab({ hunt }: { hunt: HuntAi }) {
 
   return (
     <div className="flex flex-col gap-3.5">
-      <TickerHeader detail={technical.detail} loading={technical.aiLoading} onRun={() => void technical.run(Boolean(technical.analysis))} hasAnalysis={Boolean(technical.analysis)} />
+      <TickerHeader detail={technical.detail} analysis={technical.analysis} agentId={hunt.activeAgentId} loading={technical.aiLoading} onRun={() => void technical.run(Boolean(technical.analysis))} hasAnalysis={Boolean(technical.analysis)} />
       {technical.aiLoading ? <PremiumLoading title={agentLoadingTitle(hunt.activeAgentId, "intraday", technical.ticker)} subject={technical.ticker} agentId={hunt.activeAgentId} task="intraday" /> : null}
-      {!technical.aiLoading && technical.analysis ? <AgentRead analysis={technical.analysis} onRerun={() => void technical.run(true)} /> : null}
+      {!technical.aiLoading && technical.analysis ? <AgentRead analysis={technical.analysis} setupScore={technical.detail.verdict?.score} onRerun={() => void technical.run(true)} /> : null}
       <StructureChart detail={technical.detail} analysis={technical.analysis} />
     </div>
   );
 }
 
-function TickerHeader({ detail, loading, onRun, hasAnalysis }: { detail: StockDetailResponse; loading: boolean; onRun: () => void; hasAnalysis: boolean }) {
+function TickerHeader({ detail, analysis, agentId, loading, onRun, hasAnalysis }: { detail: StockDetailResponse; analysis: TechnicalAnalysisResponse | null; agentId: string; loading: boolean; onRun: () => void; hasAnalysis: boolean }) {
   const stock = detail.stock;
   return (
     <section className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--aw-radius-card)] border border-[var(--aw-border)] bg-[var(--aw-surface)] px-5 py-4">
@@ -38,23 +39,40 @@ function TickerHeader({ detail, loading, onRun, hasAnalysis }: { detail: StockDe
       </div>
       <div className="flex items-center gap-4">
         <div className="text-right"><div className="font-mono text-[17px] font-bold">{formatCurrency(stock.price, stock.currency || "USD")}</div><div className={stock.changePct >= 0 ? "text-[12px] text-[#3ecf8e]" : "text-[12px] text-[#ff5f68]"}>{stock.changePct >= 0 ? "+" : ""}{stock.changePct.toFixed(2)}%</div></div>
-        <PremiumAiButton label={loading ? "Analyzing" : hasAnalysis ? "Refresh" : "AI Technical"} sublabel="Chart" disabled={loading} loading={loading} onClick={onRun} size="xs" />
+        <AgentActionButton agent={analysis?.agent} fallbackName={agentName(agentId)} label={loading ? "Analyzing" : hasAnalysis ? "Refresh" : "Chart read"} sublabel="Ask your Agent" disabled={loading} loading={loading} onClick={onRun} />
       </div>
     </section>
   );
 }
 
-function AgentRead({ analysis, onRerun }: { analysis: TechnicalAnalysisResponse; onRerun: () => void }) {
+function AgentRead({ analysis, setupScore, onRerun }: { analysis: TechnicalAnalysisResponse; setupScore?: number | null; onRerun: () => void }) {
   const color = analysis.tone === "good" ? "#3ecf8e" : analysis.tone === "bad" ? "#ff5f68" : "#f5c451";
   return (
-    <AgentCall agent={analysis.agent} label="Chart read" score={analysis.confidence} scoreLabel="technical fit" signal={analysis.signal} headline={analysis.headline} summary={analysis.summary} accent={color} onRerun={onRerun} meta="Agent-weighted technical read · heuristic, not financial advice" dataTrust={analysis.dataTrust}>
-      <div className="mt-4 grid gap-2 min-[760px]:grid-cols-5">
-        {analysis.frameworks.map((item) => <div key={item.framework} className="rounded-[var(--aw-radius-control)] border border-[#29292f] bg-[#0e0e10] p-3"><div className="flex items-center justify-between gap-2"><span className="text-[10px] font-bold text-[#ececee]">{humanize(item.framework)}</span><div className="flex items-center gap-1.5"><FrameworkStance stance={item.stance} /><span className="text-[8px] font-bold" style={{ color: item.weight === "PRIMARY" ? color : item.weight === "CONFIRMATION" ? "#74a4ff" : "#6f6f78" }}>{item.weight}</span></div></div><div className="mt-2 text-[11px] font-semibold leading-[1.4]">{item.verdict}</div><div className="mt-1 text-[9.5px] leading-[1.45] text-[#777780]">{item.evidence}</div></div>)}
+    <AgentCall agent={analysis.agent} label="Chart read" score={actionPositionFromSignal(analysis.signal, analysis.confidence, { tone: analysis.tone, actionScore: setupScore })} scoreLabel="Action position" scoreMode="action" scoreNote={`Confidence ${analysis.confidence}/100`} signal={analysis.signal} headline={<span className="line-clamp-2">{analysis.headline}</span>} summary={<span className="line-clamp-4">{analysis.summary}</span>} accent={color} onRerun={onRerun} meta="Agent-weighted technical read · heuristic, not financial advice" dataTrust={analysis.dataTrust}>
+      <div className="mt-4 grid gap-2 @min-[500px]:grid-cols-2 @min-[840px]:grid-cols-3 @min-[1240px]:grid-cols-5">
+        {analysis.frameworks.map((item) => <FrameworkCard key={item.framework} item={item} color={color} />)}
       </div>
-      <div className="mt-3 grid gap-2 min-[720px]:grid-cols-2"><TextBox label="Agent action" text={analysis.action} color={color} /><TextBox label="Structure / business context" text={analysis.structureContext} color="#d6b36a" /></div>
+      <div className="mt-3 grid gap-2 @min-[620px]:grid-cols-2"><TextBox label="Agent action" text={analysis.action} color={color} /><TextBox label="Structure / business context" text={analysis.structureContext} color="#d6b36a" /></div>
       <div className="mt-3 text-[10px] font-bold uppercase tracking-[.08em] text-[#ff5f68]">What invalidates this view</div>
-      <div className="mt-2 grid gap-2 min-[720px]:grid-cols-2">{analysis.invalidations.map((item, index) => <TextBox key={item} label={`${index + 1}`} text={item} color="#ff5f68" />)}</div>
+      <div className="mt-2 grid gap-2 @min-[620px]:grid-cols-2">{analysis.invalidations.map((item, index) => <TextBox key={item} label={`${index + 1}`} text={item} color="#ff5f68" />)}</div>
     </AgentCall>
+  );
+}
+
+function FrameworkCard({ item, color }: { item: TechnicalAnalysisResponse["frameworks"][number]; color: string }) {
+  const weightColor = item.weight === "PRIMARY" ? color : item.weight === "CONFIRMATION" ? "#74a4ff" : "#6f6f78";
+  return (
+    <div className="rounded-[var(--aw-radius-control)] border border-[#29292f] bg-[#0e0e10] p-3">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[10px] font-bold text-[#ececee]">{humanize(item.framework)}</span>
+        <div className="flex flex-none items-center gap-1.5"><FrameworkStance stance={item.stance} /><span className="text-[8px] font-bold" style={{ color: weightColor }}>{item.weight}</span></div>
+      </div>
+      <div className="mt-2 line-clamp-3 text-[11px] font-semibold leading-[1.4]">{item.verdict}</div>
+      <details className="group mt-2 border-t border-[#242429] pt-2">
+        <summary className="cursor-pointer list-none text-[9px] font-bold text-[#777780] hover:text-[#bcbcc2]">Evidence <span className="group-open:hidden">＋</span><span className="hidden group-open:inline">−</span></summary>
+        <div className="mt-1.5 text-[9.5px] leading-[1.45] text-[#777780]">{item.evidence}</div>
+      </details>
+    </div>
   );
 }
 

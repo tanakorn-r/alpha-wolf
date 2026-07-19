@@ -15,6 +15,16 @@ export function SearchIcon({ className }: { className?: string }) {
   );
 }
 
+export function ExploreIcon({ size = 17, className }: { size?: number; className?: string }) {
+  return (
+    <svg aria-hidden="true" width={size} height={size} viewBox="0 0 18 18" fill="none" className={className}>
+      <circle cx="9" cy="9" r="6.25" stroke="currentColor" strokeWidth="1.25" />
+      <path d="m11.75 6.25-1.6 3.9-3.9 1.6 1.6-3.9 3.9-1.6Z" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round" />
+      <circle cx="9" cy="9" r=".8" fill="currentColor" />
+    </svg>
+  );
+}
+
 export function ArrowUpIcon({ size }: { size: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none">

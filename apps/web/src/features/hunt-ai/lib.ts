@@ -9,11 +9,11 @@ export type MoveDirection = "UP" | "DOWN" | "FLAT";
 export type MoveRow = { i: number; entry: number; target: number; movePct: number; direction: MoveDirection; phase?: string; reason?: string; conf: number };
 
 export const STRAT_CARDS: Array<{ key: StratMode; label: string; subtitle: string; color: string; apiMode: string }> = [
-  { key: "swing", label: "Swing Trade", subtitle: "Support turn", color: "#3ecf8e", apiMode: "momentum" },
+  { key: "swing", label: "Swing", subtitle: "Support turn", color: "#3ecf8e", apiMode: "momentum" },
   { key: "day", label: "Day Trade", subtitle: "In & out same day", color: "#f2575c", apiMode: "momentum" },
   { key: "long", label: "Long-Term", subtitle: "Multi-year compound", color: "#74a4ff", apiMode: "stable_dca" },
-  { key: "value", label: "Value / Capital", subtitle: "Below intrinsic value", color: "#f5c451", apiMode: "capitalized" },
-  { key: "fomo", label: "FOMO / Momentum", subtitle: "Chase breakouts", color: "#c77dff", apiMode: "momentum" },
+  { key: "value", label: "Value", subtitle: "Below intrinsic value", color: "#f5c451", apiMode: "capitalized" },
+  { key: "fomo", label: "Momentum", subtitle: "Breakout strength", color: "#c77dff", apiMode: "momentum" },
 ];
 
 export const timeframes = ["1m", "5m", "15m", "1h", "4h", "1D", "1W"] as const;
@@ -95,17 +95,6 @@ export function colorForTone(tone?: "good" | "warn" | "bad") {
   if (tone === "good") return "#3ecf8e";
   if (tone === "bad") return "#f2575c";
   return "#f5c451";
-}
-
-export function signalLevel(score: number | null | undefined, fallback?: string) {
-  if (typeof score !== "number" || !Number.isFinite(score)) {
-    return { label: normalizeSignal(fallback || "WATCH"), tone: "warn" as const, color: "#f5c451" };
-  }
-  if (score >= 82) return { label: "STRONG BUY", tone: "good" as const, color: "#3ecf8e" };
-  if (score >= 68) return { label: "BUY", tone: "good" as const, color: "#3ecf8e" };
-  if (score >= 55) return { label: "ACCUMULATE", tone: "warn" as const, color: "#f5c451" };
-  if (score >= 40) return { label: "WATCH", tone: "warn" as const, color: "#f5c451" };
-  return { label: "PASS", tone: "bad" as const, color: "#f2575c" };
 }
 
 export function toneFromSignal(signal: string, fallback: string) {

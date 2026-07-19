@@ -1,10 +1,10 @@
 import { LoadingPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { AgentCall } from "../../components/agents/AgentCall";
-import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentActionButton } from "../../components/agents/AgentActionButton";
 import type { ValuationVerdictResponse } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
 import { clamp, formatAnalyzedAt } from "./lib";
-import { agentLoadingTitle, PremiumLoading } from "./ui";
+import { agentLoadingTitle, agentName, PremiumLoading } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 import { getLocaleSettings } from "../../lib/locale";
 
@@ -63,7 +63,7 @@ function ValuationState({
             <button type="button" onClick={onOpen} className="rounded-[5px] border border-[#2a2a31] bg-[#161619] px-[11px] py-[5px] text-[10px] font-bold text-[#bcbcc2] hover:border-[#3ecf8e]">
               Open Detail
             </button>
-            <PremiumAiButton label={buttonLabel} sublabel="Valuation" disabled={fetching} loading={fetching} onClick={onRun} size="xs" />
+            <AgentActionButton fallbackName={agentName(agentId)} label={buttonLabel} sublabel="Quick verdict" disabled={fetching} loading={fetching} onClick={onRun} />
           </div>
         </div>
       </div>
@@ -83,8 +83,10 @@ function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: Val
       <AgentCall
         agent={verdict.agent}
         label="Daily valuation"
-        score={verdict.rightNow.conviction}
-        scoreLabel="Decision conviction"
+        score={actionPositionScore(verdict.rightNow.action, verdict.rightNow.conviction, band.currentZone)}
+        scoreLabel="Action position"
+        scoreMode="action"
+        scoreNote={`Confidence ${verdict.rightNow.conviction}/100`}
         signal={verdictLabel(verdict.verdict, verdict.rightNow.action, band)}
         headline={companyLabel}
         summary={verdict.recap ?? verdict.narrative ?? verdict.rightNow.note}
@@ -181,7 +183,7 @@ function RightNow({ verdict, theme, zone }: { verdict: ValuationVerdictResponse;
       <div className="min-w-0 flex-1 basis-[180px] text-[12.5px] leading-[1.55] text-[#bcbcc2]">{note}</div>
       <div className="flex flex-none gap-3.5">
       <MiniMetric label={metricLabel} value={formatNullableMoney(verdict.rightNow.entryOnlyAt, verdict.currency)} note={pctAwayText(verdict.rightNow.pctAway)} color={theme.accent} />
-      <MiniMetric label={`${verdict.agent?.name ?? "Agent"} perspective`} value={String(verdict.rightNow.conviction)} note="/ 100" color={theme.accent} />
+      <MiniMetric label="Decision confidence" value={String(verdict.rightNow.conviction)} note="/ 100" color={theme.accent} />
       </div>
     </div>
   );
@@ -432,6 +434,26 @@ function verdictLabel(verdict: ValuationVerdictResponse["verdict"], action: Valu
   if (verdict === "INSUFFICIENT_DATA") return "Insufficient data";
   if (zone === "fair") return "Fair value · hold / wait";
   return "Fair · hold / wait";
+}
+
+function actionPositionScore(
+  action: ValuationVerdictResponse["rightNow"]["action"],
+  conviction: number,
+  zone: StructureZone,
+) {
+  const confidence = clamp(conviction, 0, 100);
+  if (action === "BUY") return 50 + confidence / 2;
+  if (action === "TRIM" || action === "AVOID") return 50 - confidence / 2;
+
+  const waitTarget: Record<StructureZone, number> = {
+    deep: 72,
+    discount: 64,
+    fair: 50,
+    expensive: 36,
+    chasing: 22,
+  };
+  const evidenceWeight = 0.55 + confidence * 0.0045;
+  return 50 + (waitTarget[zone] - 50) * evidenceWeight;
 }
 
 function actionTone(action: ValuationVerdictResponse["rightNow"]["action"]) {

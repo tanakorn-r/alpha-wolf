@@ -8,10 +8,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.ai.agents import AGENTS, ANALYST_PERSPECTIVES, DAILY_BRIEF_PERSPECTIVES, compose_instructions
 from internal.ai.context import build_analysis_context, build_today_context
-from internal.ai.openai_client import _today_performance_instructions
+from internal.ai.openai_client import _analyst_brief_instructions, _today_performance_instructions
 
 
 class AgentPersonaTests(unittest.TestCase):
+    def test_analyst_voice_contract_is_emotional_and_persona_specific(self) -> None:
+        prompt = _analyst_brief_instructions()
+
+        self.assertIn("controlled banker authority", prompt)
+        self.assertIn("proud of spotting the setup before the crowd", prompt)
+        self.assertIn("risk-first", prompt)
+        self.assertIn("warm but calculated", prompt)
+        self.assertIn("Gen-Z swagger", prompt)
+        self.assertIn("patient business owner", prompt)
+        self.assertIn("decisive CIO", prompt)
+        self.assertIn("may never override supplied evidence", prompt)
+
     def test_industry_trust_is_horizon_specific(self) -> None:
         vera = compose_instructions("Return analysis.", "vera")
         rex = compose_instructions("Return analysis.", "rex")

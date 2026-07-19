@@ -26,7 +26,7 @@ export function AppHeader() {
     : location.pathname === "/live-trade"
       ? { title: "Live Trade", subtitle: "TradingView chart plus live US screener reads" }
     : isHuntAi
-      ? { title: "Hunt AI", subtitle: "Daily signals, entry zones and position sizing — updated every morning" }
+      ? { title: "Hunt AI", subtitle: "Choose a stock, ask one clear question, and get an Agent action sheet" }
     : location.pathname === "/calendar"
       ? { title: "Income Calendar", subtitle: "When your dividend money actually lands" }
       : { title: "Strategy Dashboard", subtitle: "Everything happening with your money, in one view" };

@@ -239,6 +239,18 @@ def migrate() -> None:
         )
         db.execute(
             """
+            CREATE TABLE IF NOT EXISTS research_shortlist (
+                user_id INTEGER NOT NULL,
+                symbol TEXT NOT NULL,
+                rank INTEGER NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(user_id, symbol),
+                UNIQUE(user_id, rank)
+            )
+            """
+        )
+        db.execute(
+            """
             CREATE TABLE IF NOT EXISTS market_universe_cache (
                 region TEXT PRIMARY KEY,
                 payload TEXT NOT NULL,
@@ -673,6 +685,7 @@ def _migrate_account_tables(db: sqlite3.Connection | LibsqlConnection) -> None:
         db.execute("DROP TABLE dca_orders_legacy")
     db.execute("CREATE INDEX IF NOT EXISTS idx_dca_orders_user ON dca_orders(user_id, scheduled_for, id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_watchlist_user ON portfolio_watchlist(user_id, created_at, id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_research_shortlist_user ON research_shortlist(user_id, rank)")
 
 
 def _table_columns(db: sqlite3.Connection | LibsqlConnection, table: str) -> set[str]:

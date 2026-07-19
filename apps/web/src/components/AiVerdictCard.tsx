@@ -4,6 +4,7 @@ import { AgentCall, type AgentCallMetric } from "./agents/AgentCall";
 import { AgentRecap } from "./agents/AgentRecap";
 import { formatLocalDateTime } from "../lib/locale";
 import { formatCurrency, formatPercent } from "../lib/format";
+import { actionPositionFromSignal } from "../lib/actionPosition";
 
 const scoreColor = (score: number) => (score >= 75 ? "#3ecf8e" : score >= 55 ? "#f5c451" : "#f2575c");
 
@@ -43,8 +44,10 @@ export function AiVerdictCard({
     <AgentCall
       agent={value.agent}
       label={bylineLabel ?? "Agent analysis"}
-      score={value.confidence}
-      scoreLabel="Analysis confidence"
+      score={actionPositionFromSignal(value.signal, value.confidence, { tone: value.tone, directionalPct: value.targetPrice?.impliedUpsidePct, actionScore: value.longTermView?.structureScore })}
+      scoreLabel="Action position"
+      scoreMode="action"
+      scoreNote={value.confidence == null ? undefined : `Confidence ${value.confidence}/100`}
       signal={value.signal}
       headline={value.headline}
       summary={value.summary}

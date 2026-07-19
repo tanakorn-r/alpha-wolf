@@ -178,6 +178,7 @@ export function useDashboard() {
     accountUser: authQuery.data ?? null,
     signedIn: Boolean(authQuery.data?.id),
     signInOpen,
+    showSignIn: () => setSignInOpen(true),
     closeSignIn: () => setSignInOpen(false),
     activeAgentId,
     analysis: review,

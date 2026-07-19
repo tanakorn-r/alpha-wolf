@@ -9,11 +9,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentActionButton } from "../../components/agents/AgentActionButton";
 import { AgentCall } from "../../components/agents/AgentCall";
 import { RetryPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { paddedDomain } from "../../lib/chart";
 import { formatCurrency } from "../../lib/format";
+import { actionPositionFromSignal } from "../../lib/actionPosition";
 import { PremiumChartTooltip } from "./ChartTooltip";
 import { buildTechnicalChartData, colorForTone, formatAnalyzedAt, moneyMaybe, stopFromEntry } from "./lib";
 import { ChartLoading, SpinnerOrb, agentLoadingTitle, agentName, panel, PremiumLoading } from "./ui";
@@ -121,8 +122,10 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
             <AgentCall
               agent={analysis.agent}
               label="Intraday signal"
-              score={analysis.confidence}
-              scoreLabel="Signal confidence"
+              score={actionPositionFromSignal(analysis.signal, analysis.confidence, { tone: analysis.tone, directionalPct: analysis.targetPrice?.impliedUpsidePct, actionScore: detail?.verdict?.score })}
+              scoreLabel="Action position"
+              scoreMode="action"
+              scoreNote={analysis.confidence == null ? undefined : `Confidence ${analysis.confidence}/100`}
               signal={analysis.signal}
               headline={`${intraday.ticker} · live tape read`}
               summary={analysis.summary}
@@ -148,13 +151,14 @@ export function IntradayTab({ hunt }: { hunt: HuntAi }) {
                 Last sync {formatAnalyzedAt(intraday.analyzedAt)}
               </div>
             ) : null}
-            <PremiumAiButton
+            <AgentActionButton
+              agent={analysis?.agent}
+              fallbackName={agentName(hunt.activeAgentId)}
               label={intraday.aiLoading ? "Reading..." : analysis ? "Refresh AI signal" : "Get AI signal now"}
-              sublabel={analysis ? "Premium · cached signal" : "Premium · live tape"}
+              sublabel={analysis ? "Refresh Agent read" : "Live tape"}
               disabled={intraday.aiLoading || intraday.pending}
               loading={intraday.aiLoading}
               onClick={() => void intraday.run(Boolean(analysis))}
-              size="compact"
               className="w-full"
             />
           </div>

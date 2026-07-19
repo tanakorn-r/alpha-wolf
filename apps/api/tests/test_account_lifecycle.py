@@ -59,11 +59,13 @@ class AccountLifecycleTests(unittest.TestCase):
         record_current_legal_acceptance(self.user["id"])
         with store_db.connect() as db:
             db.execute("INSERT INTO portfolio_watchlist(user_id, symbol, created_at) VALUES(?, 'AAPL', '2026-07-15T00:00:00+00:00')", (self.user["id"],))
+            db.execute("INSERT INTO research_shortlist(user_id, symbol, rank, updated_at) VALUES(?, 'AAPL', 1, '2026-07-15T00:00:00+00:00')", (self.user["id"],))
             db.execute("INSERT INTO support_requests(user_id, email, category, subject, message, created_at) VALUES(?, ?, 'support', 'Help', 'Please help me', '2026-07-15T00:00:00+00:00')", (self.user["id"], self.user["email"]))
             db.commit()
         exported = export_account_data(self.user["id"])
         self.assertEqual(exported["profile"]["email"], "wolf@example.com")
         self.assertEqual(exported["watchlist"][0]["symbol"], "AAPL")
+        self.assertEqual(exported["researchShortlist"][0]["symbol"], "AAPL")
         self.assertEqual(exported["supportRequests"][0]["subject"], "Help")
         json.dumps(exported)
 
@@ -91,6 +93,7 @@ class AccountLifecycleTests(unittest.TestCase):
             db.execute("UPDATE ai_credit_balances SET balance = 10, updated_at = 'now' WHERE user_id = ?", (user_id,))
             db.execute("INSERT INTO backtrade_jobs(id, account_scope, payload, updated_at) VALUES('job', ?, '{}', 'now')", (f"user:{user_id}",))
             db.execute("INSERT INTO ai_response_cache(namespace, cache_key, payload, expires_at, updated_at) VALUES('analysis', ?, '{}', 1, 'now')", (f"user:{user_id}:result",))
+            db.execute("INSERT INTO research_shortlist(user_id, symbol, rank, updated_at) VALUES(?, 'AAPL', 1, 'now')", (user_id,))
             db.commit()
         save_user_settings(
             user_id,
@@ -109,6 +112,7 @@ class AccountLifecycleTests(unittest.TestCase):
             self.assertIsNone(db.execute("SELECT id FROM backtrade_jobs WHERE account_scope = ?", (f"user:{user_id}",)).fetchone())
             self.assertIsNone(db.execute("SELECT cache_key FROM ai_response_cache WHERE cache_key LIKE ?", (f"user:{user_id}:%",)).fetchone())
             self.assertIsNone(db.execute("SELECT user_id FROM user_settings WHERE user_id = ?", (user_id,)).fetchone())
+            self.assertIsNone(db.execute("SELECT user_id FROM research_shortlist WHERE user_id = ?", (user_id,)).fetchone())
 
 
 if __name__ == "__main__":

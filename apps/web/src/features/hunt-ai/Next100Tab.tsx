@@ -1,10 +1,10 @@
-import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentActionButton } from "../../components/agents/AgentActionButton";
 import { ArrowUpIcon } from "../../components/ui/icons";
 import { RetryPanel, TickerEmptyPanel } from "../../components/ui/panels";
 import { PaywallGate } from "../../components/ui/PaywallGate";
 import { realTimeframes, timeframes, type N100Timeframe } from "./lib";
 import { Next100Result } from "./Next100Result";
-import { agentLoadingTitle, PremiumLoading, panel } from "./ui";
+import { agentLoadingTitle, agentName, PremiumLoading, panel } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 
 export function Next100Tab({ hunt }: { hunt: HuntAi }) {
@@ -59,12 +59,12 @@ export function Next100Tab({ hunt }: { hunt: HuntAi }) {
             <div className="mb-1.5 text-[16px] font-bold">Ready · <span className="font-mono text-[#3ecf8e]">{n100.ticker}</span> · <span className="font-mono text-[#74a4ff]">{n100.timeframe}</span></div>
             <div className="mx-auto max-w-[460px] text-[12.5px] leading-[1.6] text-[#8c8c95]">AI scans momentum, recent history and technical context, then maps the next 10 moves for this ticker/timeframe.</div>
           </div>
-          <PremiumAiButton
+          <AgentActionButton
+            fallbackName={agentName(hunt.activeAgentId)}
             label={n100.quotaLeft <= 0 ? "AI tokens used up" : "Forecast Next 10 ↑"}
-            sublabel="Premium · cached forecast"
+            sublabel="Forecast path"
             disabled={n100.quotaLeft <= 0}
             onClick={n100.run}
-            size="wide"
           />
         </div>
       ) : null}

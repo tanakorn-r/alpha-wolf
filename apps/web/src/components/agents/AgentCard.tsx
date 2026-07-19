@@ -25,7 +25,7 @@ export function AgentCard({
   } as CSSProperties;
 
   return (
-    <section className={`relative overflow-hidden rounded-[var(--aw-radius-card)] border p-5 ${className}`} style={style}>
+    <section className={`@container relative overflow-hidden rounded-[var(--aw-radius-card)] border p-5 ${className}`} style={style}>
       <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-[linear-gradient(90deg,transparent,var(--agent-accent),transparent)] opacity-70" />
       <AgentByline agent={agent} label={label} detail={detail} />
       {children}

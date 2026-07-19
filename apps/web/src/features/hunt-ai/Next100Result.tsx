@@ -9,7 +9,6 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { PremiumAiButton } from "../../components/PremiumAiButton";
 import { AgentCall } from "../../components/agents/AgentCall";
 import { TagPill } from "../../components/ui/Badge";
 import { EmptyPanel } from "../../components/ui/panels";

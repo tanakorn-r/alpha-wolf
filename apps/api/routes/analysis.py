@@ -19,7 +19,7 @@ from internal.market.detail import build_detail_bundle, get_ai_financials, get_d
 from internal.market.data_trust import build_universe_data_trust, market_tape_needs_refresh
 from internal.market.portfolio import build_portfolio_dashboard
 from internal.market.scoring import StrategyKey, STRATEGY_LABELS, parse_strategy
-from internal.market.universe import build_market_page
+from internal.market.catalog import get_market_catalog
 from internal.store.cache import cache_get
 from internal.store.ai_results import AIResultKey, AIResultQualityError, load_ai_result, load_latest_ai_result, save_ai_result
 from internal.store.ai_audit import list_ai_decision_history, record_ai_failure
@@ -352,9 +352,9 @@ def analyst_report(
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:analyst-report:v13-prime-hybrid-council:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    cache_key = f"{account_scope}:analyst-report:v15-emotional-persona-voice:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
 
-    result_key = AIResultKey(user_id, "analyst-report", normalized, agent_id, f"v13:{strategy}:{position_cache_key}")
+    result_key = AIResultKey(user_id, "analyst-report", normalized, agent_id, f"v15:{strategy}:{position_cache_key}")
     cached_analysis = _load_saved_ai_result(result_key, cache_key)
     if cached_analysis is not None and not force:
         bundle = build_detail_bundle(normalized, strategy, refresh_stale=False)
@@ -761,14 +761,14 @@ def _position_cache_key(context: dict[str, Any]) -> str:
 
 @router.post("/api/strategy/recommendations", response_model=StrategyPlaybookResponse)
 def strategy_recommendations(payload: StrategyRecommendationRequest, request: Request, agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
-    require_ai_account(request, premium_required=True)
+    require_ai_account(request)
     strategy_prompt = payload.strategy.strip()
     base_strategy = _infer_base_strategy(strategy_prompt)
     agent_id = normalize_agent_id(agent)
     user_id = user_id_from_request(request)
     account_scope = account_cache_scope(user_id)
     cache_digest = hashlib.sha256(
-        f"{account_scope}:{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}".encode("utf-8")
+        f"{account_scope}:{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}:{','.join(sorted(payload.candidateSymbols))}".encode("utf-8")
     ).hexdigest()[:24]
     cache_key = f"{account_scope}:strategy-playbook:v7-agent-method:{cache_digest}"
     result_key = AIResultKey(user_id, "strategy", "universe", agent_id, f"v7:{cache_digest}")
@@ -776,14 +776,20 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
     if cached is not None and not force:
         return cached
 
-    candidates, _, total = build_market_page(
-        page=1,
-        limit=payload.candidateLimit,
-        strategy=base_strategy,
-        region=payload.region,
-    )
-    if not candidates:
-        raise HTTPException(status_code=404, detail="No stock candidates are available for this strategy")
+    allowed_symbols = set(payload.candidateSymbols)
+    # Discovery may have sourced candidates from any preferred market. Resolve every
+    # submitted symbol against the same server-owned live catalogs, never client data.
+    catalog = get_market_catalog(("us", "th", "europe", "japan", "hong-kong-china"))
+    candidate_by_symbol = {
+        str(candidate.get("symbol") or "").strip().upper(): candidate
+        for candidate in catalog
+        if str(candidate.get("symbol") or "").strip().upper() in allowed_symbols
+    }
+    candidates = [candidate_by_symbol[symbol] for symbol in payload.candidateSymbols if symbol in candidate_by_symbol]
+    if len(candidates) < 5:
+        raise HTTPException(status_code=422, detail="At least five submitted candidates must exist in the live universe")
+    candidates = candidates[:payload.candidateLimit]
+    total = len(candidates)
 
     context = {
         "strategyPrompt": strategy_prompt,
@@ -796,17 +802,20 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
         "candidates": [_strategy_candidate_context(candidate, base_strategy) for candidate in candidates],
     }
 
-    usage_user_id, _ = claim_ai_run(request, premium_required=True)
+    usage_user_id, _ = claim_ai_run(request)
     try:
         result = recommend_strategy_with_openai(context, agent_id)
+        result = _filter_strategy_picks(result, candidates, payload.limit, strategy_prompt)
+        expected_picks = min(payload.limit, len(candidates))
+        if len(result.get("picks") or []) != expected_picks:
+            raise AIResultQualityError(f"Strategy AI returned fewer than {expected_picks} valid unique picks")
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
         record_ai_failure(key=result_key, context=context, data_trust=build_universe_data_trust(payload.region, candidates), error=exc)
         release_ai_run(usage_user_id)
-        if cached is not None:
+        if cached is not None and not force:
             return cached
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    result = _filter_strategy_picks(result, candidates, payload.limit, strategy_prompt)
     strategy_trust = build_universe_data_trust(payload.region, candidates)
     result = _publish_ai_result(result_key, {**result, "dataTrust": strategy_trust}, cached, usage_user_id, context=context, data_trust=strategy_trust)
     return result
@@ -943,7 +952,12 @@ def _filter_strategy_picks(result: dict[str, Any], candidates: list[dict[str, An
     candidate_by_symbol = {str(candidate.get("symbol") or "").upper(): candidate for candidate in candidates}
     picks: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for pick in result.get("picks", []):
+    raw_picks = result.get("picks")
+    if not isinstance(raw_picks, list):
+        raise AIResultQualityError("Strategy AI did not return a valid picks list")
+    for pick in raw_picks:
+        if not isinstance(pick, dict):
+            continue
         symbol = str(pick.get("ticker") or "").upper().strip()
         if not symbol or symbol not in candidate_by_symbol or symbol in seen:
             continue
@@ -960,7 +974,7 @@ def _filter_strategy_picks(result: dict[str, Any], candidates: list[dict[str, An
             break
 
     if not picks:
-        raise HTTPException(status_code=503, detail="Strategy AI did not return any valid universe picks")
+        raise AIResultQualityError("Strategy AI did not return any valid universe picks")
 
     return {
         **result,

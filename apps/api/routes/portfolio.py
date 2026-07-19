@@ -3,9 +3,9 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request, Response, st
 from internal.auth_context import require_user_id
 from internal.fx import fx_payload
 from internal.market.portfolio import build_portfolio_dashboard, build_portfolio_quotes
-from internal.store.portfolio import add_watchlist_symbols, create_dca_order, delete_dca_order, delete_watchlist_symbol, list_transactions, list_watchlist, record_buy, record_sale, update_dca_order_amount, upsert_holding
+from internal.store.portfolio import add_watchlist_symbols, create_dca_order, delete_dca_order, delete_research_shortlist, delete_watchlist_symbol, list_transactions, list_watchlist, load_research_shortlist, record_buy, record_sale, save_research_shortlist, update_dca_order_amount, upsert_holding
 from internal.store.settings import load_user_settings
-from models import BuyHoldingInput, DcaOrder, DcaOrderInput, Holding, HoldingInput, PortfolioDashboard, PortfolioTransaction, SellHoldingInput, SellHoldingResult
+from models import BuyHoldingInput, DcaOrder, DcaOrderInput, Holding, HoldingInput, PortfolioDashboard, PortfolioTransaction, ResearchShortlistInput, ResearchShortlistResponse, SellHoldingInput, SellHoldingResult
 
 router = APIRouter(prefix="/api/portfolio", tags=["portfolio"])
 
@@ -92,3 +92,21 @@ def save_watchlist_symbols(request: Request, payload: dict[str, list[str]] = Bod
 def remove_watchlist_symbol(symbol: str, request: Request) -> Response:
     delete_watchlist_symbol(symbol, require_user_id(request))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/research-shortlist", response_model=ResearchShortlistResponse)
+def research_shortlist(request: Request) -> dict[str, object]:
+    return load_research_shortlist(require_user_id(request))
+
+
+@router.put("/research-shortlist", response_model=ResearchShortlistResponse)
+def put_research_shortlist(payload: ResearchShortlistInput, request: Request) -> dict[str, object]:
+    try:
+        return save_research_shortlist(payload.symbols, require_user_id(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/research-shortlist", response_model=ResearchShortlistResponse)
+def remove_research_shortlist(request: Request) -> dict[str, object]:
+    return delete_research_shortlist(require_user_id(request))

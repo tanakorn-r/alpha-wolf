@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { AgentCall } from "../../components/agents/AgentCall";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { DataTrustBadge } from "../../components/DataTrustBadge";
-import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentActionButton } from "../../components/agents/AgentActionButton";
 import { ErrorCard, RetryPanel } from "../../components/ui/panels";
 import { PillTabs } from "../../components/ui/PillTabs";
 import { TagPill } from "../../components/ui/Badge";
-import { Ring } from "../../lib/ring";
 import type { TodayPerformanceResponse } from "../../lib/api";
+import { actionPositionLabel, actionPositionTone } from "../../lib/actionPosition";
 import { formatCurrency, formatMoneyBaht, formatNumber, formatPercent } from "../../lib/format";
+import { formatLocalDate } from "../../lib/locale";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
 import type { BriefFilter, BriefStatus, BriefTone, DailyBrief, HoldingBriefRow } from "./useDailyBrief";
 
@@ -20,9 +21,9 @@ const TRIAGE_COPY: Record<BriefStatus, { label: string; color: string }> = {
 
 const filters: Array<{ key: BriefFilter; label: string }> = [
   { key: "all", label: "All" },
-  { key: "needs_you", label: "Sell" },
-  { key: "watch", label: "Watch" },
-  { key: "hold", label: "Chill" },
+  { key: "needs_you", label: "Act today" },
+  { key: "watch", label: "Watch closely" },
+  { key: "hold", label: "No action" },
 ];
 
 export function DailyBriefView({ brief }: { brief: DailyBrief }) {
@@ -31,12 +32,9 @@ export function DailyBriefView({ brief }: { brief: DailyBrief }) {
 
   return (
     <div className="flex flex-col gap-3.5">
-      <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#161619] p-5">
-        <div className="text-xs font-semibold uppercase tracking-[.14em] text-[#3ecf8e]">Your holdings today</div>
-        <h2 className="mt-1 text-lg font-semibold">{brief.rows.length ? triageHeadline(brief) : "Add holdings to get a daily read"}</h2>
-        <p className="mt-1 max-w-[560px] text-sm text-[#8c8c95]">{brief.summary}</p>
-      </section>
-      {brief.rows.length ? <DataTrustBadge trust={brief.dataTrust} /> : null}
+      <MorningMemo brief={brief} />
+      {brief.rows.length ? <ExecutiveStrip brief={brief} /> : null}
+      {brief.rows.length ? <DataTrustBadge trust={brief.dataTrust} className="self-start" /> : null}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <PillTabs
@@ -51,12 +49,16 @@ export function DailyBriefView({ brief }: { brief: DailyBrief }) {
         </div>
       </div>
 
+      {brief.rows.length ? <CatalystTimeline brief={brief} /> : null}
+
       <section className="grid gap-2.5">
-        {brief.visibleRows.length ? brief.visibleRows.map((row) => (
+        {brief.visibleRows.length ? brief.visibleRows.map((row, index) => (
           <BriefQueueRow
             key={row.symbol}
             row={row}
+            defaultExpanded={index === 0}
             agentId={brief.activeAgentId}
+            agent={brief.activeAgent}
             state={brief.rowAnalysis[row.symbol]}
             onOpen={(force) => void brief.analyzeRow(row, force)}
           />
@@ -65,6 +67,63 @@ export function DailyBriefView({ brief }: { brief: DailyBrief }) {
         )}
       </section>
     </div>
+  );
+}
+
+function MorningMemo({ brief }: { brief: DailyBrief }) {
+  const review = brief.portfolioReview;
+  if (brief.portfolioReviewLoading) return <PremiumLoading title={agentLoadingTitle(brief.activeAgentId, "portfolio", "your holdings")} subject="Portfolio" agentId={brief.activeAgentId} task="portfolio" />;
+  if (review) {
+    return (
+      <AgentCall agent={review.agent} label="Morning desk memo" score={review.score} scoreLabel="portfolio readiness" signal={review.verdict} headline={review.intro} summary={review.sections[0]?.b ?? brief.summary} bullets={review.bullets.slice(0, 4)} accent={review.agent.color} signoff={false} density="compact" dataTrust={review.dataTrust}>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t pt-3" style={{ borderColor: `${review.agent.color}30` }}>
+          <span className="text-[10px] text-[#6f6f78]">Saved memo · update when you want a fresh read</span>
+          <AgentActionButton agent={review.agent} label="Refresh memo" sublabel="Update memo" onClick={() => void brief.generatePortfolioReview(true)} />
+        </div>
+        {brief.portfolioReviewError ? <div className="mt-3"><ErrorCard message={brief.portfolioReviewError} /></div> : null}
+      </AgentCall>
+    );
+  }
+  return (
+    <section className="rounded-[var(--aw-radius-card)] border border-[#3ecf8e]/25 bg-[radial-gradient(circle_at_85%_10%,rgba(116,164,255,.10),transparent_34%),#161619] p-5">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div className="text-[10px] font-bold uppercase tracking-[.14em] text-[#3ecf8e]">Your holdings today</div>
+          <h2 className="mt-1.5 text-[19px] font-bold">{brief.rows.length ? triageHeadline(brief) : "Add holdings to get a daily read"}</h2>
+          <p className="mt-1.5 max-w-[680px] text-[12.5px] leading-[1.6] text-[#8c8c95]">{brief.summary}</p>
+        </div>
+        {brief.rows.length ? <AgentActionButton agent={brief.activeAgent} label="Generate desk memo" sublabel="Portfolio AI" onClick={() => void brief.generatePortfolioReview(false)} /> : null}
+      </div>
+      {brief.portfolioReviewError ? <div className="mt-3"><ErrorCard message={brief.portfolioReviewError} /></div> : null}
+    </section>
+  );
+}
+
+function ExecutiveStrip({ brief }: { brief: DailyBrief }) {
+  const lead = brief.rows[0];
+  const watch = brief.rows.find((row) => row.status === "watch") ?? lead;
+  const catalyst = nextCatalyst(brief.rows);
+  return (
+    <section className="grid gap-2 min-[680px]:grid-cols-2 min-[1050px]:grid-cols-4">
+      <ExecutiveCard eyebrow="Do today" title={brief.counts.needs_you ? `${brief.counts.needs_you} decision${brief.counts.needs_you === 1 ? "" : "s"}` : "No trade required"} body={brief.counts.needs_you ? `${lead.symbol} · ${lead.actionLabel}` : `Keep ${lead.symbol} on plan`} color={brief.counts.needs_you ? "#f5c451" : "#3ecf8e"} />
+      <ExecutiveCard eyebrow="Top watch" title={watch.symbol} body={watch.sellTrigger.title} color={watch.sellTrigger.tone === "bad" ? "#ff5f68" : "#f5c451"} />
+      <ExecutiveCard eyebrow="Next catalyst" title={catalyst?.title ?? "No dated event"} body={catalyst?.body ?? "No dividend or DCA deadline is currently visible."} color="#74a4ff" />
+      <ExecutiveCard eyebrow="Portfolio today" title={`${brief.totalPl >= 0 ? "+" : "-"}${formatMoneyBaht(Math.abs(brief.totalPl))}`} body={`${formatMoneyBaht(brief.stats?.totalValue)} total value`} color={brief.totalPl >= 0 ? "#3ecf8e" : "#ff5f68"} />
+    </section>
+  );
+}
+
+function ExecutiveCard({ eyebrow, title, body, color }: { eyebrow: string; title: string; body: string; color: string }) {
+  return <div className="rounded-[10px] border border-[#2a2a31] bg-[#151518] p-3.5"><div className="text-[8.5px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">{eyebrow}</div><div className="mt-1.5 truncate text-[14px] font-bold" style={{ color }}>{title}</div><div className="mt-1 line-clamp-2 text-[10.5px] leading-[1.45] text-[#8c8c95]">{body}</div></div>;
+}
+
+function CatalystTimeline({ brief }: { brief: DailyBrief }) {
+  const items = catalystItems(brief.rows).slice(0, 6);
+  if (!items.length) return null;
+  return (
+    <section className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#151518] px-4 py-3.5">
+      <div className="flex flex-wrap items-center gap-2.5"><span className="text-[9px] font-bold uppercase tracking-[0.11em] text-[#74a4ff]">Next 30 days</span>{items.map((item) => <span key={item.key} className="inline-flex items-center gap-2 rounded-[7px] border border-[#2a2a31] bg-[#0e0e10] px-2.5 py-1.5 text-[10px]"><b className="font-mono text-[#ececee]">{item.date}</b><span className="text-[#8c8c95]">{item.label}</span></span>)}</div>
+    </section>
   );
 }
 
@@ -104,20 +163,52 @@ function triageHeadline(brief: DailyBrief) {
   return "You're clear to chill — nothing needs you today.";
 }
 
+function catalystItems(rows: HoldingBriefRow[]) {
+  const events = rows.flatMap((row) => row.events.map((event) => ({
+    key: `${row.symbol}:${event.kind}:${event.date}`,
+    timestamp: new Date(`${event.date}T00:00:00`).getTime(),
+    date: formatLocalDate(new Date(`${event.date}T00:00:00`), { month: "short", day: "numeric" }),
+    title: `${row.symbol} ${event.kind === "EX-DIV" ? "ex-dividend" : "payment"}`,
+    label: `${row.symbol} · ${event.kind === "EX-DIV" ? "ex-div" : "pays"}`,
+    body: event.days <= 0 ? "Today" : `In ${event.days} days`,
+  })));
+  const orders = rows.flatMap((row) => row.dcaOrders.map((order) => ({
+    key: `${row.symbol}:DCA:${order.id}`,
+    timestamp: new Date(`${order.scheduledFor}T00:00:00`).getTime(),
+    date: formatLocalDate(new Date(`${order.scheduledFor}T00:00:00`), { month: "short", day: "numeric" }),
+    title: `${row.symbol} DCA plan`,
+    label: `${row.symbol} · DCA plan`,
+    body: "Scheduled capital decision",
+  })));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const horizon = today.getTime() + 30 * 86_400_000;
+  return [...events, ...orders].filter((item) => Number.isFinite(item.timestamp) && item.timestamp >= today.getTime() && item.timestamp <= horizon).sort((a, b) => a.timestamp - b.timestamp);
+}
+
+function nextCatalyst(rows: HoldingBriefRow[]) {
+  return catalystItems(rows)[0] ?? null;
+}
+
 function BriefQueueRow({
   row,
+  defaultExpanded,
   agentId,
+  agent,
   state,
   onOpen,
 }: {
   row: HoldingBriefRow;
+  defaultExpanded: boolean;
   agentId: string;
+  agent: DailyBrief["activeAgent"];
   state?: DailyBrief["rowAnalysis"][string];
   onOpen: (force: boolean) => void;
 }) {
   const tag = triageTag(row);
   const hasResult = Boolean(state?.data);
   const [open, setOpen] = useState(false);
+  const [lensesOpen, setLensesOpen] = useState(defaultExpanded);
   const aiScore = state?.data?.buyScore;
   const aiTone = state?.data?.tone;
 
@@ -167,30 +258,39 @@ function BriefQueueRow({
         </div>
         <div className="flex min-w-0 items-center justify-between gap-3 min-[820px]:justify-end">
           {state?.loading || state?.restoring || aiScore != null ? (
-            <div className="flex flex-col items-center gap-1">
-              <div className="relative h-12 w-12 flex-none">
+            <div className="flex w-[100px] flex-col items-center gap-1.5">
+              <div className="relative flex h-12 w-full flex-none flex-col justify-center">
                 {state?.loading || state?.restoring ? (
-                  <div className="grid h-12 w-12 place-items-center"><LoadingSpinner size={18} className="text-[#6f6f78]" /></div>
+                  <div className="grid h-12 place-items-center"><LoadingSpinner size={18} className="text-[#6f6f78]" /></div>
                 ) : (
                   <>
-                    <Ring score={aiScore ?? 0} color={toneColor(aiTone)} size={48} stroke={5} />
-                    <div className="absolute inset-0 grid place-items-center font-mono text-[15px] font-bold" style={{ color: toneColor(aiTone) }}>{aiScore}</div>
+                    <div className="truncate text-center text-[9px] font-bold uppercase" style={{ color: actionPositionTone(aiScore ?? 50) }}>{actionPositionLabel(aiScore ?? 50)}</div>
+                    <div className="relative mt-2 h-1.5 rounded-full bg-[linear-gradient(90deg,#f2575c,#f5c451_50%,#3ecf8e)]">
+                      <span className="absolute top-1/2 h-3 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_2px_#161619]" style={{ left: `${Math.max(0, Math.min(100, aiScore ?? 50))}%` }} />
+                    </div>
+                    <div className="mt-1 flex justify-between text-[6.5px] font-semibold uppercase text-[#5f5f68]"><span>Sell</span><span>Buy</span></div>
                   </>
                 )}
               </div>
-              <div className="whitespace-nowrap text-[9px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">ai score</div>
+              <div className="whitespace-nowrap text-[8px] font-bold uppercase tracking-[0.08em] text-[#6f6f78]">action position</div>
             </div>
           ) : null}
-          <PremiumAiButton
-            label={state?.restoring ? "Loading" : state?.loading ? "Analyzing" : hasResult ? open ? "Refresh" : "View" : "Analyze"}
-            sublabel="Today"
-            loading={state?.loading || state?.restoring}
-            onClick={runAnalysis}
-            size="xs"
-            className="flex-none"
-          />
+          <div className="flex flex-col items-stretch gap-1.5">
+            <AgentActionButton
+              agent={state?.data?.agent ?? agent}
+              fallbackName="Your Agent"
+              label={state?.restoring ? "Loading" : state?.loading ? "Analyzing" : hasResult ? open ? "Refresh" : "View" : "Ask Agent"}
+              sublabel={hasResult ? open ? "Refresh analysis" : "Open saved" : "Today’s read"}
+              loading={state?.loading || state?.restoring}
+              onClick={runAnalysis}
+              className="w-full flex-none"
+            />
+            <button type="button" onClick={() => setLensesOpen((value) => !value)} className="text-[9px] font-bold uppercase tracking-[0.07em] text-[#74a4ff] hover:text-[#9bc0ff]">{lensesOpen ? "Hide desk lenses" : "Show desk lenses"}</button>
+          </div>
         </div>
       </article>
+
+      {lensesOpen ? <HoldingLensGrid row={row} /> : null}
 
       {open ? (
         <section className="flex flex-col gap-2">
@@ -211,6 +311,31 @@ function BriefQueueRow({
   );
 }
 
+function HoldingLensGrid({ row }: { row: HoldingBriefRow }) {
+  const panels = [
+    { ...row.nextMove, label: "Valuation desk" },
+    { ...row.sellTrigger, label: "Technical risk" },
+    { ...row.watchFor, label: "Income & events" },
+    { ...row.news, label: "News desk" },
+  ];
+  return (
+    <section className="grid gap-2 rounded-[10px] border border-[#25252b] bg-[#111114] p-2.5 min-[680px]:grid-cols-2 min-[1120px]:grid-cols-4">
+      {panels.map((panel) => <DecisionLens key={panel.label} panel={panel} />)}
+    </section>
+  );
+}
+
+function DecisionLens({ panel }: { panel: HoldingBriefRow["nextMove"] }) {
+  const color = toneColor(panel.tone);
+  return (
+    <div className="rounded-[8px] border bg-[#161619] p-3" style={{ borderColor: `${color}2f` }}>
+      <div className="text-[8.5px] font-bold uppercase tracking-[0.09em]" style={{ color }}>{panel.label}</div>
+      <div className="mt-1.5 text-[11.5px] font-bold text-[#ececee]">{panel.title}</div>
+      <p className="mt-1 text-[10px] leading-[1.5] text-[#8c8c95]">{panel.body}</p>
+    </div>
+  );
+}
+
 function toneColor(tone?: BriefTone | string) {
   if (tone === "good") return "#3ecf8e";
   if (tone === "bad") return "#ff5f68";
@@ -222,7 +347,7 @@ function TodayPanel({ data }: { data: TodayPerformanceResponse }) {
   const color = toneColor(data.tone);
   const alignment = data.horizonAlignment;
   return (
-    <AgentCall agent={data.agent} label="Today's plan" score={data.buyScore} scoreLabel="plan fit" signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Today only · generated on request · not financial advice" dataTrust={data.dataTrust}>
+    <AgentCall agent={data.agent} label="Today's plan" score={data.buyScore} scoreLabel="Action position" scoreMode="action" scoreNote={`Evidence strength ${data.buyScore}/100`} signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Today only · generated on request · not financial advice" dataTrust={data.dataTrust}>
       <div className="mt-4 grid gap-2.5 min-[760px]:grid-cols-[0.8fr_1.2fr]">
         <div className="rounded-[10px] border bg-[#0e0e10] p-3.5" style={{ borderColor: `${holdingActionColor(data.holdingAction)}55` }}>
           <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Do this today</div>

@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   loadAuthUser,
+  loadAgents,
   loadLatestAiResult,
   loadPortfolio,
+  loadPortfolioReview,
   loadStockDetailsBatch,
   loadTodayPerformance,
   type DcaOrder,
   type CanonicalDecisionState,
   type PortfolioHolding,
+  type PortfolioReviewResponse,
   type StockDetailResponse,
   type StockNewsItem,
   type TodayPerformanceResponse,
@@ -74,13 +77,18 @@ export type DailyBrief = ReturnType<typeof useDailyBrief>;
 export type RowAnalysisState = { loading: boolean; restoring?: boolean; data: TodayPerformanceResponse | null; error: string };
 
 export function useDailyBrief() {
+  const queryClient = useQueryClient();
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
   const getHuntAiCache = useWolfStore((state) => state.getHuntAiCache);
   const setHuntAiCache = useWolfStore((state) => state.setHuntAiCache);
   const [filter, setFilter] = useState<BriefFilter>("all");
   const [rowAnalysis, setRowAnalysis] = useState<Record<string, RowAnalysisState>>({});
+  const [portfolioReview, setPortfolioReview] = useState<PortfolioReviewResponse | null>(null);
+  const [portfolioReviewLoading, setPortfolioReviewLoading] = useState(false);
+  const [portfolioReviewError, setPortfolioReviewError] = useState("");
   const [enrichmentReady, setEnrichmentReady] = useState(false);
   const auth = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
+  const agents = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
   const accountScope = auth.data?.id ? `user:${auth.data.id}` : "signed-out";
   const portfolio = useQuery({
     queryKey: ["portfolio", accountScope],
@@ -92,6 +100,23 @@ export function useDailyBrief() {
   setFxRates(portfolio.data?.fxRates);
 
   const holdings = portfolio.data?.holdings ?? [];
+  const reviewCacheKey = `${accountScope}:v1:portfolio-review:${activeAgentId}`;
+  const cachedPortfolioReview = getHuntAiCache<PortfolioReviewResponse>(reviewCacheKey);
+  const savedPortfolioReview = useQuery({
+    queryKey: ["saved-ai", accountScope, "portfolio", activeAgentId],
+    queryFn: ({ signal }) => loadLatestAiResult<PortfolioReviewResponse>({ feature: "portfolio", subject: "portfolio", agent: activeAgentId, variantPrefix: "v5", signal }),
+    enabled: Boolean(auth.data?.id && holdings.length),
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: 0,
+  });
+  const activePortfolioReview = portfolioReview?.agent.id === activeAgentId
+    ? portfolioReview
+    : savedPortfolioReview.data?.agent.id === activeAgentId
+      ? savedPortfolioReview.data
+      : cachedPortfolioReview?.data.agent.id === activeAgentId
+        ? cachedPortfolioReview.data
+        : null;
   const detailRequestKey = holdings.map((holding) => `${holding.symbol}:${holding.strategy}`).sort().join("|");
   useEffect(() => {
     setEnrichmentReady(false);
@@ -210,6 +235,25 @@ export function useDailyBrief() {
     filter,
     setFilter,
     activeAgentId,
+    activeAgent: agents.data?.find((agent) => agent.id === activeAgentId) ?? agents.data?.[0] ?? null,
+    portfolioReview: activePortfolioReview,
+    portfolioReviewLoading,
+    portfolioReviewError,
+    async generatePortfolioReview(force = false) {
+      if (!holdings.length) return;
+      setPortfolioReviewLoading(true);
+      setPortfolioReviewError("");
+      try {
+        const result = await loadPortfolioReview(activeAgentId, force);
+        setPortfolioReview(result);
+        setHuntAiCache(reviewCacheKey, { analyzedAt: result.generatedAt ?? new Date().toISOString(), data: result });
+        void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
+      } catch (error) {
+        setPortfolioReviewError(error instanceof Error ? error.message : "The Agent could not generate today's desk brief.");
+      } finally {
+        setPortfolioReviewLoading(false);
+      }
+    },
     rowAnalysis: displayedRowAnalysis,
     async analyzeRow(row: HoldingBriefRow, force = false) {
       setRowAnalysis((current) => ({ ...current, [row.symbol]: { loading: true, restoring: false, data: displayedRowAnalysis[row.symbol]?.data ?? null, error: "" } }));
@@ -412,7 +456,7 @@ function groupOrders(orders: DcaOrder[]) {
 function buildSummary(rows: HoldingBriefRow[], counts: Record<BriefFilter, number>) {
   if (!rows.length) return "Add holdings to turn Daily Brief into a portfolio action desk.";
   const lead = rows[0];
-  return `${counts.needs_you} need a decision, ${counts.watch} are watch-only, and ${counts.hold} can sit. Start with ${lead.symbol}: ${lead.whatToDo}`;
+  return `${counts.needs_you} need a decision, ${counts.watch} need watching, and ${counts.hold} need no action. Start with ${lead.symbol}: ${lead.actionLabel.toLowerCase()} — ${lead.headline}`;
 }
 
 function fallbackRating(holding: PortfolioHolding, detail?: StockDetailResponse) {

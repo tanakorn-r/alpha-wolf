@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentActionButton } from "../../components/agents/AgentActionButton";
 import { ErrorCard, TickerEmptyPanel } from "../../components/ui/panels";
 import { loadBacktradeJob, startBacktrade, type BacktradeDecision, type BacktradeJob, type BacktradeResult } from "../../lib/api";
 import type { HuntAi } from "./useHuntAi";
 import { finishFlow, startFlow } from "../../lib/telemetry";
+import { agentName } from "./ui";
 
 export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
   const symbol = hunt.watchlist.activeTicker;
@@ -57,7 +58,7 @@ export function BacktradeTab({ hunt }: { hunt: HuntAi }) {
             <h2 className="mt-1 text-[17px] font-bold text-[#ececee]">{symbol} · one combined {job?.agent.name ?? "Agent"} decision per month</h2>
             <p className="mt-1 max-w-[760px] text-[12px] leading-[1.5] text-[#8c8c95]">One decision at the prior month-end, executed on the first trading session of each month, with a DCA benchmark and audit log.</p>
           </div>
-          <PremiumAiButton label={starting ? "Starting" : job?.status === "running" || job?.status === "queued" ? "Replay running" : "Run AI Replay"} sublabel="Background job" disabled={starting || job?.status === "running" || job?.status === "queued"} loading={starting || job?.status === "running" || job?.status === "queued"} onClick={() => void run()} size="compact" />
+          <AgentActionButton agent={job?.agent} fallbackName={agentName(hunt.activeAgentId)} label={starting ? "Starting" : job?.status === "running" || job?.status === "queued" ? "Replay running" : "Run AI Replay"} sublabel="Background Agent job" disabled={starting || job?.status === "running" || job?.status === "queued"} loading={starting || job?.status === "running" || job?.status === "queued"} onClick={() => void run()} />
         </div>
         <div className="mt-4 grid gap-2.5 min-[720px]:grid-cols-2">
           <Control label="History">

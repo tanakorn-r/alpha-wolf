@@ -2,9 +2,10 @@ import type { ReactNode } from "react";
 import type { AgentBadge, MarketDataTrust } from "../../lib/api";
 import { DataTrustBadge } from "../DataTrustBadge";
 import { Ring } from "../../lib/ring";
-import { PremiumAiButton } from "../PremiumAiButton";
+import { AgentActionButton } from "./AgentActionButton";
 import { AgentCard } from "./AgentCard";
 import { AgentSignoff } from "./AgentByline";
+import { actionPositionLabel, actionPositionTone } from "../../lib/actionPosition";
 
 export type AgentCallMetric = {
   label: string;
@@ -25,6 +26,8 @@ export function AgentCall({
   label,
   score,
   scoreLabel = "confidence",
+  scoreMode = "strength",
+  scoreNote,
   signal,
   headline,
   summary,
@@ -43,6 +46,8 @@ export function AgentCall({
   label: string;
   score?: number | null;
   scoreLabel?: string;
+  scoreMode?: "strength" | "action";
+  scoreNote?: ReactNode;
   signal: ReactNode;
   headline: ReactNode;
   summary?: ReactNode;
@@ -61,11 +66,33 @@ export function AgentCall({
   const safeScore = typeof score === "number" ? Math.max(0, Math.min(100, score)) : null;
   const roundedScore = safeScore === null ? null : Math.round(safeScore);
   const band = safeScore === null ? null : scoreBand(safeScore);
+  const action = safeScore === null ? null : actionPositionLabel(safeScore);
+  const actionColor = safeScore === null ? color : actionPositionTone(safeScore);
 
   return (
     <AgentCard agent={agent} label={label} detail={bylineDetail} accent={color} className={`shadow-[0_28px_80px_rgba(0,0,0,0.28)] ${density === "compact" ? "!p-4" : ""}`}>
-      <div className={`absolute ${density === "compact" ? "right-4 top-4" : "right-5 top-4"} max-[720px]:relative max-[720px]:right-auto max-[720px]:top-auto max-[720px]:mb-4`}>
-        {safeScore !== null ? (
+      <div className={`absolute ${density === "compact" ? "right-4 top-4" : "right-5 top-4"} @max-[720px]:relative @max-[720px]:right-auto @max-[720px]:top-auto @max-[720px]:mb-4`}>
+        {safeScore !== null && scoreMode === "action" ? (
+          <div
+            className="w-[214px] rounded-[12px] border border-white/[0.08] bg-[#0e0e10]/95 px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.22)]"
+            aria-label={`${scoreLabel}: ${action}. Position ${roundedScore} out of 100, from sell to buy.`}
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <div className="text-[8.5px] font-bold uppercase tracking-[0.07em] text-[#8c8c95]">{scoreLabel}</div>
+              <div className="text-[10px] font-bold uppercase tracking-[0.04em]" style={{ color: actionColor }}>{action}</div>
+            </div>
+            <div className="relative mt-3 h-2 rounded-full bg-[linear-gradient(90deg,#f2575c_0%,#f5c451_50%,#3ecf8e_100%)]">
+              <span
+                className="absolute top-1/2 h-4 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full border border-white bg-[#ececee] shadow-[0_0_0_3px_rgba(14,14,16,0.8)]"
+                style={{ left: `${safeScore}%` }}
+              />
+            </div>
+            <div className="mt-1.5 flex justify-between text-[8px] font-semibold uppercase tracking-[0.04em] text-[#6f6f78]">
+              <span>Sell</span><span>Hold</span><span>Buy</span>
+            </div>
+            {scoreNote ? <div className="mt-1.5 text-[8.5px] text-[#6f6f78]">{scoreNote}</div> : null}
+          </div>
+        ) : safeScore !== null ? (
           <div
             className="flex items-center gap-2.5 rounded-[12px] border border-white/[0.08] bg-[#0e0e10]/90 px-2.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.22)]"
             aria-label={`${scoreLabel}: ${roundedScore} out of 100, ${band}`}
@@ -87,7 +114,7 @@ export function AgentCall({
         ) : null}
       </div>
 
-      <div className="max-w-[860px] pr-[210px] max-[720px]:pr-0">
+      <div className={`max-w-[860px] ${scoreMode === "action" ? "pr-[245px]" : "pr-[210px]"} @max-[720px]:pr-0`}>
         <span className="inline-flex rounded-[var(--aw-radius-chip)] border-[1.5px] px-3 py-1 font-mono text-[12px] font-bold uppercase tracking-[0.05em]" style={{ color, borderColor: color, background: `${color}0d` }}>
           {signal}
         </span>
@@ -96,7 +123,7 @@ export function AgentCall({
       </div>
 
       {metrics.length ? (
-        <div className="mt-5 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-5 grid gap-2.5 @min-[520px]:grid-cols-2 @min-[780px]:grid-cols-3">
           {metrics.map((metric) => (
             <div key={metric.label} className="rounded-[12px] border border-[#2a2a31] bg-[#0e0e10] px-3.5 py-3">
               <div className="text-[9.5px] font-bold uppercase tracking-[0.07em] text-[#8c8c95]">{metric.label}</div>
@@ -124,7 +151,7 @@ export function AgentCall({
       {meta || onRerun ? (
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t pt-3" style={{ borderColor: `${color}30` }}>
           <div className="font-mono text-[10.5px] text-[#5a5a62]">{meta}</div>
-          {onRerun ? <PremiumAiButton label="Re-run" sublabel="Agent" onClick={onRerun} size="xs" /> : null}
+          {onRerun ? <AgentActionButton agent={agent} label="Refresh" sublabel="Re-run Agent" onClick={onRerun} className="h-9" /> : null}
         </div>
       ) : null}
       {signoff !== false ? <AgentSignoff agent={agent} text={signoff || undefined} /> : null}

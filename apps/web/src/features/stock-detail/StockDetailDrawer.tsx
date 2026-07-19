@@ -6,7 +6,7 @@ import { AgentByline } from "../../components/agents/AgentByline";
 import { AgentRecap } from "../../components/agents/AgentRecap";
 import { LoadingSpinner } from "../../components/LoadingSpinner";
 import { DataTrustBadge } from "../../components/DataTrustBadge";
-import { PremiumAiButton } from "../../components/PremiumAiButton";
+import { AgentActionButton } from "../../components/agents/AgentActionButton";
 import { GoogleAccountModal } from "../../components/auth/GoogleAccount";
 import { Modal } from "../../components/ui/Modal";
 import { lockBodyScroll } from "../../lib/bodyScrollLock";
@@ -17,6 +17,7 @@ import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, f
 import { formatLocalDateTime } from "../../lib/locale";
 import { buyHolding, loadAgents, loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
 import { negative, positive } from "../../lib/ui";
+import { actionPositionLabel, actionPositionTone } from "../../lib/actionPosition";
 import { useWolfStore } from "../../store/useWolfStore";
 import { agentLoadingTitle, PremiumLoading } from "../hunt-ai/ui";
 import { AdvancedInsightCard, type AdvancedInsightTone } from "./AdvancedInsightCard";
@@ -270,7 +271,7 @@ export function StockDetailDrawer() {
             ) : null}
             {detail && !loading && !detail.dataPending ? <>
               <DataTrustBadge trust={detail.dataTrust} />
-              {analyzing ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} activeAgentId={activeAgentId} /> : null}
+              {analyzing ? <AiGate symbol={detail.stock.symbol} analysis={analysis} analyzing={analyzing} onAnalyze={analyze} activeAgentId={activeAgentId} agent={activeAgent} /> : null}
               <QuickReadCard detail={detail} analysis={analysis} agent={activeAgent} />
               <ResearchTabs ref={tabsRef} active={tab} onSelect={selectTab} />
               {tab === "overview" ? (
@@ -278,7 +279,7 @@ export function StockDetailDrawer() {
               ) : tab === "news" ? (
                 <NewsSection detail={detail} research={researchQuery.data ?? null} researchLoading={researchQuery.isPending} />
               ) : tab === "market" ? (
-                marketQuery.isPending ? <DetailSkeleton symbol={selectedSymbol} /> : marketQuery.isError ? <LazyTabError label="Market comparison" onRetry={() => void marketQuery.refetch()} /> : <MarketResearch market={marketQuery.data ?? null} analyzing={analyzing} onAnalyze={() => analyze(Boolean(analysis))} />
+                marketQuery.isPending ? <DetailSkeleton symbol={selectedSymbol} /> : marketQuery.isError ? <LazyTabError label="Market comparison" onRetry={() => void marketQuery.refetch()} /> : <MarketResearch market={marketQuery.data ?? null} analyzing={analyzing} onAnalyze={() => analyze(Boolean(analysis))} agent={activeAgent} />
               ) : researchQuery.isPending ? (
                 <DetailSkeleton symbol={selectedSymbol} />
               ) : researchQuery.isError ? (
@@ -383,13 +384,13 @@ const REC_SEGMENTS: Array<{ key: string; label: string; color: string }> = [
   { key: "strongSell", label: "Strong sell", color: "#b03038" },
 ];
 
-function MarketResearch({ market, analyzing, onAnalyze }: { market: MarketComparisonResponse | null; analyzing: boolean; onAnalyze: () => void }) {
+function MarketResearch({ market, analyzing, onAnalyze, agent }: { market: MarketComparisonResponse | null; analyzing: boolean; onAnalyze: () => void; agent: AgentBadge | null }) {
   if (!market) return <div className={panel}>No market comparison was reported.</div>;
   const gap = market.stock.returnPct - market.benchmark.returnPct;
   const beating = gap >= 0;
   return <div className="flex flex-col gap-[14px]">
     <div className={`${panel} p-[18px]`}>
-      <div className="flex items-start justify-between gap-5"><div><h3 className={`text-lg font-bold ${beating ? "text-[#3ecf8e]" : "text-[#f5c451]"}`}>{market.stock.symbol} is {beating ? "beating" : "lagging"} the market</h3><p className="mt-1 text-[13px] text-[#8c8c95]">Total return, last 12 months · every series rebased to 100</p></div><PremiumAiButton label={analyzing ? "Analyzing…" : "Ask AI"} sublabel="Can it beat market?" onClick={onAnalyze} disabled={analyzing} loading={analyzing} size="compact" /></div>
+      <div className="flex items-start justify-between gap-5"><div><h3 className={`text-lg font-bold ${beating ? "text-[#3ecf8e]" : "text-[#f5c451]"}`}>{market.stock.symbol} is {beating ? "beating" : "lagging"} the market</h3><p className="mt-1 text-[13px] text-[#8c8c95]">Total return, last 12 months · every series rebased to 100</p></div><AgentActionButton agent={agent} fallbackName="Agent" label={analyzing ? "Analyzing" : "Market outlook"} sublabel={analyzing ? "Reading relative strength" : "Ask your Agent"} onClick={onAnalyze} disabled={analyzing} loading={analyzing} /></div>
       <div className="mt-4 h-[310px]"><ResponsiveContainer width="100%" height="100%"><LineChart data={market.points} margin={{ top: 10, right: 8, bottom: 2, left: 0 }}><CartesianGrid stroke="#2a2a31" strokeDasharray="2 7" vertical={false}/><XAxis dataKey="date" hide/><YAxis domain={["auto", "auto"]} hide/><Tooltip contentStyle={{ background: "#1c1c20", border: "1px solid #34343c", borderRadius: 8, color: "#ececee" }} formatter={(value) => `${Number(value).toFixed(1)}`}/><Line type="monotone" dataKey="stock" name={`${market.stock.symbol} · this stock`} stroke="#3ecf8e" strokeWidth={2.5} dot={false}/><Line type="monotone" dataKey="peer" name={`${market.peer.symbol} · industry leader`} stroke="#f5c451" strokeWidth={2} dot={false}/><Line type="monotone" dataKey="benchmark" name={market.benchmark.name} stroke="#676771" strokeWidth={2} strokeDasharray="6 5" dot={false}/></LineChart></ResponsiveContainer></div>
       <div className="mt-1 flex flex-wrap gap-6 text-[12px] text-[#8c8c95]"><LegendLine color="#3ecf8e" label={`${market.stock.symbol} · this stock`}/><LegendLine color="#f5c451" label={`${market.peer.symbol} · industry leader`}/><LegendLine color="#676771" label={market.benchmark.name} dashed/></div>
     </div>
@@ -830,10 +831,10 @@ function IndustryRankBadge({ detail }: { detail: StockDetailResponse }) {
   );
 }
 
-function AiGate({ symbol, analysis, analyzing, onAnalyze, activeAgentId }: { symbol: string; analysis: StockAnalysisResponse | null; analyzing: boolean; onAnalyze: (force: boolean) => void; activeAgentId: string }) {
+function AiGate({ symbol, analysis, analyzing, onAnalyze, activeAgentId, agent }: { symbol: string; analysis: StockAnalysisResponse | null; analyzing: boolean; onAnalyze: (force: boolean) => void; activeAgentId: string; agent: AgentBadge | null }) {
   if (analyzing) return <PremiumLoading title={agentLoadingTitle(activeAgentId, "deep", symbol)} subject={symbol} agentId={activeAgentId} task="deep" />;
   if (analysis) return <AiVerdictCard value={analysis} onRerun={() => onAnalyze(true)} size="modal" />;
-  return <div className="flex flex-col items-center gap-3.5 rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask AI to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">OpenAI will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><PremiumAiButton label={`Analyze ${symbol}`} sublabel="Premium · full picture" onClick={() => onAnalyze(false)} size="wide" /></div>;
+  return <div className="flex flex-col items-center gap-3.5 rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[linear-gradient(160deg,#15171a,#101012)] px-[26px] py-[30px] text-center"><div className="max-w-[500px]"><h3 className="text-lg font-bold tracking-[-.3px]">Ask your Agent to analyze the complete picture</h3><p className="mt-[7px] text-[13.5px] leading-[1.6] text-[#8c8c95]">Your Agent will review {symbol}'s fundamentals, statements, analyst estimates, calendar, dividends, technicals, news, industry rank, and regional market comparison. Nothing is sent until you tap.</p></div><AgentActionButton agent={agent} fallbackName="Agent" label={`Analyze ${symbol}`} sublabel="Full picture" onClick={() => onAnalyze(false)} /></div>;
 }
 
 function V4HeroMetric({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: "good" | "warn" | "neutral" }) {
@@ -884,19 +885,19 @@ function AlphaHuntDecisionDesk({ advice, loading, onHunt, activeAgentId }: { adv
             </div>
             <p className="mt-2 max-w-[620px] text-[13px] leading-[1.6] text-[#bcbcc2]">{advice.hook}</p>
           </div>
-          <div className="w-[132px] flex-none rounded-xl border border-[#2a2a31] bg-[#0e0e10] p-3 max-[560px]:w-full">
+          <div className="w-[168px] flex-none rounded-xl border border-[#2a2a31] bg-[#0e0e10] p-3 max-[560px]:w-full">
             <div className="flex items-baseline justify-between gap-2">
-              <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#6d6d76]">Buy score</div>
-              <div className="font-mono text-[22px] font-black leading-none" style={{ color: tone.color }}>{advice.buyScore}</div>
+              <div className="text-[9px] font-bold uppercase tracking-[0.12em] text-[#6d6d76]">Action position</div>
+              <div className="text-[10px] font-black uppercase leading-none" style={{ color: actionPositionTone(advice.buyScore) }}>{actionPositionLabel(advice.buyScore)}</div>
             </div>
-            <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#242429]">
-              <div className="h-full rounded-full" style={{ width: `${Math.max(4, Math.min(100, advice.buyScore))}%`, background: `linear-gradient(90deg,#3ecf8e,${tone.color})` }} />
+            <div className="relative mt-3 h-2 rounded-full bg-[linear-gradient(90deg,#f2575c,#f5c451_50%,#3ecf8e)]">
+              <span className="absolute top-1/2 h-4 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_3px_#0e0e10]" style={{ left: `${Math.max(0, Math.min(100, advice.buyScore))}%` }} />
             </div>
-            <div className="mt-1.5 text-right font-mono text-[9px] text-[#6d6d76]">/100</div>
+            <div className="mt-1.5 flex justify-between text-[7.5px] font-bold uppercase text-[#6d6d76]"><span>Sell</span><span>Hold</span><span>Buy</span></div>
           </div>
         </div>
         <div className="mt-3 grid min-w-0 grid-cols-1 gap-2">
-          <AdviceLane title="Score & why" value={`${advice.buyScore}/100`} tone={advice.tone === "good" ? "good" : advice.tone === "bad" ? "bad" : "warn"}>
+          <AdviceLane title="Why this position" value={`${advice.buyScore}/100 evidence`} tone={advice.tone === "good" ? "good" : advice.tone === "bad" ? "bad" : "warn"}>
             <span>{advice.summary}</span>
           </AdviceLane>
           <AdviceLane title="Entry plan" value={advice.nextActionWindow} tone={advice.tone === "good" ? "good" : advice.tone === "bad" ? "bad" : "warn"}>

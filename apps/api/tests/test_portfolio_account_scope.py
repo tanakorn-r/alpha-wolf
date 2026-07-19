@@ -9,7 +9,19 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from internal.store import db as store_db
-from internal.store.portfolio import _holding, _order, add_watchlist_symbols, delete_watchlist_symbol, list_dca_orders, list_holdings, list_watchlist, upsert_holding
+from internal.store.portfolio import (
+    _holding,
+    _order,
+    add_watchlist_symbols,
+    delete_research_shortlist,
+    delete_watchlist_symbol,
+    list_dca_orders,
+    list_holdings,
+    list_watchlist,
+    load_research_shortlist,
+    save_research_shortlist,
+    upsert_holding,
+)
 from models import HoldingInput
 
 
@@ -61,6 +73,36 @@ class PortfolioAccountScopeTests(unittest.TestCase):
 
         self.assertEqual(list_watchlist(user_id=1), ["GC=F"])
         self.assertEqual(list_watchlist(user_id=2), ["GLD", "CL=F"])
+
+    def test_research_shortlist_preserves_rank_and_adds_missing_watchlist_symbols(self) -> None:
+        add_watchlist_symbols(["TSLA", "GLD"], user_id=1)
+
+        result = save_research_shortlist(["aapl", "MSFT", "NVDA", "AMZN", "META"], user_id=1)
+
+        self.assertEqual(result["symbols"], ["AAPL", "MSFT", "NVDA", "AMZN", "META"])
+        self.assertIsNotNone(result["updatedAt"])
+        self.assertEqual(load_research_shortlist(1), result)
+        self.assertEqual(list_watchlist(1), ["TSLA", "GLD", "AAPL", "MSFT", "NVDA", "AMZN", "META"])
+
+        reordered = save_research_shortlist(["META", "AAPL", "NVDA", "MSFT", "AMZN"], user_id=1)
+        self.assertEqual(reordered["symbols"], ["META", "AAPL", "NVDA", "MSFT", "AMZN"])
+        self.assertEqual(list_watchlist(1), ["TSLA", "GLD", "AAPL", "MSFT", "NVDA", "AMZN", "META"])
+
+    def test_research_shortlist_requires_exactly_five_unique_symbols(self) -> None:
+        with self.assertRaises(ValueError):
+            save_research_shortlist(["AAPL", "MSFT"], user_id=1)
+        with self.assertRaises(ValueError):
+            save_research_shortlist(["AAPL", "AAPL", "MSFT", "NVDA", "META"], user_id=1)
+
+    def test_research_shortlist_can_be_removed_without_removing_watchlist(self) -> None:
+        symbols = ["AAPL", "MSFT", "NVDA", "AMZN", "META"]
+        save_research_shortlist(symbols, user_id=1)
+
+        result = delete_research_shortlist(user_id=1)
+
+        self.assertEqual(result, {"symbols": [], "updatedAt": None})
+        self.assertEqual(load_research_shortlist(user_id=1), result)
+        self.assertEqual(list_watchlist(user_id=1), symbols)
 
     def test_guest_personal_data_is_always_empty_and_read_only(self) -> None:
         self.assertEqual(list_holdings(user_id=0), [])

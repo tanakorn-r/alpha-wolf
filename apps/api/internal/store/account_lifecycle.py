@@ -62,6 +62,7 @@ def export_account_data(user_id: int) -> dict[str, Any]:
             "transactions": _rows(db, "SELECT symbol, kind, shares, native_currency, native_price, native_fees, amount, cost_basis, realized_pnl, occurred_at, source, created_at FROM portfolio_transactions WHERE user_id = ? ORDER BY occurred_at, id", (user_id,)),
             "dcaOrders": _rows(db, "SELECT symbol, amount, scheduled_for, strategy, status, executed_price, shares, created_at FROM dca_orders WHERE user_id = ? ORDER BY scheduled_for, id", (user_id,)),
             "watchlist": _rows(db, "SELECT symbol, created_at FROM portfolio_watchlist WHERE user_id = ? ORDER BY created_at", (user_id,)),
+            "researchShortlist": _rows(db, "SELECT symbol, rank, updated_at FROM research_shortlist WHERE user_id = ? ORDER BY rank", (user_id,)),
             "aiResults": _rows(db, "SELECT feature, subject, agent_id, variant, payload, model, generated_at, quality_status, created_at, updated_at FROM ai_results WHERE user_id = ? ORDER BY updated_at", (user_id,)),
             "aiRunAudit": _rows(db, "SELECT run_id, feature, subject, agent_id, variant, model, prompt_version, source_timestamps, input_payload, raw_output, guarded_output, decision_state, quality_checks, status, error, created_at FROM ai_run_audit WHERE user_id = ? ORDER BY created_at", (user_id,)),
             "notifications": _rows(db, "SELECT id, kind, subject, title, message, metadata, read_at, created_at FROM notifications WHERE user_id = ? ORDER BY created_at", (user_id,)),
@@ -78,7 +79,7 @@ def delete_account_data(user_id: int) -> None:
         # guarantee that SQLite foreign-key cascades are enabled on every connection.
         for table in (
             "auth_sessions", "user_settings", "ai_credit_balances", "stripe_credit_fulfillments",
-            "holdings", "portfolio_transactions", "dca_orders", "portfolio_watchlist", "ai_results", "ai_run_audit", "notifications", "support_requests",
+            "holdings", "portfolio_transactions", "dca_orders", "portfolio_watchlist", "research_shortlist", "ai_results", "ai_run_audit", "notifications", "support_requests",
         ):
             db.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
         db.execute("DELETE FROM backtrade_jobs WHERE account_scope = ?", (scope,))

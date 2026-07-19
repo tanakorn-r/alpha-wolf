@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink, useLocation } from "react-router-dom";
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
@@ -8,11 +9,14 @@ import { useWolfStore } from "../../store/useWolfStore";
 import { NavIcon } from "./NavIcon";
 import { CreditTopUpButton } from "../billing/CreditTopUp";
 import { APP_NAVIGATION } from "./navigation";
+import { AgentPickerModal } from "../agents/AgentPickerModal";
 
 export function AppSidebar() {
+  const [agentOpen, setAgentOpen] = useState(false);
   const portfolioValue = useWolfStore((state) => state.portfolioValue);
   const portfolioGainPct = useWolfStore((state) => state.portfolioGainPct);
   const activeAgentId = useWolfStore((state) => state.activeAgentId);
+  const setActiveAgent = useWolfStore((state) => state.setActiveAgent);
   const location = useLocation();
   const authQuery = useQuery({ queryKey: ["auth-user"], queryFn: loadAuthUser, staleTime: 300_000, retry: 0 });
   const agentsQuery = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
@@ -64,13 +68,22 @@ export function AppSidebar() {
 
       <div className="mt-auto flex flex-col gap-2.5">
         {location.pathname === "/" && activeAgent ? (
-          <div className="rounded-[var(--aw-radius-control)] border px-3 py-2.5" style={{ borderColor: `${activeAgent.color}45`, background: `${activeAgent.color}0c` }}>
-            <div className="mb-2 text-[9px] font-bold uppercase tracking-[0.1em] text-[#8c8c95]">Your Agent</div>
+          <button
+            type="button"
+            onClick={() => setAgentOpen(true)}
+            aria-label={`Change agent, active ${activeAgent.name}`}
+            className="group w-full rounded-[var(--aw-radius-control)] border px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:brightness-125 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            style={{ borderColor: `${activeAgent.color}45`, background: `${activeAgent.color}0c`, outlineColor: activeAgent.color }}
+          >
+            <div className="mb-2 flex items-center justify-between gap-2 text-[9px] font-bold uppercase tracking-[0.1em] text-[#8c8c95]">
+              <span>Your Agent</span>
+              <span className="normal-case tracking-normal text-[#5f5f68] transition group-hover:text-[#ececee]">Change ↗</span>
+            </div>
             <div className="flex items-center gap-2">
               <span className="h-7 w-7 overflow-hidden rounded-[8px] border" style={{ borderColor: `${activeAgent.color}55` }}>{activeAgent.avatarUrl ? <img src={activeAgent.avatarUrl} alt="" className="h-full w-full object-cover" /> : null}</span>
               <div className="min-w-0"><div className="truncate text-[11px] font-bold text-[#ececee]">{activeAgent.name}</div><div className="truncate text-[9px] font-semibold" style={{ color: activeAgent.color }}>{activeAgent.title}</div></div>
             </div>
-          </div>
+          </button>
         ) : authQuery.data ? <AiUsageMeter user={authQuery.data} /> : null}
         <div className="rounded-[10px] border border-[#2a2a31] bg-[#161619] px-3 py-3">
           <div className="mb-[5px] text-[11px] uppercase tracking-[0.6px] text-[#8c8c95]">Portfolio</div>
@@ -80,6 +93,16 @@ export function AppSidebar() {
 
         <div className="flex items-center gap-2 px-1.5 text-[11px] text-[#8c8c95]"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#3ecf8e]" />AI runs only when you ask</div>
       </div>
+      {agentOpen ? (
+        <AgentPickerModal
+          activeAgentId={activeAgentId}
+          onClose={() => setAgentOpen(false)}
+          onUse={(agentId) => {
+            setActiveAgent(agentId);
+            setAgentOpen(false);
+          }}
+        />
+      ) : null}
     </aside>
   );
 }

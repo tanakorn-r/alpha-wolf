@@ -208,6 +208,51 @@ def delete_watchlist_symbol(symbol: str, user_id: int = 0) -> None:
         db.commit()
 
 
+def load_research_shortlist(user_id: int = 0) -> dict[str, object]:
+    _require_account(user_id)
+    with connect() as db:
+        rows = db.execute(
+            "SELECT symbol, updated_at FROM research_shortlist WHERE user_id = ? ORDER BY rank",
+            (user_id,),
+        ).fetchall()
+    symbols = [str(row["symbol"] if hasattr(row, "keys") else row[0]) for row in rows]
+    updated_at = None
+    if rows:
+        first = rows[0]
+        updated_at = str(first["updated_at"] if hasattr(first, "keys") else first[1])
+    return {"symbols": symbols, "updatedAt": updated_at}
+
+
+def save_research_shortlist(symbols: list[str], user_id: int = 0) -> dict[str, object]:
+    _require_account(user_id)
+    normalized = [symbol.strip().upper() for symbol in symbols if symbol.strip()]
+    if len(normalized) != 5 or len(set(normalized)) != 5:
+        raise ValueError("Exactly five unique symbols are required")
+    updated_at = datetime.now(timezone.utc).isoformat()
+    with connect() as db:
+        db.execute("DELETE FROM research_shortlist WHERE user_id = ?", (user_id,))
+        for rank, symbol in enumerate(normalized, start=1):
+            db.execute(
+                "INSERT INTO research_shortlist(user_id, symbol, rank, updated_at) VALUES(?, ?, ?, ?)",
+                (user_id, symbol, rank, updated_at),
+            )
+            db.execute(
+                "INSERT OR IGNORE INTO portfolio_watchlist(user_id, symbol, created_at) VALUES(?, ?, ?)",
+                (user_id, symbol, updated_at),
+            )
+        db.commit()
+    return {"symbols": normalized, "updatedAt": updated_at}
+
+
+def delete_research_shortlist(user_id: int = 0) -> dict[str, object]:
+    """Remove the ranked shortlist without touching holdings or watchlist symbols."""
+    _require_account(user_id)
+    with connect() as db:
+        db.execute("DELETE FROM research_shortlist WHERE user_id = ?", (user_id,))
+        db.commit()
+    return {"symbols": [], "updatedAt": None}
+
+
 def _holding(row) -> Holding:
     return Holding(
         id=_row_value(row, "id", 0),

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addPortfolioWatchlistSymbols,
+  deleteResearchShortlist,
   deletePortfolioWatchlistSymbol,
   loadBuyTiming,
   loadAuthUser,
@@ -11,17 +12,21 @@ import {
   redeemPremiumPromo,
   loadPortfolio,
   loadPortfolioWatchlist,
+  loadResearchShortlist,
   loadStockDetail,
   loadTechnicalAnalysis,
   loadStrategyPlaybook,
   loadUpwardMoves,
   loadValuationVerdict,
+  saveResearchShortlist,
   summarizeStock,
   type BuyTimingResponse,
   type AnalystBriefResponse,
+  type PortfolioReviewResponse,
   type StockAnalysisResponse,
   type StockDetailResponse,
   type StrategyPlaybookResponse,
+  type StrategyPick,
   type TechnicalAnalysisResponse,
   type UpwardMovesResponse,
   type ValuationVerdictResponse,
@@ -47,7 +52,42 @@ type PersistedReplay = { jobId: string };
 
 // Bump when persona reasoning changes so persisted browser reports cannot make a newly fixed
 // Agent appear to repeat an older, generic answer.
-const AGENT_REASONING_CACHE_VERSION = "persona-v24-nadia-convex-hedging";
+const AGENT_REASONING_CACHE_VERSION = "persona-v25-spoken-emotional-voice";
+const RESEARCH_SHORTLIST_STORAGE_KEY = "alphawolf:research-shortlist:v1";
+const modeStrategy: Record<StratMode, string> = {
+  swing: "momentum",
+  day: "momentum",
+  long: "stable_dca",
+  value: "capitalized",
+  fomo: "momentum",
+};
+
+function localResearchShortlist(accountScope: string): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(`${RESEARCH_SHORTLIST_STORAGE_KEY}:${accountScope}`) || "[]");
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean).slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalResearchShortlist(symbols: string[], accountScope: string) {
+  if (typeof window !== "undefined") window.localStorage.setItem(`${RESEARCH_SHORTLIST_STORAGE_KEY}:${accountScope}`, JSON.stringify(symbols.slice(0, 5)));
+}
+
+function preferredDiscoveryMarkets(values: string[] | undefined) {
+  return (values ?? ["us"]).map((value) => value === "thailand" ? "th" : value) as Array<"us" | "th" | "europe" | "japan" | "hong-kong-china">;
+}
+
+function inferStrategyMode(strategy: string): StratMode {
+  const text = strategy.toLowerCase();
+  if (text.includes("day")) return "day";
+  if (text.includes("swing")) return "swing";
+  if (text.includes("value") || text.includes("capital")) return "value";
+  if (text.includes("fomo") || text.includes("momentum")) return "fomo";
+  return "long";
+}
 
 function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentId: string) {
   return data?.agent?.id === agentId;
@@ -71,10 +111,13 @@ export function useHuntAi() {
   const [selectedTicker, setSelectedTicker] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [addQuery, setAddQuery] = useState("");
-  const [stratMode, setStratMode] = useState<StratMode | null>(null);
+  const [stratMode, setStratMode] = useState<StratMode>("long");
   const [stratPrompt, setStratPrompt] = useState("");
   const [stratAnalysis, setStratAnalysis] = useState<StrategyPlaybookResponse | null>(null);
   const [stratLoading, setStratLoading] = useState(false);
+  const [stratDraft, setStratDraft] = useState<StrategyPick[]>([]);
+  const [localShortlist, setLocalShortlist] = useState<string[]>([]);
+  const [shortlistSaved, setShortlistSaved] = useState(false);
   const [analystQuery, setAnalystQuery] = useState("");
   const [analystTicker, setAnalystTicker] = useState("");
   const [analystDetail, setAnalystDetail] = useState<StockDetailResponse | null>(null);
@@ -114,7 +157,7 @@ export function useHuntAi() {
   const savedStrategyQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "strategy", activeAgentId],
     queryFn: ({ signal }) => loadLatestAiResult<StrategyPlaybookResponse>({ feature: "strategy", subject: "universe", agent: activeAgentId, variantPrefix: "v7:", signal }),
-    enabled: authenticated && premium && tab === "strategy" && activatedTabs.has("strategy"),
+    enabled: authenticated,
     staleTime: Infinity,
     gcTime: Infinity,
     retry: 0,
@@ -135,6 +178,13 @@ export function useHuntAi() {
     refetchOnWindowFocus: false,
   });
   const watchlistQuery = useQuery({ queryKey: ["portfolio-watchlist", accountScope], queryFn: loadPortfolioWatchlist, enabled: authenticated });
+  const shortlistQuery = useQuery({
+    queryKey: ["research-shortlist", accountScope],
+    queryFn: loadResearchShortlist,
+    enabled: authenticated,
+    staleTime: 60_000,
+    retry: 0,
+  });
   const addWatchlistMutation = useMutation({
     mutationFn: addPortfolioWatchlistSymbols,
     onSuccess: (nextSymbols) => queryClient.setQueryData(["portfolio-watchlist", accountScope], nextSymbols),
@@ -153,13 +203,56 @@ export function useHuntAi() {
       setAiError(error instanceof Error ? error.message : "Could not remove this asset from your watchlist.");
     },
   });
+  const shortlistMutation = useMutation({
+    mutationFn: saveResearchShortlist,
+    onSuccess: (saved) => {
+      queryClient.setQueryData(["research-shortlist", accountScope], saved);
+      queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => Array.from(new Set([...saved.symbols, ...current])));
+      setLocalShortlist(saved.symbols);
+      saveLocalResearchShortlist(saved.symbols, accountScope);
+      setShortlistSaved(true);
+    },
+    onError: (error) => setAiError(error instanceof Error ? error.message : "Could not save your Top Five."),
+  });
+  const removeShortlistMutation = useMutation({
+    mutationFn: deleteResearchShortlist,
+    onSuccess: (removed) => {
+      setLocalShortlist([]);
+      saveLocalResearchShortlist([], accountScope);
+      queryClient.setQueryData(["research-shortlist", accountScope], removed);
+      setShortlistSaved(false);
+    },
+    onError: (error) => setAiError(error instanceof Error ? error.message : "Could not remove your saved Top Five."),
+  });
   const holdingSymbols = portfolioQuery.data?.holdings.map((holding) => holding.symbol) ?? [];
   const watchingSymbols = watchlistQuery.data ?? [];
-  const symbols = Array.from(new Set([...holdingSymbols, ...watchingSymbols]));
+  const savedDeskBriefQuery = useQuery({
+    queryKey: ["saved-ai", accountScope, "portfolio", activeAgentId],
+    queryFn: ({ signal }) => loadLatestAiResult<PortfolioReviewResponse>({ feature: "portfolio", subject: "portfolio", agent: activeAgentId, variantPrefix: "v5", signal }),
+    enabled: authenticated && holdingSymbols.length > 0,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: 0,
+  });
+  const serverShortlist = shortlistQuery.data?.symbols ?? [];
+  const shortlistSymbols = serverShortlist.length ? serverShortlist : localShortlist;
+  const symbols = Array.from(new Set([...shortlistSymbols, ...holdingSymbols, ...watchingSymbols]));
   const activeTicker = selectedTicker || symbols[0] || "";
   const replayCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:replay:${activeTicker}:${activeAgentId}`;
   const replayCached = getHuntAiCache<PersistedReplay>(replayCacheKey);
   const debouncedAddQuery = useDebouncedValue(addQuery.trim(), DISCOVERY_DEBOUNCE_MS);
+  const preferredMarkets = preferredDiscoveryMarkets(authQuery.data?.settings?.preferredMarkets);
+  const preferredMarketsKey = preferredMarkets.join(",");
+  const strategyCandidatesQuery = useQuery({
+    queryKey: ["hunt-top-five-candidates", stratMode, preferredMarketsKey],
+    queryFn: ({ signal }) => loadDiscoveries({ kind: "stock", strategy: modeStrategy[stratMode], mode: stratMode, sort: "score", region: "all", markets: preferredMarkets, limit: 40, signal }),
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  useEffect(() => {
+    setLocalShortlist(localResearchShortlist(accountScope));
+  }, [accountScope]);
 
   useEffect(() => {
     if (addQuery.trim() !== debouncedAddQuery) {
@@ -167,12 +260,14 @@ export function useHuntAi() {
     }
   }, [addQuery, debouncedAddQuery, queryClient]);
 
-  useEffect(() => {
-    if (selectedTicker && !symbols.includes(selectedTicker)) setSelectedTicker("");
-  }, [selectedTicker, symbols]);
+  // A research ticker may be selected before it is saved to an authenticated
+  // watchlist. Keep that local selection so first-time visitors can explore the
+  // workspace before signing in.
+  const researchSymbols = Array.from(new Set([...symbols, ...(selectedTicker ? [selectedTicker] : [])]));
 
   useEffect(() => {
     setStratAnalysis(null);
+    setStratDraft([]);
     setAnalystAnalysis(null);
     setAnalystDetail(null);
     setIntradayAnalysis(null);
@@ -191,6 +286,7 @@ export function useHuntAi() {
       setStratMode(saved.mode);
       setStratPrompt(saved.prompt);
       setStratAnalysis(saved.analysis);
+      setStratDraft(saved.analysis.picks);
     }
   }, [activeAgentId, accountScope]);
 
@@ -199,7 +295,16 @@ export function useHuntAi() {
     if (!saved || !matchesAgent(saved, activeAgentId)) return;
     setStratAnalysis(saved);
     setStratPrompt(saved.strategy ?? "");
+    setStratMode(inferStrategyMode(saved.strategy ?? ""));
+    setStratDraft(saved.picks);
   }, [activeAgentId, savedStrategyQuery.data]);
+
+  useEffect(() => {
+    if (!shortlistQuery.isSuccess) return;
+    const server = shortlistQuery.data.symbols;
+    setLocalShortlist(server);
+    saveLocalResearchShortlist(server, accountScope);
+  }, [accountScope, shortlistQuery.isSuccess, shortlistQuery.data?.symbols.join(",")]);
 
   const addQueryResult = useQuery({
     queryKey: ["hunt-add-search", debouncedAddQuery],
@@ -208,7 +313,7 @@ export function useHuntAi() {
     staleTime: 60_000,
     retry: 0,
   });
-  const addResults = (addQueryResult.data?.live ?? []).filter((item) => !symbols.includes(item.symbol));
+  const addResults = (addQueryResult.data?.live ?? []).filter((item) => !researchSymbols.includes(item.symbol));
   const savedValuationQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "valuation", activeTicker, activeAgentId],
     queryFn: ({ signal }) => loadLatestAiResult<ValuationVerdictResponse>({ feature: "valuation", subject: activeTicker, agent: activeAgentId, variantPrefix: "v26:stable_dca", signal }),
@@ -307,7 +412,7 @@ export function useHuntAi() {
   });
   const savedAnalystQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "analyst-report", activeTicker, activeAgentId],
-    queryFn: ({ signal }) => loadLatestAiResult<AnalystBriefResponse>({ feature: "analyst-report", subject: activeTicker, agent: activeAgentId, variantPrefix: "v13:capitalized:", signal }),
+    queryFn: ({ signal }) => loadLatestAiResult<AnalystBriefResponse>({ feature: "analyst-report", subject: activeTicker, agent: activeAgentId, variantPrefix: "v15:capitalized:", signal }),
     enabled: authenticated && premium && tab === "analyst" && activatedTabs.has("analyst") && Boolean(activeTicker), staleTime: Infinity, gcTime: Infinity, retry: 0,
   });
   const savedAnalystDetailQuery = useQuery({
@@ -423,14 +528,22 @@ export function useHuntAi() {
     accountUser: authQuery.data ?? null,
     accountSignInOpen,
     closeAccountSignIn: () => setAccountSignInOpen(false),
+    showAccountSignIn: () => setAccountSignInOpen(true),
     redeemPremium: () => redeemPremiumMutation.mutate(),
     redeemingPremium: redeemPremiumMutation.isPending,
     unlockPremium: () => setTrialModalOpen(true),
     aiError,
     activeAgentId,
 
+    deskBrief: {
+      review: matchesAgent(savedDeskBriefQuery.data, activeAgentId) ? savedDeskBriefQuery.data : null,
+      holdingCount: holdingSymbols.length,
+      researchCount: researchSymbols.length,
+      loading: savedDeskBriefQuery.isFetching,
+    },
+
     watchlist: {
-      symbols,
+      symbols: researchSymbols,
       holdingSymbols,
       activeTicker,
       loading: authQuery.isPending || (authenticated && portfolioQuery.isPending && watchlistQuery.isPending),
@@ -441,27 +554,20 @@ export function useHuntAi() {
       select: setSelectedTicker,
       setQuery: setAddQuery,
       toggle() {
-        if (!authenticated) {
-          setAccountSignInOpen(true);
-          return;
-        }
         setAddOpen((open) => !open);
       },
       add(symbol: string) {
-        if (!authenticated) {
-          setAccountSignInOpen(true);
-          return;
-        }
         const normalized = symbol.trim().toUpperCase();
-        queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => Array.from(new Set([...current, normalized])));
-        addWatchlistMutation.mutate([normalized]);
         setSelectedTicker(normalized);
         setAddOpen(false);
         setAddQuery("");
+        if (!authenticated) return;
+        queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => Array.from(new Set([...current, normalized])));
+        addWatchlistMutation.mutate([normalized]);
       },
       remove(symbol: string) {
         if (!authenticated) {
-          setAccountSignInOpen(true);
+          if (selectedTicker === symbol) setSelectedTicker("");
           return;
         }
         queryClient.setQueryData<string[]>(["portfolio-watchlist", accountScope], (current = []) => current.filter((item) => item !== symbol));
@@ -472,7 +578,7 @@ export function useHuntAi() {
 
     signals: {
       ticker: activeTicker,
-      symbols,
+      symbols: researchSymbols,
       // Portfolio and watchlist are independent. Render as soon as either source is ready;
       // a slow holdings request must not block usable watchlist symbols or saved local cards.
       loading: authQuery.isPending || (authenticated && portfolioQuery.isPending && watchlistQuery.isPending),
@@ -618,27 +724,102 @@ export function useHuntAi() {
       prompt: stratPrompt,
       setPrompt: setStratPrompt,
       analysis: matchesAgent(stratAnalysis, activeAgentId) ? stratAnalysis : null,
+      picks: stratDraft,
       loading: stratLoading,
+      candidates: strategyCandidatesQuery.data?.live ?? [],
+      candidateCount: strategyCandidatesQuery.data?.live.length ?? 0,
+      candidatesLoading: strategyCandidatesQuery.isFetching,
+      preferredMarkets,
+      shortlist: shortlistSymbols,
+      saving: shortlistMutation.isPending,
+      removing: removeShortlistMutation.isPending,
+      saved: shortlistSaved,
+      selectMode(mode: StratMode) {
+        if (mode !== stratMode) {
+          setStratAnalysis(null);
+          setStratDraft([]);
+          setStratPrompt("");
+        }
+        setStratMode(mode);
+        setShortlistSaved(false);
+      },
       async run(mode: StratMode, force = false) {
+        if (!authenticated) {
+          setAccountSignInOpen(true);
+          return;
+        }
+        if ((authQuery.data?.aiUsage?.remaining ?? 0) <= 0) {
+          setAiError("No AI tokens remaining. Add tokens to ask your Agent for a fresh Top Five.");
+          return;
+        }
+        const candidates = strategyCandidatesQuery.data?.live ?? [];
+        if (mode !== stratMode || candidates.length < 5) {
+          setAiError("At least five live candidates are required. Wait for the market list to finish loading and try again.");
+          return;
+        }
         startFlow("strategy_analysis");
         setStratMode(mode);
         setStratAnalysis(null);
+        setStratDraft([]);
         setStratLoading(true);
+        setShortlistSaved(false);
         setAiError("");
         try {
           const card = STRAT_CARDS.find((c) => c.key === mode);
           const strategy = stratPrompt.trim() || (card ? `${card.label}: ${card.subtitle}` : mode);
-          const result = await loadStrategyPlaybook({ strategy, region: "all", limit: 5, candidateLimit: 40, agent: activeAgentId, force });
+          const result = await loadStrategyPlaybook({ strategy, candidateSymbols: candidates.slice(0, 40).map((candidate) => candidate.symbol), region: "all", limit: 5, candidateLimit: 40, agent: activeAgentId, force });
           setStratAnalysis(result);
+          setStratDraft(result.picks);
           setHuntAiCache(strategyCacheKey, { analyzedAt: result.generatedAt ?? new Date().toISOString(), data: { mode, prompt: stratPrompt, analysis: result } });
           void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
           finishFlow("strategy_analysis", "success");
-        } catch {
-          setAiError("Strategy AI could not rank the stock universe for this strategy.");
+        } catch (error) {
+          setAiError(error instanceof Error ? error.message : "Strategy AI could not rank the stock universe for this strategy.");
           finishFlow("strategy_analysis", "failure");
         } finally {
           setStratLoading(false);
         }
+      },
+      move(from: number, to: number) {
+        setStratDraft((current) => {
+          if (from === to || from < 0 || to < 0 || from >= current.length || to >= current.length) return current;
+          const next = [...current];
+          const [pick] = next.splice(from, 1);
+          next.splice(to, 0, pick);
+          return next;
+        });
+        setShortlistSaved(false);
+      },
+      reset() {
+        setStratDraft(stratAnalysis?.picks ?? []);
+        setShortlistSaved(false);
+      },
+      save() {
+        const ranked = stratDraft.map((pick) => pick.ticker);
+        if (ranked.length !== 5) {
+          setAiError("A complete five-stock ranking is required before saving.");
+          return;
+        }
+        if (!authenticated) {
+          saveLocalResearchShortlist(ranked, accountScope);
+          setLocalShortlist(ranked);
+          setAccountSignInOpen(true);
+          return;
+        }
+        shortlistMutation.mutate(ranked);
+      },
+      remove() {
+        if (!authenticated) {
+          setLocalShortlist([]);
+          saveLocalResearchShortlist([], accountScope);
+          return;
+        }
+        removeShortlistMutation.mutate();
+      },
+      open(symbol: string) {
+        const normalized = symbol.trim().toUpperCase();
+        setSelectedTicker(normalized);
+        setTabState("signals");
       },
     },
 
