@@ -41,6 +41,21 @@ class AgentPersonaTests(unittest.TestCase):
         self.assertTrue(all(contracts))
         self.assertEqual(len(contracts), len(set(contracts)))
 
+    def test_dante_is_the_exclusive_red_live_quant(self) -> None:
+        dante = next(agent for agent in AGENTS if agent["id"] == "dante")
+        prompt = compose_instructions("Return one live trade contract.", "dante", analyst_task=True)
+
+        self.assertEqual(dante["color"], "#ff4655")
+        self.assertTrue(dante["premium"])
+        self.assertTrue(dante["liveTradeOnly"])
+        self.assertEqual(dante["avatarUrl"], "/agents/dante-cross.png")
+        self.assertIn("Forex and gold session structure", dante["knows"])
+        self.assertIn("LONG, SHORT, or WAIT", prompt)
+        self.assertIn("hard stop", prompt)
+        self.assertIn("TP1", prompt)
+        self.assertIn("scheduled macro event", prompt)
+        self.assertIn("You exist only inside Live Trading", prompt)
+
     def test_every_agent_has_a_distinct_analyst_perspective(self) -> None:
         ids = {agent["id"] for agent in AGENTS}
         north_stars = [ANALYST_PERSPECTIVES[agent_id]["northStar"] for agent_id in ids]
@@ -93,6 +108,19 @@ class AgentPersonaTests(unittest.TestCase):
         self.assertIn("SEVEN DESKS", prime)
         self.assertIn("exposure-normalized, risk-adjusted outcomes", prime)
         self.assertIn("Never promise to win", prime)
+
+    def test_compact_analyst_fuses_research_without_large_report_schema(self) -> None:
+        task = _analyst_brief_instructions()
+        ben = compose_instructions(task, "ben", analyst_task=True, analyst_brief_task=True)
+        rex = compose_instructions(task, "rex", analyst_task=True, analyst_brief_task=True)
+
+        self.assertIn("Join live company/country/industry research", ben)
+        self.assertIn("presales/backlog/project conversion", ben)
+        self.assertIn("researchSynthesis", ben)
+        self.assertIn("decisionRule", ben)
+        self.assertNotIn("Return exactly four perspectiveSections", ben)
+        self.assertIn("maximum three-month lifecycle", rex)
+        self.assertNotEqual(ben, rex)
 
     def test_daily_brief_horizons_are_agent_specific(self) -> None:
         self.assertEqual(set(DAILY_BRIEF_PERSPECTIVES), {agent["id"] for agent in AGENTS})

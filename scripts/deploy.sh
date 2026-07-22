@@ -195,6 +195,7 @@ gcloud run deploy "$SERVICE" \
   --platform managed \
   --allow-unauthenticated \
   --port 8080 \
+  --timeout 300s \
   --concurrency "$CLOUD_RUN_CONCURRENCY" \
   --min "$CLOUD_RUN_MIN_INSTANCES" \
   --max "$CLOUD_RUN_MAX_INSTANCES" \

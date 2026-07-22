@@ -326,6 +326,13 @@ class AiPerformanceTests(unittest.TestCase):
             "holdingAction": "HOLD",
             "holdingActionReason": "No thesis breaker occurred today.",
             "todayRead": "One session does not change owner earnings.",
+            "oneDayOutlook": "MIXED",
+            "oneDayThesis": "Stable company economics offset ordinary index volatility, so price pressure is two-way.",
+            "impactDrivers": [
+                {"driver": "Owner economics", "scope": "COMPANY", "direction": "UP", "timing": "Today", "mechanism": "Intact cash economics support the holding case.", "sourceRanks": [1]},
+                {"driver": "Index volatility", "scope": "INDEX", "direction": "TWO_WAY", "timing": "Today", "mechanism": "Benchmark flows can move price without changing the thesis.", "sourceRanks": [2]},
+            ],
+            "fundamentalCheck": {"status": "UNCHANGED", "company": "The owner thesis is intact.", "index": "Index flow is mixed.", "country": "No verified country change."},
             "horizonAlignment": {
                 "status": "ALIGNED",
                 "planHorizon": "5 years",
@@ -380,6 +387,13 @@ class AiPerformanceTests(unittest.TestCase):
             "holdingAction": "HOLD",
             "holdingActionReason": "Owner earnings remain intact.",
             "todayRead": "The session is ordinary noise.",
+            "oneDayOutlook": "MIXED",
+            "oneDayThesis": "Company evidence remains intact while technical pressure may create only a temporary reaction.",
+            "impactDrivers": [
+                {"driver": "Owner economics", "scope": "COMPANY", "direction": "UP", "timing": "Today", "mechanism": "Intact economics support the strategic case.", "sourceRanks": [1]},
+                {"driver": "Technical pressure", "scope": "INDEX", "direction": "DOWN", "timing": "Today", "mechanism": "Risk-off flow can pressure the quote without breaking the business.", "sourceRanks": [2]},
+            ],
+            "fundamentalCheck": {"status": "UNCHANGED", "company": "Owner earnings remain intact.", "index": "Technical flow is soft.", "country": "No verified country change."},
             "horizonAlignment": {
                 "status": "BROKEN",
                 "planHorizon": "5 years",
@@ -396,7 +410,10 @@ class AiPerformanceTests(unittest.TestCase):
             "agentFitReason": "This remains an owner holding.",
         }
         result = TodayPerformance.model_validate(payload)
-        context = {"positionContext": {"isHolding": True}}
+        context = {
+            "positionContext": {"isHolding": True},
+            "webNewsResearch": {"sources": [{"title": "Company source"}, {"title": "Index source"}]},
+        }
 
         self.assertIn("BROKEN", _today_action_issue(context, result, "ben") or "")
 
@@ -417,6 +434,13 @@ class AiPerformanceTests(unittest.TestCase):
             "holdingAction": "HOLD",
             "holdingActionReason": "Owner earnings remain intact.",
             "todayRead": "This session is ordinary noise.",
+            "oneDayOutlook": "MIXED",
+            "oneDayThesis": "The business case is steady while the session tape may stay noisy.",
+            "impactDrivers": [
+                {"driver": "Owner economics", "scope": "COMPANY", "direction": "UP", "timing": "Today", "mechanism": "Intact owner earnings support the plan.", "sourceRanks": [1]},
+                {"driver": "Session noise", "scope": "INDEX", "direction": "TWO_WAY", "timing": "Today", "mechanism": "Market flow can move the quote around the unchanged thesis.", "sourceRanks": [2]},
+            ],
+            "fundamentalCheck": {"status": "UNCHANGED", "company": "The owner thesis is intact.", "index": "Index flow is mixed.", "country": "No verified country change."},
             "horizonAlignment": {
                 "status": "BROKEN",
                 "planHorizon": "5 years",

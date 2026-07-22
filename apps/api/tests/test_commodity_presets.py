@@ -14,6 +14,14 @@ from routes.discover import discover
 
 
 class CommodityPresetTests(unittest.TestCase):
+    def test_thai_catalog_excludes_foreign_depositary_receipts(self) -> None:
+        for symbol in ("PEP80.BK", "SINGTEL80.BK", "TENCENT11.BK"):
+            with self.subTest(symbol=symbol):
+                self.assertFalse(market_catalog._is_supported_quote({"symbol": symbol, "name": "Foreign company"}, "th"))
+
+        self.assertTrue(market_catalog._is_supported_quote({"symbol": "BDMS.BK", "name": "Bangkok Dusit Medical Services"}, "th"))
+        self.assertTrue(market_catalog._is_supported_quote({"symbol": "2S.BK", "name": "2S Metal"}, "th"))
+
     def test_lists_core_commodity_presets(self) -> None:
         presets = list_market_presets(kind="commodity")
         by_code = {preset.code: preset for preset in presets}

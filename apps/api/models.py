@@ -364,6 +364,7 @@ class AgentBadge(BaseModel):
     color: str
     avatarUrl: str | None = None
     premium: bool = False
+    liveTradeOnly: bool = False
     analystFocus: str | None = None
 
 
@@ -383,6 +384,45 @@ class StockAnalysisResponse(StockAnalysis):
     runId: str | None = None
 
 
+class LiveTradeSource(BaseModel):
+    title: str
+    url: str
+
+
+class LiveTradeTimeframeRead(BaseModel):
+    timeframe: Literal["1m", "5m", "15m", "1h", "4h"]
+    bias: Literal["LONG", "SHORT", "NEUTRAL"]
+    evidence: str
+
+
+class LiveTradeRiskReview(BaseModel):
+    action: Literal["EXECUTE", "HOLD", "REJECT"]
+    direction: Literal["LONG", "SHORT"]
+    entryPrice: float
+    hardStopLoss: float
+    takeProfitTargets: list[float] = Field(min_length=1, max_length=3)
+    calculatedPositionSize: float = Field(ge=0)
+    quantitativeJustification: str
+    executionRating: int = Field(ge=1, le=10)
+    ratingReason: str
+    invalidationCheck: str
+    invalidationQuality: Literal["LOGICAL", "WEAK", "ARBITRARY", "UNVERIFIABLE"]
+    structuralEvidence: list[str] = Field(min_length=2, max_length=5)
+    fundamentalRisks: list[str] = Field(min_length=2, max_length=5)
+    devilsAdvocate: str
+    targetLogic: str
+    executionPlan: str
+    timeframeReads: list[LiveTradeTimeframeRead] = Field(min_length=5, max_length=5)
+    waitingFor: list[str] = Field(min_length=1, max_length=4)
+    sessionState: str
+    marketPhase: str
+    newsBlackout: bool
+    spreadCheck: Literal["PASS", "FAIL", "UNVERIFIABLE"]
+    drawdownCheck: Literal["PASS", "KILL_SWITCH", "UNVERIFIABLE"]
+    missingEvidence: list[str] = Field(default_factory=list, max_length=5)
+    sources: list[LiveTradeSource] = Field(default_factory=list, max_length=6)
+
+
 class AnalystBrief(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -391,14 +431,159 @@ class AnalystBrief(BaseModel):
     tone: Literal["good", "warn", "bad"]
     confidence: int | None = Field(default=None, ge=1, le=100)
     summary: str
+    timeHorizon: str
+    controllingQuestion: str
+    researchSynthesis: str
     thesis: str
     actionPlan: str
+    decisionRule: str
     evidence: list[str] = Field(min_length=3, max_length=3)
     risks: list[str] = Field(min_length=2, max_length=2)
     changeTrigger: str
     recap: str
     agentFit: Literal["aligned", "neutral", "against"]
     agentFitReason: str
+
+
+class NewsResearchHorizon(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str
+    direction: Literal["BULLISH", "BEARISH", "MIXED", "NEUTRAL"]
+    confidence: int = Field(ge=1, le=100)
+    window: str
+    thesis: str
+    catalysts: list[str] = Field(min_length=1, max_length=3)
+    invalidation: str
+    sourceRanks: list[int] = Field(min_length=1, max_length=4)
+
+
+class NewsResearchSource(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str
+    url: str
+    publisher: str
+    publishedAt: str | None = None
+    relevance: int = Field(ge=1, le=100)
+    sentiment: Literal["BULLISH", "BEARISH", "MIXED", "NEUTRAL"]
+    horizon: Literal["SHORT", "MEDIUM", "LONG", "MULTIPLE"]
+    eventType: Literal["EARNINGS", "GUIDANCE", "CAPITAL", "DIVIDEND", "MANAGEMENT", "REGULATION", "LEGAL", "CONTRACT", "OPERATIONS", "SECTOR", "MACRO", "MARKET", "OTHER"]
+    whyItMatters: str
+
+    @field_validator("url")
+    @classmethod
+    def require_clickable_web_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized.startswith(("https://", "http://")):
+            raise ValueError("source URL must use http or https")
+        return normalized
+
+
+class NewsResearch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    headline: str
+    tone: Literal["good", "warn", "bad", "neutral"]
+    confidence: int = Field(ge=1, le=100)
+    researchFocus: str
+    summary: str
+    keyEvents: list[str] = Field(min_length=1, max_length=5)
+    horizons: list[NewsResearchHorizon] = Field(min_length=1, max_length=3)
+    sources: list[NewsResearchSource] = Field(min_length=1, max_length=10)
+
+    @model_validator(mode="after")
+    def require_unique_ranked_sources(self) -> "NewsResearch":
+        urls = [source.url.rstrip("/").lower() for source in self.sources]
+        if len(urls) != len(set(urls)):
+            raise ValueError("news research sources must be unique")
+        if any(left.relevance < right.relevance for left, right in zip(self.sources, self.sources[1:])):
+            raise ValueError("news research sources must be ordered by relevance")
+        if any(rank > len(self.sources) for horizon in self.horizons for rank in horizon.sourceRanks):
+            raise ValueError("horizon source rank does not exist")
+        return self
+
+
+class NewsResearchResponse(NewsResearch):
+    source: Literal["openai"]
+    model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
+
+
+class HistoricalTimelineEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    period: str
+    priceDirection: Literal["UP", "DOWN", "SIDEWAYS", "MIXED", "UNKNOWN"]
+    event: str
+    businessChange: str
+    marketImpact: str
+    evidenceType: Literal["MARKET_DATA", "FILING", "NEWS", "MACRO", "MIXED"]
+    sourceRanks: list[int] = Field(default_factory=list, max_length=4)
+
+
+class HistoricalCurrentYear(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["BETTER", "WORSE", "MIXED", "TOO_EARLY"]
+    whatChanged: str
+    comparisonWithHistory: str
+    evidence: list[str] = Field(min_length=2, max_length=4)
+    sourceRanks: list[int] = Field(default_factory=list, max_length=4)
+
+
+class HistoricalForwardOutlook(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    direction: Literal["IMPROVING", "STABLE", "DETERIORATING", "UNCERTAIN"]
+    thesis: str
+    catalysts: list[str] = Field(min_length=2, max_length=4)
+    risks: list[str] = Field(min_length=2, max_length=4)
+
+
+class HistoricalAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    verdict: Literal["IMPROVING", "STABLE", "DETERIORATING", "TURNAROUND", "CYCLICAL", "INSUFFICIENT_DATA"]
+    rating: int = Field(ge=1, le=100)
+    historyWindow: str
+    headline: str
+    summary: str
+    priceStory: str
+    earningsStory: str
+    timeline: list[HistoricalTimelineEvent] = Field(min_length=3, max_length=8)
+    currentYear: HistoricalCurrentYear
+    historyLessons: list[str] = Field(min_length=2, max_length=4)
+    forwardOutlook: HistoricalForwardOutlook
+    agentConclusion: str
+    sources: list[NewsResearchSource] = Field(min_length=2, max_length=10)
+
+    @model_validator(mode="after")
+    def require_valid_history_source_ranks(self) -> "HistoricalAnalysis":
+        ranks = [rank for event in self.timeline for rank in event.sourceRanks] + self.currentYear.sourceRanks
+        if any(rank < 1 or rank > len(self.sources) for rank in ranks):
+            raise ValueError("historical source rank does not exist")
+        return self
+
+
+class HistoricalAnalysisResponse(HistoricalAnalysis):
+    symbol: str
+    source: Literal["openai"]
+    model: str
+    agent: AgentBadge | None = None
+    generatedAt: str | None = None
+    dataTrust: dict[str, Any] | None = None
+    decisionState: dict[str, Any] | None = None
+    guardedDecision: dict[str, Any] | None = None
+    qualityChecks: list[dict[str, Any]] = Field(default_factory=list)
+    promptVersion: str | None = None
+    runId: str | None = None
 
 
 class StrategyPick(BaseModel):
@@ -643,6 +828,26 @@ class TodayHorizonAlignment(BaseModel):
     why: str
 
 
+class TodayImpactDriver(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    driver: str
+    scope: Literal["COMPANY", "SECTOR", "INDEX", "COUNTRY"]
+    direction: Literal["UP", "DOWN", "TWO_WAY", "NEUTRAL"]
+    timing: str
+    mechanism: str
+    sourceRanks: list[int] = Field(min_length=1, max_length=4)
+
+
+class TodayFundamentalCheck(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["SUPPORTS", "UNCHANGED", "WEAKENS", "UNKNOWN"]
+    company: str
+    index: str
+    country: str
+
+
 class TodayPerformance(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -654,6 +859,10 @@ class TodayPerformance(BaseModel):
     holdingAction: Literal["HOLD", "NO_ACTION", "ADD_SMALL", "ADD", "REDUCE", "SELL"]
     holdingActionReason: str
     todayRead: str
+    oneDayOutlook: Literal["BULLISH", "BEARISH", "MIXED", "NEUTRAL"]
+    oneDayThesis: str
+    impactDrivers: list[TodayImpactDriver] = Field(min_length=2, max_length=4)
+    fundamentalCheck: TodayFundamentalCheck
     horizonAlignment: TodayHorizonAlignment
     evidence: list[str] = Field(min_length=2, max_length=3)
     continueGate: str
@@ -670,6 +879,7 @@ class TodayPerformanceResponse(TodayPerformance):
     model: str
     agent: AgentBadge | None = None
     generatedAt: str | None = None
+    newsResearch: NewsResearchResponse | None = None
     dataTrust: dict[str, Any] | None = None
     decisionState: dict[str, Any] | None = None
     guardedDecision: dict[str, Any] | None = None

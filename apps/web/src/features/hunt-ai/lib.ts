@@ -2,7 +2,7 @@ import type { StockDetailResponse, UpwardMove } from "../../lib/api";
 import { formatCurrency } from "../../lib/format";
 import { formatLocalDate, formatLocalDateTime, getLocaleSettings } from "../../lib/locale";
 
-export type HuntTab = "signals" | "brief" | "timing" | "technical" | "replay" | "intraday" | "n100" | "strategy" | "analyst";
+export type HuntTab = "signals" | "brief" | "timing" | "technical" | "history" | "replay" | "intraday" | "n100" | "strategy" | "analyst";
 export type N100Timeframe = "1D" | "1W";
 export type StratMode = "swing" | "day" | "long" | "value" | "fomo";
 export type MoveDirection = "UP" | "DOWN" | "FLAT";

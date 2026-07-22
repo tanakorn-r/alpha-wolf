@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { loadAgents, type AgentProfile } from "../../lib/api";
 import { lockBodyScroll } from "../../lib/bodyScrollLock";
 import { useDialogAccessibility } from "../../lib/useDialogAccessibility";
@@ -12,6 +13,7 @@ type Props = {
 };
 
 export function AgentPickerModal({ activeAgentId, onUse, onClose }: Props) {
+  const navigate = useNavigate();
   const titleId = useId();
   const dialogRef = useDialogAccessibility(onClose);
   const { data: agents = [], isLoading } = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
@@ -20,6 +22,12 @@ export function AgentPickerModal({ activeAgentId, onUse, onClose }: Props) {
   useEffect(() => lockBodyScroll(), []);
 
   function useAgent(agentId: string) {
+    const agent = agents.find((item) => item.id === agentId);
+    if (agent?.liveTradeOnly) {
+      onClose();
+      navigate("/live-trade");
+      return;
+    }
     onUse(agentId);
     setProfileId(agentId);
   }
@@ -85,6 +93,7 @@ function AgentCard({ agent, active, selected, onProfile, onUse }: { agent: Agent
           <div className="flex items-center gap-2">
             <div className="truncate text-[14px] font-extrabold text-[#ececee]">{agent.name}</div>
             {active ? <span className="rounded-[5px] px-2 py-[2px] text-[9px] font-bold uppercase" style={{ background: `${agent.color}1f`, color: agent.color }}>Active</span> : null}
+            {agent.liveTradeOnly ? <span className="rounded-[5px] border border-[#ff4655]/40 bg-[#ff4655]/10 px-2 py-[2px] text-[9px] font-bold uppercase text-[#ff6673]">Live only</span> : null}
             {agent.premium ? <span className="rounded-[5px] border border-[#f5c451]/40 bg-[#f5c451]/10 px-2 py-[2px] text-[9px] font-bold uppercase text-[#f5c451]">Pro</span> : null}
           </div>
           <div className="mt-[2px] text-[11px] font-semibold" style={{ color: agent.color }}>{agent.title} · {agent.years}y</div>
@@ -102,7 +111,7 @@ function AgentCard({ agent, active, selected, onProfile, onUse }: { agent: Agent
           className="rounded-[7px] border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.04em]"
           style={{ borderColor: `${agent.color}55`, color: active ? "#0e0e10" : agent.color, background: active ? agent.color : `${agent.color}12` }}
         >
-          {active ? "Using" : "Use"}
+          {agent.liveTradeOnly ? "Open live desk" : active ? "Using" : "Use"}
         </button>
       </div>
     </div>
@@ -121,6 +130,7 @@ function AgentProfileView({ agent, active, onUse }: { agent: AgentProfile; activ
               <div className="text-[17px] font-extrabold tracking-[-0.2px] text-[#ececee]">{agent.name}</div>
               <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] font-semibold" style={{ color: agent.color }}>
                 <span>{agent.title} · {agent.years} years</span>
+                {agent.liveTradeOnly ? <span className="rounded-[5px] border border-[#ff4655]/40 bg-[#ff4655]/10 px-2 py-[2px] text-[9px] font-bold uppercase text-[#ff6673]">Live Trade only</span> : null}
                 {agent.premium ? <span className="rounded-[5px] border border-[#f5c451]/40 bg-[#f5c451]/10 px-2 py-[2px] text-[9px] font-bold uppercase text-[#f5c451]">Premium</span> : null}
               </div>
               <div className="mt-2 text-[12px] leading-[1.5] text-[#bcbcc2]">{agent.bio}</div>
@@ -159,7 +169,7 @@ function AgentProfileView({ agent, active, onUse }: { agent: AgentProfile; activ
       </div>
 
       <button type="button" onClick={onUse} className="mt-4 w-full rounded-[9px] px-4 py-2.5 text-[12px] font-extrabold uppercase tracking-[0.05em] text-[#0e0e10]" style={{ background: agent.color }}>
-        {active ? "Active agent" : `Use ${agent.name}`}
+        {agent.liveTradeOnly ? "Open Live Trade with Dante" : active ? "Active agent" : `Use ${agent.name}`}
       </button>
     </aside>
   );

@@ -68,13 +68,16 @@ export function AgentCall({
   const band = safeScore === null ? null : scoreBand(safeScore);
   const action = safeScore === null ? null : actionPositionLabel(safeScore);
   const actionColor = safeScore === null ? color : actionPositionTone(safeScore);
+  const visibleBullets = bullets.slice(0, 3);
+  const hiddenBullets = bullets.slice(3);
 
   return (
     <AgentCard agent={agent} label={label} detail={bylineDetail} accent={color} className={`shadow-[0_28px_80px_rgba(0,0,0,0.28)] ${density === "compact" ? "!p-4" : ""}`}>
-      <div className={`absolute ${density === "compact" ? "right-4 top-4" : "right-5 top-4"} @max-[720px]:relative @max-[720px]:right-auto @max-[720px]:top-auto @max-[720px]:mb-4`}>
+      <div className={`mt-4 grid min-w-0 items-start gap-4 ${safeScore !== null ? "@min-[720px]:grid-cols-[minmax(0,1fr)_214px]" : ""}`}>
+      <div className="min-w-0 @min-[720px]:col-start-2 @min-[720px]:row-start-1 @min-[720px]:justify-self-end">
         {safeScore !== null && scoreMode === "action" ? (
           <div
-            className="w-[214px] rounded-[12px] border border-white/[0.08] bg-[#0e0e10]/95 px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.22)]"
+            className="aw-agent-score-panel w-full min-[720px]:w-[214px] rounded-[12px] border border-white/[0.08] bg-[#0e0e10]/95 px-3 py-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.22)]"
             aria-label={`${scoreLabel}: ${action}. Position ${roundedScore} out of 100, from sell to buy.`}
           >
             <div className="flex items-baseline justify-between gap-2">
@@ -94,7 +97,7 @@ export function AgentCall({
           </div>
         ) : safeScore !== null ? (
           <div
-            className="flex items-center gap-2.5 rounded-[12px] border border-white/[0.08] bg-[#0e0e10]/90 px-2.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.22)]"
+            className="aw-agent-score-panel flex w-full items-center gap-2.5 rounded-[12px] border border-white/[0.08] bg-[#0e0e10]/90 px-2.5 py-2 shadow-[0_8px_24px_rgba(0,0,0,0.22)] min-[720px]:w-auto"
             aria-label={`${scoreLabel}: ${roundedScore} out of 100, ${band}`}
             title={`Higher means stronger ${scoreLabel.toLowerCase()}.`}
           >
@@ -114,12 +117,13 @@ export function AgentCall({
         ) : null}
       </div>
 
-      <div className={`max-w-[860px] ${scoreMode === "action" ? "pr-[245px]" : "pr-[210px]"} @max-[720px]:pr-0`}>
+      <div className="min-w-0 max-w-[860px] @min-[720px]:col-start-1 @min-[720px]:row-start-1">
         <span className="inline-flex rounded-[var(--aw-radius-chip)] border-[1.5px] px-3 py-1 font-mono text-[12px] font-bold uppercase tracking-[0.05em]" style={{ color, borderColor: color, background: `${color}0d` }}>
           {signal}
         </span>
         <h2 className={`${density === "compact" ? "mt-2 text-[17px]" : "mt-3 text-[19px]"} font-bold leading-[1.25] tracking-[-0.3px] text-[#ececee]`}>{headline}</h2>
-        {summary ? <div className={`${density === "compact" ? "mt-1.5 text-[12.5px] leading-[1.55]" : "mt-2 text-[13.5px] leading-[1.65]"} text-[#bcbcc2]`}>{summary}</div> : null}
+        {summary ? <div className={`${density === "compact" ? "mt-1.5 text-[12.5px] leading-[1.55]" : "mt-2 text-[13.5px] leading-[1.65]"} line-clamp-3 text-[#bcbcc2]`}>{summary}</div> : null}
+      </div>
       </div>
 
       {metrics.length ? (
@@ -136,11 +140,12 @@ export function AgentCall({
 
       {bullets.length ? (
         <div className={`${density === "compact" ? "mt-3 gap-1.5" : "mt-5 gap-2.5"} grid`}>
-          {bullets.map((bullet, index) => (
+          {visibleBullets.map((bullet, index) => (
             <div key={index} className={`flex gap-2.5 leading-[1.55] text-[#cfcfd4] ${density === "compact" ? "text-[12px]" : "text-[13px]"}`}>
-              <span style={{ color }}>●</span><span>{bullet}</span>
+              <span className="mt-[7px] h-1.5 w-1.5 flex-none rounded-full" style={{ background: color }} /><span className="line-clamp-2">{bullet}</span>
             </div>
           ))}
+          {hiddenBullets.length ? <details className="mt-1 rounded-[8px] border border-white/[0.06] bg-black/10 px-3 py-2"><summary className="cursor-pointer text-[9.5px] font-bold" style={{ color }}>Show {hiddenBullets.length} more insight{hiddenBullets.length === 1 ? "" : "s"}</summary><div className="mt-2 grid gap-2">{hiddenBullets.map((bullet, index) => <div key={index} className={`flex gap-2.5 leading-[1.55] text-[#b8b8c0] ${density === "compact" ? "text-[11px]" : "text-[12px]"}`}><span style={{ color }}>•</span><span>{bullet}</span></div>)}</div></details> : null}
         </div>
       ) : null}
 

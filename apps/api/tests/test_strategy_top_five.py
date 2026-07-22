@@ -39,6 +39,25 @@ def _pick(symbol: str) -> dict[str, object]:
 
 
 class StrategyTopFiveTests(unittest.TestCase):
+    def test_analyst_ranking_context_is_bounded_and_symbol_scoped(self) -> None:
+        context = analysis._analyst_ranking_context({
+            "rankingContext": {
+                "ticker": "aapl",
+                "rank": 1,
+                "total": 5,
+                "mode": "long",
+                "strategyLabel": "Long-Term",
+                "action": "ACCUMULATE",
+                "conviction": 84,
+                "reason": "Best compounder in the screened set.",
+            }
+        }, "AAPL")
+
+        self.assertEqual(context["rank"], 1)
+        self.assertEqual(context["mode"], "long")
+        self.assertIn("relative rank", context["interpretation"])
+        self.assertIsNone(analysis._analyst_ranking_context({"rankingContext": {"ticker": "MSFT"}}, "AAPL"))
+
     def test_request_requires_five_to_forty_unique_normalized_candidates(self) -> None:
         request = StrategyRecommendationRequest(
             strategy="momentum",

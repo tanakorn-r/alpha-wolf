@@ -200,7 +200,7 @@ export function useDailyBrief() {
         feature: "today",
         subject: row.symbol,
         agent: activeAgentId,
-        variantPrefix: `v23:${row.strategy}:`,
+        variantPrefix: `v26:${row.strategy}:`,
         signal: controller.signal,
       }).catch(() => null),
     }))).then((saved) => {
@@ -276,7 +276,7 @@ export function useDailyBrief() {
 }
 
 function dailyBriefCacheKey(accountScope: string, symbol: string, strategy: string, agentId: string) {
-  return `${accountScope}:persona-v24-agent-evidence-consistency:daily-brief:${symbol}:${strategy}:${agentId}`;
+  return `${accountScope}:persona-v27-adaptive-research-challenge:daily-brief:${symbol}:${strategy}:${agentId}`;
 }
 
 function buildHoldingRow({

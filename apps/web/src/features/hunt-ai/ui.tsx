@@ -8,7 +8,7 @@ type ProgressStep = {
   sub: string;
 };
 
-export type LoadingTask = "analyst" | "valuation" | "forecast" | "strategy" | "portfolio" | "intraday" | "deep" | "timing";
+export type LoadingTask = "analyst" | "valuation" | "forecast" | "strategy" | "portfolio" | "intraday" | "deep" | "timing" | "history";
 
 const AGENT_NAMES: Record<string, string> = {
   vera: "Vera",
@@ -37,6 +37,7 @@ export function agentLoadingTitle(agentId: string | undefined, task: LoadingTask
     if (task === "timing") return `Kai is mapping when to send ${target}`;
   }
   if (task === "analyst" || task === "deep") return `${name} is analyzing ${target}`;
+  if (task === "history") return `${name} is reconstructing ${target}'s history`;
   if (task === "valuation") return `${name} is checking ${target}'s price discipline`;
   if (task === "forecast") return `${name} is forecasting the next 10 days for ${target}`;
   if (task === "strategy") return `${name} is building the strategy playbook`;
@@ -71,6 +72,16 @@ export function PremiumLoading({ title, subject, steps, agentId, task, onClose }
 
 function agentSteps(steps: ProgressStep[], agentId?: string, task?: LoadingTask) {
   if (!agentId || !task) return steps;
+  if (task === "history") {
+    const horizon = agentId === "kai" ? "the last 3–4 months" : agentId === "rex" ? "the last 12 months" : "the last five years";
+    return [
+      { label: `Mapping ${horizon}`, sub: "price regimes · inflection points · drawdowns" },
+      { label: "Matching events to the chart", sub: "filings · earnings · news · macro shifts" },
+      { label: "Testing cause against coincidence", sub: "timing · primary evidence · market reaction" },
+      { label: "Comparing this year with history", sub: "better · worse · mixed · too early" },
+      { label: `${agentName(agentId)} draws the lesson`, sub: "persona lens · risks · forward conditions" },
+    ];
+  }
   if (agentId === "kai") {
     if (task === "valuation") {
       return [

@@ -15,7 +15,7 @@ import { TickerPerformanceChart } from "../../components/charts/TickerPerformanc
 import alphaWolfIcon from "../../assets/icons/alphawolf-icon.png";
 import { formatBig, formatCurrency, formatMoney, formatMultiple, formatNumber, formatPercent, formatShortDate } from "../../lib/format";
 import { formatLocalDateTime } from "../../lib/locale";
-import { buyHolding, loadAgents, loadAuthUser, loadMarketComparison, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
+import { buyHolding, loadAgents, loadAuthUser, loadMarketComparison, loadNewsResearch, loadPortfolio, loadQuantPerspective, loadStockDetail, loadStockResearch, summarizeStock, type AgentBadge, type MarketComparisonResponse, type NewsResearchHorizon, type NewsResearchResponse, type NewsResearchSource, type QuantPerspectiveResponse, type StockAnalysisResponse, type StockDetailResponse, type StockNewsItem, type StockResearchResponse } from "../../lib/api";
 import { negative, positive } from "../../lib/ui";
 import { actionPositionLabel, actionPositionTone } from "../../lib/actionPosition";
 import { useWolfStore } from "../../store/useWolfStore";
@@ -42,6 +42,9 @@ export function StockDetailDrawer() {
   const [analyzing, setAnalyzing] = useState(false);
   const [huntAdvice, setHuntAdvice] = useState<QuantPerspectiveResponse | null>(null);
   const [huntLoading, setHuntLoading] = useState(false);
+  const [newsResearch, setNewsResearch] = useState<NewsResearchResponse | null>(null);
+  const [newsResearchLoading, setNewsResearchLoading] = useState(false);
+  const [newsResearchError, setNewsResearchError] = useState("");
   const [error, setError] = useState("");
   const [tab, setTab] = useState<ResearchTab>("overview");
   const [addStatus, setAddStatus] = useState("");
@@ -71,6 +74,7 @@ export function StockDetailDrawer() {
   const accountScope = authQuery.data?.id ? `user:${authQuery.data.id}` : "signed-out";
   const analysisCacheKey = `${accountScope}:persona-v23-score-action-consistency:stock-detail:${selectedSymbol}:${selectedStrategy}:${selectedMode ?? "default"}:${activeAgentId}`;
   const quantCacheKey = `${accountScope}:persona-v23-score-action-consistency:stock-quant:${selectedSymbol}:${selectedStrategy}:${selectedMode ?? "default"}:${activeAgentId}`;
+  const newsResearchCacheKey = `${accountScope}:news-research-v4-adaptive-challenge:${selectedSymbol}:${activeAgentId}`;
   const researchQuery = useQuery({
     queryKey: ["stock-research", selectedSymbol],
     queryFn: () => loadStockResearch(selectedSymbol),
@@ -141,13 +145,17 @@ export function StockDetailDrawer() {
     setError("");
     const savedAnalysis = getHuntAiCache<StockAnalysisResponse>(analysisCacheKey)?.data;
     const savedQuant = getHuntAiCache<QuantPerspectiveResponse>(quantCacheKey)?.data;
+    const savedNewsResearch = getHuntAiCache<NewsResearchResponse>(newsResearchCacheKey)?.data;
     setAnalysis(savedAnalysis?.agent?.id === activeAgentId ? savedAnalysis : null);
     setHuntAdvice(savedQuant?.agent?.id === activeAgentId ? savedQuant : null);
+    setNewsResearch(savedNewsResearch?.agent?.id === activeAgentId ? savedNewsResearch : null);
+    setNewsResearchLoading(false);
+    setNewsResearchError("");
     setTab("overview");
     setAddOpen(false);
     setAddStatus("");
     setPendingRetryAttempt(0);
-  }, [detailOpen, selectedSymbol, activeAgentId, analysisCacheKey, quantCacheKey, getHuntAiCache]);
+  }, [detailOpen, selectedSymbol, activeAgentId, analysisCacheKey, quantCacheKey, newsResearchCacheKey, getHuntAiCache]);
 
   useEffect(() => {
     if (!detailOpen || !detail?.dataPending || pendingRetryAttempt >= DETAIL_PENDING_RETRY_DELAYS_MS.length) return;
@@ -197,6 +205,25 @@ export function StockDetailDrawer() {
       setError("Alpha Hunt is unavailable. Check the API configuration.");
     } finally {
       setHuntLoading(false);
+    }
+  }
+
+  async function researchLatestNews(force = false) {
+    if (!selectedSymbol) return;
+    if (!authQuery.data?.id) {
+      setSignInOpen(true);
+      return;
+    }
+    setNewsResearchError("");
+    setNewsResearchLoading(true);
+    try {
+      const result = await loadNewsResearch(selectedSymbol, selectedStrategy, activeAgentId, force);
+      setNewsResearch(result);
+      setHuntAiCache(newsResearchCacheKey, { analyzedAt: result.generatedAt ?? new Date().toISOString(), data: result });
+    } catch (err) {
+      setNewsResearchError(err instanceof Error ? err.message : "News research is unavailable.");
+    } finally {
+      setNewsResearchLoading(false);
     }
   }
 
@@ -277,7 +304,7 @@ export function StockDetailDrawer() {
               {tab === "overview" ? (
                 <DetailContent detail={detail} huntAdvice={huntAdvice} huntLoading={huntLoading} onHunt={runAlphaHunt} activeAgentId={activeAgentId} />
               ) : tab === "news" ? (
-                <NewsSection detail={detail} research={researchQuery.data ?? null} researchLoading={researchQuery.isPending} />
+                <NewsSection detail={detail} research={researchQuery.data ?? null} researchLoading={researchQuery.isPending} newsResearch={newsResearch} newsResearchLoading={newsResearchLoading} newsResearchError={newsResearchError} onResearch={researchLatestNews} />
               ) : tab === "market" ? (
                 marketQuery.isPending ? <DetailSkeleton symbol={selectedSymbol} /> : marketQuery.isError ? <LazyTabError label="Market comparison" onRetry={() => void marketQuery.refetch()} /> : <MarketResearch market={marketQuery.data ?? null} analyzing={analyzing} onAnalyze={() => analyze(Boolean(analysis))} agent={activeAgent} />
               ) : researchQuery.isPending ? (
@@ -302,7 +329,7 @@ function ResearchTabs({ ref, active, onSelect }: { ref: React.Ref<HTMLDivElement
     { key: "financials", label: "Financials" },
     { key: "calendar", label: "Calendar" },
     { key: "market", label: "Market" },
-    { key: "news", label: "News" },
+    { key: "news", label: "News & Catalysts" },
   ];
   return (
     <div ref={ref} className="sticky top-0 z-20 flex gap-1 overflow-x-auto rounded-[var(--aw-radius-control)] border border-[#2a2a31] bg-[#111113] p-1 backdrop-blur [scrollbar-width:none]">
@@ -405,20 +432,29 @@ function ReturnCard({ label, value, badge, good, description, tone }: { label: s
   return <DrawerMetric label={label} value={formatPercent(value)} tone={metricTone} detail={description ?? "12-month total return"} badge={badgeNode} />;
 }
 
-function NewsSection({ detail, research, researchLoading }: { detail: StockDetailResponse; research: StockResearchResponse | null; researchLoading: boolean }) {
+function NewsSection({ detail, research, researchLoading, newsResearch, newsResearchLoading, newsResearchError, onResearch }: { detail: StockDetailResponse; research: StockResearchResponse | null; researchLoading: boolean; newsResearch: NewsResearchResponse | null; newsResearchLoading: boolean; newsResearchError: string; onResearch: (force?: boolean) => void }) {
   const news = [...(detail.news ?? [])].sort((a, b) => newsTime(b) - newsTime(a));
-  const action = detail.verdict?.action;
-  const tone: MetricTone = action === "BUY" || action === "BUY SETUP" ? "good" : action === "PASS" ? "bad" : action === "WAIT" ? "warn" : "neutral";
-  const color = newsToneColor(tone);
+  const color = newsResearch ? researchToneColor(newsResearch.tone) : "#74a4ff";
   const events = research ? upcomingEvents(research) : [];
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3 rounded-[var(--aw-radius-card)] border p-4" style={{ borderColor: `${color}66`, background: `${color}0d` }}>
-        <span className="grid h-6 w-6 shrink-0 place-items-center" style={{ color: "#74a4ff" }}>
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l1.6 4.3L14 7l-4.4 1.2L8 12.5 6.4 8.2 2 7l4.4-1.2L8 1.5z" fill="currentColor"/></svg>
-        </span>
-        <div className="text-[17px] font-bold leading-tight text-[#ececee]">{newsHeadline(detail, news.length)}</div>
+      <div className="flex flex-col gap-4 rounded-[var(--aw-radius-card)] border p-4 min-[720px]:flex-row min-[720px]:items-center min-[720px]:justify-between" style={{ borderColor: `${color}66`, background: `${color}0d` }}>
+        <div className="min-w-0">
+          <div className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color }}>News &amp; Catalysts</div>
+          <div className="mt-1 text-[17px] font-bold leading-tight text-[#ececee]">{newsResearch?.headline ?? `Research what could move ${detail.stock.symbol}`}</div>
+          <div className="mt-1.5 max-w-[660px] text-[12.5px] leading-[1.55] text-[#8c8c95]">{newsResearch?.summary ?? `${news.length} feed headline${news.length === 1 ? "" : "s"} found. Ask your Agent to search current web sources and separate short-, medium-, and long-term impact.`}</div>
+        </div>
+        <AgentActionButton agent={newsResearch?.agent} fallbackName="Agent" label={newsResearchLoading ? "Researching" : newsResearch ? "Refresh research" : "Research latest news"} sublabel={newsResearchLoading ? "Searching live sources" : "Uses 1 AI token"} loading={newsResearchLoading} disabled={newsResearchLoading} onClick={() => onResearch(Boolean(newsResearch))} className="shrink-0" />
+      </div>
+
+      {newsResearchError ? <div className={`${panel} text-[12px] text-[#f2575c]`}>{newsResearchError}</div> : null}
+      {newsResearchLoading && !newsResearch ? <div className={`${panel} flex items-center gap-3 py-5 text-[12.5px] text-[#8c8c95]`}><LoadingSpinner size={16} className="text-[#74a4ff]" /><div><div className="font-semibold text-[#ececee]">Searching and checking sources…</div><div className="mt-1">Ranking distinct events, then building three horizon scenarios.</div></div></div> : null}
+      {newsResearch ? <NewsResearchPanel value={newsResearch} /> : null}
+
+      <div className="flex items-end justify-between gap-3 pt-1">
+        <div><div className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#8c8c95]">Fast detail feed</div><div className="mt-1 text-[11px] text-[#5f5f68]">Unverified headlines shown immediately; Agent research above carries the interpreted view.</div></div>
+        <span className="shrink-0 font-mono text-[11px] text-[#5f5f68]">{news.length} items</span>
       </div>
 
       {news.length ? (
@@ -449,6 +485,58 @@ function NewsSection({ detail, research, researchLoading }: { detail: StockDetai
       ) : null}
     </div>
   );
+}
+
+function NewsResearchPanel({ value }: { value: NewsResearchResponse }) {
+  const gridClass = value.horizons.length === 1 ? "min-[760px]:grid-cols-1" : value.horizons.length === 2 ? "min-[760px]:grid-cols-2" : "min-[760px]:grid-cols-3";
+  return <>
+    <div className="rounded-[var(--aw-radius-card)] border border-[#74a4ff]/25 bg-[#74a4ff]/[0.06] px-4 py-3 text-[11.5px] leading-[1.55] text-[#9ebcff]"><b className="text-[#c6d7ff]">Agent research focus:</b> {value.researchFocus}</div>
+    <div className={`grid gap-3 ${gridClass}`}>
+      {value.horizons.map((item) => <NewsHorizonCard key={`${item.label}-${item.window}`} value={item} />)}
+    </div>
+    <div className="overflow-hidden rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#121214]">
+      <div className="flex items-center justify-between border-b border-[#24242a] px-4 py-3">
+        <div><div className="text-[12px] font-bold text-[#ececee]">Ranked web sources</div><div className="mt-0.5 text-[10.5px] text-[#5f5f68]">Distinct sources consulted by the Agent · open to verify</div></div>
+        <span className="font-mono text-[11px] text-[#74a4ff]">{value.sources.length}/10</span>
+      </div>
+      {value.sources.map((source, index) => <NewsResearchSourceRow key={`${source.url}-${index}`} source={source} rank={index + 1} />)}
+    </div>
+  </>;
+}
+
+function NewsHorizonCard({ value }: { value: NewsResearchHorizon }) {
+  const color = researchDirectionColor(value.direction);
+  return <div className="rounded-[var(--aw-radius-card)] border border-[#2a2a31] bg-[#151518] p-3.5">
+    <div className="flex items-center justify-between gap-2"><div className="text-[10px] font-bold uppercase tracking-[0.13em] text-[#8c8c95]">{value.label}</div><span className="rounded px-2 py-0.5 text-[9px] font-bold" style={{ color, background: `${color}18` }}>{value.direction}</span></div>
+    <div className="mt-2 text-[11px] font-mono" style={{ color }}>{value.window} · {value.confidence}% confidence</div>
+    <p className="mt-2 text-[12px] leading-[1.55] text-[#cfcfd4]">{value.thesis}</p>
+    <div className="mt-2 text-[10px] font-mono text-[#74a4ff]">Evidence: {value.sourceRanks.map((rank) => `Source ${rank}`).join(" · ")}</div>
+    <div className="mt-3 border-t border-[#24242a] pt-2 text-[10.5px] leading-[1.5] text-[#6f6f78]"><b className="text-[#8c8c95]">Changes if:</b> {value.invalidation}</div>
+  </div>;
+}
+
+function NewsResearchSourceRow({ source, rank }: { source: NewsResearchSource; rank: number }) {
+  const color = researchDirectionColor(source.sentiment);
+  const date = source.publishedAt ? formatShortDate(source.publishedAt) : "Date unavailable";
+  return <a href={source.url} target="_blank" rel="noreferrer" className="flex gap-3 border-t border-[#202026] px-4 py-3.5 first:border-t-0 hover:bg-[#17171a]">
+    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#202026] font-mono text-[10px] text-[#8c8c95]">{rank}</span>
+    <span className="min-w-0 flex-1"><span className="block text-[13px] font-semibold leading-snug text-[#ececee]">{source.title}</span><span className="mt-1 block text-[11.5px] leading-[1.5] text-[#8c8c95]">{source.whyItMatters}</span><span className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1 text-[10px] text-[#5f5f68]"><span>{source.publisher}</span><span>·</span><span>{date}</span><span>·</span><span>{source.eventType}</span><span>·</span><span>{source.horizon}</span></span></span>
+    <span className="shrink-0 self-start rounded px-2 py-1 font-mono text-[9px] font-bold" style={{ color, background: `${color}18` }}>{source.relevance}%</span>
+  </a>;
+}
+
+function researchDirectionColor(direction: NewsResearchHorizon["direction"] | NewsResearchSource["sentiment"]) {
+  if (direction === "BULLISH") return "#3ecf8e";
+  if (direction === "BEARISH") return "#f2575c";
+  if (direction === "MIXED") return "#f5c451";
+  return "#74a4ff";
+}
+
+function researchToneColor(tone: NewsResearchResponse["tone"]) {
+  if (tone === "good") return "#3ecf8e";
+  if (tone === "bad") return "#f2575c";
+  if (tone === "warn") return "#f5c451";
+  return "#74a4ff";
 }
 
 function NewsItemRow({ item }: { item: StockNewsItem }) {
@@ -522,22 +610,6 @@ function headlineSentimentColor(title: string): string {
   if (bull && !bear) return "#3ecf8e";
   if (bear && !bull) return "#f2575c";
   return "#8c8c95";
-}
-
-function newsHeadline(detail: StockDetailResponse, count: number) {
-  const action = detail.verdict?.action;
-  if (!count) return "No fresh news in the detail feed.";
-  if (action === "BUY" || action === "BUY SETUP") return "News is bullish. Structure supports the next 6–12 months.";
-  if (action === "PASS") return "News is cautious. The structure is not supportive yet.";
-  if (action === "WAIT") return "News is mixed. Wait for a cleaner setup.";
-  return "News is neutral. Latest headlines for this stock.";
-}
-
-function newsToneColor(tone: MetricTone) {
-  if (tone === "good") return "#3ecf8e";
-  if (tone === "warn") return "#f5c451";
-  if (tone === "bad") return "#f2575c";
-  return "#74a4ff";
 }
 
 function ResearchContent({ tab, research, detail }: { tab: ResearchTab; research: StockResearchResponse | null; detail: StockDetailResponse }) {

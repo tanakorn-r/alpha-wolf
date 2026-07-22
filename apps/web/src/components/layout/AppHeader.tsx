@@ -16,7 +16,8 @@ export function AppHeader() {
   const setActiveAgent = useWolfStore((state) => state.setActiveAgent);
   const { data: agents = [] } = useQuery({ queryKey: ["agents"], queryFn: loadAgents, staleTime: 3_600_000 });
   const notifications = useQuery({ queryKey: ["notifications"], queryFn: loadNotifications, staleTime: 60_000, retry: 0 });
-  const activeAgent = agents.find((agent) => agent.id === activeAgentId) ?? agents[0];
+  const isLiveTrade = location.pathname === "/live-trade";
+  const activeAgent = isLiveTrade ? agents.find((agent) => agent.id === "dante") : agents.find((agent) => agent.id === activeAgentId) ?? agents[0];
   if (location.pathname === "/") return null;
   const isHuntAi = location.pathname === "/hunt-ai";
   const page = location.pathname === "/scanner"
@@ -24,7 +25,7 @@ export function AppHeader() {
     : location.pathname === "/daily-brief"
       ? { title: "Daily Brief", subtitle: "Ask your AI what deserves attention today" }
     : location.pathname === "/live-trade"
-      ? { title: "Live Trade", subtitle: "TradingView chart plus live US screener reads" }
+      ? { title: "Live Trade", subtitle: "Dante's exclusive cross-asset execution desk" }
     : isHuntAi
       ? { title: "Hunt AI", subtitle: "Choose a stock, ask one clear question, and get an Agent action sheet" }
     : location.pathname === "/calendar"
@@ -46,21 +47,21 @@ export function AppHeader() {
           {(notifications.data?.unread ?? 0) > 0 ? <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-[#f2575c]" /> : null}
         </button>
         {activeAgent ? (
-          <button type="button" onClick={() => setAgentOpen(true)} className="flex h-[38px] items-center gap-2 rounded-[8px] border border-[#2a2a31] bg-[#161619] px-2.5 text-left text-[#bcbcc2] hover:border-[#5a5a62] max-[899px]:h-[34px] max-[899px]:px-1" aria-label={`Choose agent, active ${activeAgent.name}`}>
+          <button type="button" onClick={() => { if (!isLiveTrade) setAgentOpen(true); }} className={`flex h-[38px] items-center gap-2 rounded-[8px] border bg-[#161619] px-2.5 text-left text-[#bcbcc2] max-[899px]:h-[34px] max-[899px]:px-1 ${isLiveTrade ? "cursor-default border-[#ff4655]/35" : "border-[#2a2a31] hover:border-[#5a5a62]"}`} aria-label={isLiveTrade ? `${activeAgent.name}, exclusive Live Trade agent` : `Choose agent, active ${activeAgent.name}`}>
             <span className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-[6px] border font-mono text-[9.5px] font-extrabold" style={{ color: activeAgent.color, borderColor: `${activeAgent.color}55`, background: `${activeAgent.color}18` }}>
               {activeAgent.avatarUrl ? <img src={activeAgent.avatarUrl} alt="" className="h-full w-full object-cover" /> : activeAgent.mono}
             </span>
             <span className="hidden min-w-0 sm:block">
-              <span className="block text-[8.5px] font-bold uppercase tracking-[0.14em] text-[#5a5a62]">{activeAgent.premium ? "Pro Agent" : "Agent"}</span>
+              <span className="block text-[8.5px] font-bold uppercase tracking-[0.14em] text-[#5a5a62]">{isLiveTrade ? "Live Agent" : activeAgent.premium ? "Pro Agent" : "Agent"}</span>
               <span className="block max-w-[118px] truncate text-[11.5px] font-bold leading-[1.1] text-[#ececee]">{activeAgent.name}</span>
             </span>
-            <span className="text-[10px] text-[#5a5a62] max-[899px]:hidden">⌄</span>
+            {!isLiveTrade ? <span className="text-[10px] text-[#5a5a62] max-[899px]:hidden">⌄</span> : null}
           </button>
         ) : null}
         <GoogleAccount />
         <span className="font-mono text-[11px] text-[#5a5a62] max-[899px]:hidden">{formatLocalDate(new Date(), { weekday: "short", month: "short", day: "numeric", year: "numeric" })}</span>
       </div>
-      {agentOpen ? (
+      {agentOpen && !isLiveTrade ? (
         <AgentPickerModal
           activeAgentId={activeAgentId}
           onClose={() => setAgentOpen(false)}

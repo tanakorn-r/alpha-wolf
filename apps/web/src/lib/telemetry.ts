@@ -36,6 +36,7 @@ const FLOWS = new Set([
   "intraday_analysis",
   "strategy_analysis",
   "analyst_report",
+  "historical_analysis",
   "ai_replay",
 ]);
 const PAGE_BY_PATH: Record<string, string> = {

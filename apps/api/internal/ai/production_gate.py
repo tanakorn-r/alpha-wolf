@@ -19,6 +19,8 @@ PROMPT_VERSIONS: dict[str, str] = {
     "next-10": "next-10/production-v1",
     "strategy": "strategy/production-v1",
     "portfolio": "portfolio/production-v1",
+    "news-research": "news-research/production-v1",
+    "history": "history/production-v1",
 }
 
 _TACTICAL_WORDS = ("volume", "breakout", "pullback", "support", "resistance", "stop", "trim", "exit", "momentum", "trend")

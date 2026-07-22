@@ -5,10 +5,12 @@ import {
   deleteResearchShortlist,
   deletePortfolioWatchlistSymbol,
   loadBuyTiming,
+  loadHistoricalAnalysis,
   loadAuthUser,
   loadDiscoveries,
   loadLatestAiResult,
   loadAnalystReport,
+  loadNewsResearch,
   redeemPremiumPromo,
   loadPortfolio,
   loadPortfolioWatchlist,
@@ -21,7 +23,9 @@ import {
   saveResearchShortlist,
   summarizeStock,
   type BuyTimingResponse,
+  type HistoricalAnalysisResponse,
   type AnalystBriefResponse,
+  type NewsResearchResponse,
   type PortfolioReviewResponse,
   type StockAnalysisResponse,
   type StockDetailResponse,
@@ -41,6 +45,7 @@ export type HuntAi = ReturnType<typeof useHuntAi>;
 type AnalystReport = {
   detail: StockDetailResponse;
   analysis: AnalystBriefResponse;
+  newsResearch?: NewsResearchResponse | null;
 };
 
 type AgentStamped = {
@@ -49,10 +54,13 @@ type AgentStamped = {
 
 type PersistedStrategy = { mode: StratMode; prompt: string; analysis: StrategyPlaybookResponse };
 type PersistedReplay = { jobId: string };
+type AnalystRunError = { phase: "news_research" | "analysis"; message: string };
 
 // Bump when persona reasoning changes so persisted browser reports cannot make a newly fixed
 // Agent appear to repeat an older, generic answer.
 const AGENT_REASONING_CACHE_VERSION = "persona-v25-spoken-emotional-voice";
+const STRATEGY_UNIVERSE_CACHE_VERSION = "local-company-universe-v2";
+const ANALYST_DECISION_CACHE_VERSION = "research-weighted-rating-v21";
 const RESEARCH_SHORTLIST_STORAGE_KEY = "alphawolf:research-shortlist:v1";
 const modeStrategy: Record<StratMode, string> = {
   swing: "momentum",
@@ -93,6 +101,15 @@ function matchesAgent<T extends AgentStamped | null | undefined>(data: T, agentI
   return data?.agent?.id === agentId;
 }
 
+function matchesRankingContext(
+  analysis: AnalystBriefResponse | null | undefined,
+  ranking: { rank: number; total: number; mode: StratMode } | null,
+) {
+  const saved = analysis?.shortlistRankingContext;
+  if (!ranking) return !saved;
+  return saved?.rank === ranking.rank && saved.total === ranking.total && saved.mode === ranking.mode;
+}
+
 function technicalTapeNeedsRefresh(detail: StockDetailResponse | undefined): boolean {
   if (!detail) return false;
   if (detail.dataPending) return true;
@@ -122,10 +139,15 @@ export function useHuntAi() {
   const [analystTicker, setAnalystTicker] = useState("");
   const [analystDetail, setAnalystDetail] = useState<StockDetailResponse | null>(null);
   const [analystAnalysis, setAnalystAnalysis] = useState<AnalystBriefResponse | null>(null);
+  const [analystNewsResearch, setAnalystNewsResearch] = useState<NewsResearchResponse | null>(null);
   const [analystLoading, setAnalystLoading] = useState(false);
-  const [analystStage, setAnalystStage] = useState<"market_data" | "analysis">("market_data");
+  const [analystStage, setAnalystStage] = useState<"news_research" | "market_data" | "analysis">("news_research");
+  const [analystRunError, setAnalystRunError] = useState<AnalystRunError | null>(null);
   const [technicalAnalysis, setTechnicalAnalysis] = useState<TechnicalAnalysisResponse | null>(null);
   const [technicalAiLoading, setTechnicalAiLoading] = useState(false);
+  const [historyAnalysis, setHistoryAnalysis] = useState<HistoricalAnalysisResponse | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const [intradayAnalysis, setIntradayAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [intradayAiLoading, setIntradayAiLoading] = useState(false);
   const [n100Timeframe, setN100Timeframe] = useState<N100Timeframe>("1D");
@@ -152,11 +174,11 @@ export function useHuntAi() {
   const authenticated = Boolean(authQuery.data?.id);
   const premium = Boolean(authQuery.data?.proActive);
   const n100QuotaUsed = authQuery.data?.aiUsage?.used ?? 0;
-  const strategyCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:strategy:last:${activeAgentId}`;
+  const strategyCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:${STRATEGY_UNIVERSE_CACHE_VERSION}:strategy:last:${activeAgentId}`;
   const strategyCached = getHuntAiCache<PersistedStrategy>(strategyCacheKey);
   const savedStrategyQuery = useQuery({
     queryKey: ["saved-ai", accountScope, "strategy", activeAgentId],
-    queryFn: ({ signal }) => loadLatestAiResult<StrategyPlaybookResponse>({ feature: "strategy", subject: "universe", agent: activeAgentId, variantPrefix: "v7:", signal }),
+    queryFn: ({ signal }) => loadLatestAiResult<StrategyPlaybookResponse>({ feature: "strategy", subject: "universe", agent: activeAgentId, variantPrefix: "v8:", signal }),
     enabled: authenticated,
     staleTime: Infinity,
     gcTime: Infinity,
@@ -238,6 +260,11 @@ export function useHuntAi() {
   const shortlistSymbols = serverShortlist.length ? serverShortlist : localShortlist;
   const symbols = Array.from(new Set([...shortlistSymbols, ...holdingSymbols, ...watchingSymbols]));
   const activeTicker = selectedTicker || symbols[0] || "";
+  const analystStrategy = modeStrategy[stratMode];
+  const activeRankingIndex = stratDraft.findIndex((pick) => pick.ticker === activeTicker);
+  const activeRanking = activeRankingIndex >= 0
+    ? { rank: activeRankingIndex + 1, total: stratDraft.length, mode: stratMode, label: STRAT_CARDS.find((card) => card.key === stratMode)?.label ?? stratMode }
+    : null;
   const replayCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:replay:${activeTicker}:${activeAgentId}`;
   const replayCached = getHuntAiCache<PersistedReplay>(replayCacheKey);
   const debouncedAddQuery = useDebouncedValue(addQuery.trim(), DISCOVERY_DEBOUNCE_MS);
@@ -270,6 +297,8 @@ export function useHuntAi() {
     setStratDraft([]);
     setAnalystAnalysis(null);
     setAnalystDetail(null);
+    setAnalystNewsResearch(null);
+    setAnalystRunError(null);
     setIntradayAnalysis(null);
     setTechnicalAnalysis(null);
     setValuationRunKey(0);
@@ -410,14 +439,24 @@ export function useHuntAi() {
     queryFn: ({ signal }) => loadLatestAiResult<TechnicalAnalysisResponse>({ feature: "technical", subject: activeTicker, agent: activeAgentId, variantPrefix: "v12:", signal }),
     enabled: authenticated && premium && tab === "technical" && activatedTabs.has("technical") && Boolean(activeTicker), staleTime: Infinity, gcTime: Infinity, retry: 0,
   });
+  const savedHistoryQuery = useQuery({
+    queryKey: ["saved-ai", accountScope, "history", activeTicker, activeAgentId, analystStrategy],
+    queryFn: ({ signal }) => loadLatestAiResult<HistoricalAnalysisResponse>({ feature: "history", subject: activeTicker, agent: activeAgentId, variantPrefix: `v1:${analystStrategy}`, signal }),
+    enabled: authenticated && premium && tab === "history" && activatedTabs.has("history") && Boolean(activeTicker), staleTime: Infinity, gcTime: Infinity, retry: 0,
+  });
   const savedAnalystQuery = useQuery({
-    queryKey: ["saved-ai", accountScope, "analyst-report", activeTicker, activeAgentId],
-    queryFn: ({ signal }) => loadLatestAiResult<AnalystBriefResponse>({ feature: "analyst-report", subject: activeTicker, agent: activeAgentId, variantPrefix: "v15:capitalized:", signal }),
+    queryKey: ["saved-ai", accountScope, "analyst-report", activeTicker, activeAgentId, analystStrategy],
+    queryFn: ({ signal }) => loadLatestAiResult<AnalystBriefResponse>({ feature: "analyst-report", subject: activeTicker, agent: activeAgentId, variantPrefix: `v21:${analystStrategy}:`, signal }),
+    enabled: authenticated && premium && tab === "analyst" && activatedTabs.has("analyst") && Boolean(activeTicker), staleTime: Infinity, gcTime: Infinity, retry: 0,
+  });
+  const savedAnalystNewsQuery = useQuery({
+    queryKey: ["saved-ai", accountScope, "news-research", activeTicker, activeAgentId],
+    queryFn: ({ signal }) => loadLatestAiResult<NewsResearchResponse>({ feature: "news-research", subject: activeTicker, agent: activeAgentId, variantPrefix: "v4", signal }),
     enabled: authenticated && premium && tab === "analyst" && activatedTabs.has("analyst") && Boolean(activeTicker), staleTime: Infinity, gcTime: Infinity, retry: 0,
   });
   const savedAnalystDetailQuery = useQuery({
-    queryKey: ["saved-ai-detail", activeTicker, "capitalized"],
-    queryFn: () => loadStockDetail(activeTicker, "capitalized"),
+    queryKey: ["saved-ai-detail", activeTicker, analystStrategy],
+    queryFn: () => loadStockDetail(activeTicker, analystStrategy),
     enabled: premium && tab === "analyst" && activatedTabs.has("analyst") && Boolean(savedAnalystQuery.data && activeTicker), staleTime: 180_000, retry: 0,
   });
 
@@ -426,19 +465,23 @@ export function useHuntAi() {
     setAnalystTicker("");
     setAnalystDetail(null);
     setAnalystAnalysis(null);
+    setAnalystNewsResearch(null);
+    setAnalystRunError(null);
     setTechnicalAnalysis(null);
+    setHistoryAnalysis(null);
+    setHistoryError("");
     setAiError("");
-  }, [activeTicker]);
-  const analystCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:analyst:${activeTicker}:${activeAgentId}`;
+  }, [activeTicker, analystStrategy]);
+  const analystCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:${ANALYST_DECISION_CACHE_VERSION}:analyst:${activeTicker}:${analystStrategy}:${activeAgentId}`;
   const analystCached = getHuntAiCache<AnalystReport>(analystCacheKey);
   const analystLocalReport =
     analystTicker === activeTicker && analystDetail && analystAnalysis && matchesAgent(analystAnalysis, activeAgentId)
-      ? { analyzedAt: analystAnalysis.generatedAt ?? new Date().toISOString(), data: { detail: analystDetail, analysis: analystAnalysis } }
+      ? { analyzedAt: analystAnalysis.generatedAt ?? new Date().toISOString(), data: { detail: analystDetail, analysis: analystAnalysis, newsResearch: analystNewsResearch } }
       : null;
-  const analystSavedReport = savedAnalystQuery.data && savedAnalystDetailQuery.data && matchesAgent(savedAnalystQuery.data, activeAgentId)
-    ? { analyzedAt: savedAnalystQuery.data.generatedAt ?? "", data: { detail: savedAnalystDetailQuery.data, analysis: savedAnalystQuery.data } }
+  const analystSavedReport = savedAnalystQuery.data && savedAnalystDetailQuery.data && matchesAgent(savedAnalystQuery.data, activeAgentId) && matchesRankingContext(savedAnalystQuery.data, activeRanking)
+    ? { analyzedAt: savedAnalystQuery.data.generatedAt ?? "", data: { detail: savedAnalystDetailQuery.data, analysis: savedAnalystQuery.data, newsResearch: savedAnalystNewsQuery.data ?? null } }
     : undefined;
-  const analystReport = analystLocalReport ?? analystSavedReport ?? (matchesAgent(analystCached?.data.analysis, activeAgentId) ? analystCached : undefined);
+  const analystReport = analystLocalReport ?? analystSavedReport ?? (matchesAgent(analystCached?.data.analysis, activeAgentId) && matchesRankingContext(analystCached?.data.analysis, activeRanking) ? analystCached : undefined);
 
   const intradayAnalysisCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:intraday-ai:${activeTicker}:${activeAgentId}`;
   const intradayAnalysisCached = getHuntAiCache<StockAnalysisResponse>(intradayAnalysisCacheKey);
@@ -452,6 +495,12 @@ export function useHuntAi() {
     ? technicalAnalysis
     : savedTechnicalQuery.data?.symbol === activeTicker && matchesAgent(savedTechnicalQuery.data, activeAgentId) ? savedTechnicalQuery.data
     : technicalCached?.data.symbol === activeTicker && matchesAgent(technicalCached.data, activeAgentId) ? technicalCached.data : null;
+  const historyCacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:historical-analysis-v1:${activeTicker}:${analystStrategy}:${activeAgentId}`;
+  const historyCached = getHuntAiCache<HistoricalAnalysisResponse>(historyCacheKey);
+  const historyReport = historyAnalysis?.symbol === activeTicker && matchesAgent(historyAnalysis, activeAgentId)
+    ? historyAnalysis
+    : savedHistoryQuery.data?.symbol === activeTicker && matchesAgent(savedHistoryQuery.data, activeAgentId) ? savedHistoryQuery.data
+    : historyCached?.data.symbol === activeTicker && matchesAgent(historyCached.data, activeAgentId) ? historyCached.data : null;
 
   const n100CacheKey = `${accountScope}:${AGENT_REASONING_CACHE_VERSION}:${activeTicker}:${n100Timeframe}:${activeAgentId}`;
   const n100Cached = useWolfStore((s) => s.getNext10ReportCache(n100CacheKey));
@@ -499,7 +548,7 @@ export function useHuntAi() {
     setN100RunKey((value) => value + 1);
   }
 
-  const premiumTabs = new Set<HuntTab>(["brief", "timing", "technical", "replay", "analyst"]);
+  const premiumTabs = new Set<HuntTab>(["brief", "timing", "technical", "history", "replay", "analyst"]);
   function setTab(next: HuntTab) {
     setAiError("");
     void queryClient.cancelQueries({ queryKey: ["saved-ai"] });
@@ -671,6 +720,32 @@ export function useHuntAi() {
       },
     },
 
+    history: {
+      ticker: activeTicker,
+      analysis: historyReport,
+      loading: Boolean(activeTicker && historyLoading),
+      error: historyError,
+      async run(force = false) {
+        if (!activeTicker) return;
+        startFlow("historical_analysis");
+        setHistoryLoading(true);
+        setHistoryError("");
+        setAiError("");
+        try {
+          const result = await loadHistoricalAnalysis(activeTicker, analystStrategy, activeAgentId, force);
+          setHistoryAnalysis(result);
+          setHuntAiCache(historyCacheKey, { analyzedAt: result.generatedAt ?? new Date().toISOString(), data: result });
+          void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
+          finishFlow("historical_analysis", "success");
+        } catch (error) {
+          setHistoryError(error instanceof Error ? error.message : "Historical Analysis could not reconstruct this stock's history.");
+          finishFlow("historical_analysis", "failure");
+        } finally {
+          setHistoryLoading(false);
+        }
+      },
+    },
+
     intraday: {
       ticker: activeTicker,
       symbols,
@@ -836,13 +911,17 @@ export function useHuntAi() {
       ticker: analystTicker || activeTicker,
       activeTicker,
       holdingSymbols,
-      detail: analystReport?.data.detail ?? null,
-      analysis: analystReport?.data.analysis ?? null,
+      ranking: activeRanking,
+      strategyLabel: STRAT_CARDS.find((card) => card.key === stratMode)?.label ?? stratMode,
+      detail: analystRunError ? null : analystReport?.data.detail ?? null,
+      analysis: analystRunError ? null : analystReport?.data.analysis ?? null,
+      newsResearch: analystNewsResearch ?? analystReport?.data.newsResearch ?? savedAnalystNewsQuery.data ?? null,
       analyzedAt: analystReport?.analyzedAt ?? "",
       // Restoring a saved card is passive data hydration, not an active Agent run. Only an
       // explicit Analyze/Refresh action may show the Agent thinking state.
       loading: Boolean(activeTicker && analystLoading),
       stage: analystStage,
+      error: analystRunError,
       async run(ticker?: string, force = false) {
         const sym = (ticker || activeTicker).trim().toUpperCase();
         if (!sym) return;
@@ -850,18 +929,52 @@ export function useHuntAi() {
         setAnalystTicker(sym);
         setAnalystDetail(null);
         setAnalystAnalysis(null);
+        setAnalystNewsResearch(null);
+        setAnalystRunError(null);
         setAnalystLoading(true);
-        setAnalystStage("market_data");
+        setAnalystStage("news_research");
         setAiError("");
+        let phase: AnalystRunError["phase"] = "news_research";
         try {
-          const { detail, analysis } = await loadAnalystReport(sym, "capitalized", activeAgentId, force, setAnalystStage);
+          const newsResearch = await loadNewsResearch(sym, analystStrategy, activeAgentId, force);
+          if (newsResearch.refreshWarning) throw new Error(newsResearch.refreshWarning);
+          setAnalystNewsResearch(newsResearch);
+          setAnalystStage("market_data");
+          phase = "analysis";
+          // Always synthesize again after research so this report cannot return a cached
+          // decision created before the newly saved web evidence existed.
+          const rankingPick = stratDraft.find((pick) => pick.ticker === sym);
+          const rankingIndex = rankingPick ? stratDraft.indexOf(rankingPick) : -1;
+          const strategyCard = STRAT_CARDS.find((card) => card.key === stratMode);
+          const report = await loadAnalystReport(
+            sym,
+            analystStrategy,
+            activeAgentId,
+            true,
+            setAnalystStage,
+            rankingPick && rankingIndex >= 0
+              ? {
+                  ticker: sym,
+                  rank: rankingIndex + 1,
+                  total: stratDraft.length,
+                  mode: stratMode,
+                  strategyLabel: strategyCard?.label ?? stratMode,
+                  action: rankingPick.action,
+                  conviction: rankingPick.conviction,
+                  reason: rankingPick.reason,
+                }
+              : undefined,
+          );
+          if (report.refreshWarning) throw new Error(report.refreshWarning);
+          const { detail, analysis } = report;
           setAnalystDetail(detail);
           setAnalystAnalysis(analysis);
-          setHuntAiCache(`${accountScope}:${AGENT_REASONING_CACHE_VERSION}:analyst:${sym}:${activeAgentId}`, { analyzedAt: analysis.generatedAt ?? new Date().toISOString(), data: { detail, analysis } });
+          setHuntAiCache(`${accountScope}:${AGENT_REASONING_CACHE_VERSION}:${ANALYST_DECISION_CACHE_VERSION}:analyst:${sym}:${analystStrategy}:${activeAgentId}`, { analyzedAt: analysis.generatedAt ?? new Date().toISOString(), data: { detail, analysis, newsResearch } });
           void queryClient.invalidateQueries({ queryKey: ["auth-user"] });
           finishFlow("analyst_report", "success");
         } catch (error) {
-          setAiError(error instanceof Error ? error.message : "Stock Analyst could not generate a report for this ticker.");
+          setAnalystRunError({ phase, message: error instanceof Error ? error.message : "The Agent could not complete this run." });
+          setAiError("");
           finishFlow("analyst_report", "failure");
         } finally {
           setAnalystLoading(false);

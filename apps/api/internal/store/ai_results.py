@@ -36,6 +36,8 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "portfolio": ("verdict", "intro", "bullets"),
     "buy-timing": ("headline", "summary", "agentMonthlyPlan"),
     "next-10": ("headline", "thesis", "moves"),
+    "news-research": ("headline", "summary", "horizons", "sources"),
+    "history": ("headline", "summary", "timeline", "currentYear", "sources"),
 }
 
 

@@ -1,10 +1,38 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Request
+
+from internal.ai.access import claim_ai_run, release_ai_run
+from internal.ai.openai_client import OpenAIAnalysisError, analyze_live_trade_with_openai
 
 router = APIRouter(prefix="/api/live-trade", tags=["live-trade"])
+
+
+@router.post("/risk-review")
+def live_trade_risk_review(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    required = ("symbol", "direction", "timeframe", "entry", "stop", "tp1", "tp2", "coreThesis")
+    missing = [field for field in required if payload.get(field) in (None, "")]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing live-trade evidence: {', '.join(missing)}")
+    direction = str(payload.get("direction")).upper()
+    if direction not in {"LONG", "SHORT"}:
+        raise HTTPException(status_code=400, detail="Direction must be LONG or SHORT")
+    context = {
+        **payload,
+        "direction": direction,
+        "analysisMode": "existing_position_audit" if payload.get("positionOpen") else "pre_trade_review",
+        "currentUtc": datetime.now(timezone.utc).isoformat(),
+        "dataWarning": "TradingView quote data is supplied by the client. Treat unsupported market-structure or event claims as unverified.",
+    }
+    user_id, _ = claim_ai_run(request)
+    try:
+        return analyze_live_trade_with_openai(context)
+    except OpenAIAnalysisError as exc:
+        release_ai_run(user_id)
+        raise HTTPException(status_code=503, detail="Dante could not complete a reliable risk review. Your AI token was returned; please retry.") from exc
 
 
 @router.get("/screener")
@@ -19,7 +47,7 @@ def live_trade_screener(
     try:
         from tradingview_screener import Query as TvQuery, col
 
-        query = TvQuery().select("close", "change", "volume", "RSI", "RSI|5", "relative_volume_10d_calc")
+        query = TvQuery().select("close", "change", "volume", "RSI", "RSI|5", "RSI|15", "RSI|30", "RSI|60", "RSI|240", "change|5", "change|15", "change|60", "change|240", "relative_volume_10d_calc")
         if preset == "overbought":
             query = query.where(col("RSI") > 70).order_by("volume", ascending=False)
         elif preset == "oversold":
@@ -49,7 +77,7 @@ def live_trade_quote(symbol: str = Query(..., min_length=1, max_length=24)) -> d
         for field, value in _symbol_matchers(normalized):
             _, data = (
                 TvQuery()
-                .select("close", "change", "volume", "RSI", "RSI|5", "relative_volume_10d_calc")
+                .select("close", "change", "volume", "RSI", "RSI|5", "RSI|15", "RSI|30", "RSI|60", "RSI|240", "change|5", "change|15", "change|60", "change|240", "relative_volume_10d_calc")
                 .where(col(field) == value)
                 .limit(1)
                 .get_scanner_data()
@@ -81,6 +109,14 @@ def _normalize_row(row: dict[str, Any]) -> dict[str, Any]:
         "relativeVolume": rel_volume,
         "rsi": rsi,
         "rsi5": rsi5,
+        "rsi15": _number(row.get("RSI|15")),
+        "rsi30": _number(row.get("RSI|30")),
+        "rsi60": _number(row.get("RSI|60")),
+        "rsi240": _number(row.get("RSI|240")),
+        "change5": _number(row.get("change|5")),
+        "change15": _number(row.get("change|15")),
+        "change60": _number(row.get("change|60")),
+        "change240": _number(row.get("change|240")),
         "signal": _signal(change, rsi, rsi5, rel_volume),
     }
 

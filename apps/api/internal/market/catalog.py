@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -259,8 +260,18 @@ def _rescore_cached_record(record: dict[str, Any], region: str) -> dict[str, Any
     return record
 
 
+THAI_DR_SYMBOL_PATTERN = re.compile(r"\d{2}(?:\.BK)?$")
+
+
 def _is_supported_symbol(symbol: str, region: str) -> bool:
-    return not (region == "th" and symbol.upper().endswith("-R.BK"))
+    if region != "th":
+        return True
+    normalized = symbol.strip().upper()
+    # SET depositary receipts and DRx listings use a two-digit issuer suffix
+    # (for example PEP80, SINGTEL80, and TENCENT11). They trade in Thailand,
+    # but the underlying company is foreign, so they do not belong in the
+    # Thai-company preset or its Agent-ranking candidate pool.
+    return not normalized.endswith("-R.BK") and not THAI_DR_SYMBOL_PATTERN.search(normalized)
 
 
 def _is_supported_quote(quote: dict[str, Any], region: str) -> bool:

@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import requests
 from pydantic import BaseModel
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -50,6 +51,31 @@ class OpenAiStructuredRetryTests(unittest.TestCase):
         retry_payload = post.call_args_list[1].kwargs["json"]
         self.assertGreaterEqual(retry_payload["max_output_tokens"], 2000)
         self.assertIn("complete JSON object", retry_payload["instructions"])
+
+    def test_retries_when_adapter_exhausts_a_temporary_502(self) -> None:
+        responses = [
+            requests.ConnectionError("too many 502 error responses"),
+            _Response({"output_text": '{"value":"recovered"}'}),
+        ]
+        with (
+            patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}),
+            patch.object(openai_client._SESSION, "post", side_effect=responses) as post,
+            patch.object(openai_client.time, "sleep") as sleep,
+        ):
+            result = openai_client._run_openai_structured_request(
+                context={"symbol": "SIRI.BK", "run": "transient-502"},
+                schema_model=_Result,
+                schema_name="test_transient_result",
+                instructions="Return the result.",
+                max_output_tokens=100,
+            )
+
+        self.assertEqual(result.value, "recovered")
+        self.assertEqual(post.call_count, 2)
+        sleep.assert_called_once()
+        retry_payload = post.call_args_list[1].kwargs["json"]
+        self.assertEqual(retry_payload["max_output_tokens"], 100)
+        self.assertNotIn("complete JSON object", retry_payload["instructions"])
 
 
 if __name__ == "__main__":

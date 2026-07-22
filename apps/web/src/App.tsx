@@ -9,6 +9,7 @@ import { loadAppBootstrap, loadAuthUser } from "./lib/api";
 import { LocaleGate } from "./components/settings/LocalePreferences";
 import { OperationalTelemetry } from "./components/telemetry/OperationalTelemetry";
 import { trackEvent } from "./lib/telemetry";
+import { LiveTradeShell } from "./components/layout/LiveTradeShell";
 
 const AppLayout = lazy(() => import("./components/layout/AppLayout").then((module) => ({ default: module.AppLayout })));
 const DeepAnalysisPanel = lazy(() => import("./components/DeepAnalysisPanel").then((module) => ({ default: module.DeepAnalysisPanel })));
@@ -129,9 +130,9 @@ export default function App() {
         <Route path="/support" element={<SupportPage />} />
         <Route element={<BootstrapGate />}>
           <Route path="/" element={<LocaleGate><HomeRoute /></LocaleGate>} />
+          <Route path="/live-trade" element={<LocaleGate><LiveTradeShell><LiveTradePage /></LiveTradeShell></LocaleGate>} />
           <Route element={<LocaleGate><AppShell /></LocaleGate>}>
             <Route path="/daily-brief" element={<Navigate to="/hunt-ai?tab=brief" replace />} />
-            <Route path="/live-trade" element={<LiveTradePage />} />
             <Route path="/scanner" element={<StockHuntPage />} />
             <Route path="/deep-ai" element={<Navigate to="/hunt-ai" replace />} />
             <Route path="/hunt-ai" element={<HuntAiPage />} />

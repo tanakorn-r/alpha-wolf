@@ -7,6 +7,7 @@ import { clamp, formatAnalyzedAt } from "./lib";
 import { agentLoadingTitle, agentName, PremiumLoading } from "./ui";
 import type { HuntAi } from "./useHuntAi";
 import { getLocaleSettings } from "../../lib/locale";
+import { AiVisualSummary } from "../../components/ai/AiVisualSummary";
 
 export function SignalsTab({ hunt }: { hunt: HuntAi }) {
   const signals = hunt.signals;
@@ -79,7 +80,7 @@ function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: Val
     ? verdict.symbol
     : `${verdict.symbol} · ${verdict.name}`;
   return (
-    <div className="flex flex-col gap-2.5">
+    <div className="aw-result-product aw-result-verdict flex min-w-0 flex-col gap-2.5">
       <AgentCall
         agent={verdict.agent}
         label="Daily valuation"
@@ -102,6 +103,7 @@ function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: Val
           <TodayTape verdict={verdict} />
           <MetricGrid verdict={verdict} theme={theme} />
           <StructureBand band={band} />
+          <SignalEvidenceMix verdict={verdict} />
           <Evidence verdict={verdict} />
         </div>
       </AgentCall>
@@ -109,21 +111,47 @@ function ValuationVerdict({ verdict, analyzedAt, onRun, onOpen }: { verdict: Val
   );
 }
 
+function SignalEvidenceMix({ verdict }: { verdict: ValuationVerdictResponse }) {
+  const count = (tone: "GOOD" | "WATCH" | "BAD") => verdict.whatAiSees.filter((item) => item.tone === tone).length;
+  return <AiVisualSummary title="Evidence balance" subtitle="How the quick verdict is composed" segments={[{ label: "Supports", value: count("GOOD"), color: "#3ecf8e", icon: "+" }, { label: "Watch", value: count("WATCH"), color: "#f5c451", icon: "!" }, { label: "Against", value: count("BAD"), color: "#f2575c", icon: "−" }]} />;
+}
+
 function TodayTape({ verdict }: { verdict: ValuationVerdictResponse }) {
   const metrics = verdict.metrics;
-  const chase = buildChaseRead(verdict);
   const todayTone = (metrics.todayChangePct ?? 0) > 0 ? "#3ecf8e" : (metrics.todayChangePct ?? 0) < 0 ? "#f2575c" : "#ececee";
   const rangePosition = intradayPosition(metrics.currentPrice, metrics.dayLow, metrics.dayHigh);
+  const agentId = verdict.agent?.id ?? "vera";
   const hasTape = [metrics.todayChangePct, metrics.dayLow, metrics.dayHigh, metrics.volumeRatio, metrics.rsi14, metrics.resistance]
     .some((value) => typeof value === "number" && Number.isFinite(value));
 
   if (!hasTape) return null;
 
+  if (["ben", "vera", "sam"].includes(agentId)) {
+    const context = strategicQuoteContext(agentId);
+    return (
+      <section className="rounded-[10px] border border-[#2a2a31] bg-[#111114] px-3.5 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div><div className="text-[11px] font-bold text-[#ececee]">Today&apos;s quote context</div><div className="mt-0.5 text-[9.5px] text-[#5f5f68]">{context.subtitle}</div></div>
+          <span className="rounded-full border px-2.5 py-1 text-[8.5px] font-black uppercase tracking-[0.08em]" style={{ borderColor: `${context.color}45`, background: `${context.color}10`, color: context.color }}>{context.badge}</span>
+        </div>
+        <div className="mt-2.5 grid gap-2 min-[640px]:grid-cols-[1fr_1.2fr_1fr_1.6fr]">
+          <CompactTapeMetric label="Quote" value={formatNullableMoney(metrics.currentPrice, verdict.currency)} note={todayMoveText(metrics.todayChange, metrics.todayChangePct, verdict.currency)} color={todayTone} />
+          <CompactTapeMetric label="Reported range" value={rangeText(metrics.dayLow, metrics.dayHigh, verdict.currency)} note={rangeContextText(metrics.currentPrice, metrics.dayLow, metrics.dayHigh, rangePosition)} />
+          <CompactTapeMetric label="Participation" value={metrics.volumeRatio != null ? `${metrics.volumeRatio.toFixed(2)}× normal` : "—"} note={volumeText(metrics.currentVolume, metrics.averageVolume)} />
+          <CompactTapeMetric label={context.label} value={context.value} note={context.note} color={context.color} />
+        </div>
+      </section>
+    );
+  }
+
+  const chase = buildChaseRead(verdict);
+  const isKai = agentId === "kai";
+
   return (
     <section className="rounded-[10px] border border-[#2a2a31] bg-[#111114] px-3.5 py-3">
       <div className="flex flex-wrap items-baseline justify-between gap-1.5">
-        <div className="text-[11px] font-bold tracking-[0.02em] text-[#ececee]">Today&apos;s price &amp; FOMO check</div>
-        <div className="font-mono text-[9.5px] text-[#5a5a62]">session move · crowd · trigger</div>
+        <div className="text-[11px] font-bold tracking-[0.02em] text-[#ececee]">{isKai ? "Today’s FOMO & crowd check" : agentId === "rex" ? "Today’s tape & catalyst check" : "Today’s participation check"}</div>
+        <div className="font-mono text-[9.5px] text-[#5a5a62]">session move · volume · confirmation</div>
       </div>
       <div className="mt-2.5 grid gap-2 min-[720px]:grid-cols-2 min-[1180px]:grid-cols-4">
         <TapeCard
@@ -145,7 +173,7 @@ function TodayTape({ verdict }: { verdict: ValuationVerdictResponse }) {
           color={volumeTone(metrics.volumeRatio)}
         />
         <TapeCard
-          label={`${verdict.agent?.name ?? "Agent"} chase heat`}
+          label={isKai ? "Chase heat" : agentId === "rex" ? "Trade setup heat" : `${verdict.agent?.name ?? "Agent"} signal strength`}
           value={`${chase.score}/100 · ${chase.label}`}
           note={chase.reason}
           color={chase.color}
@@ -153,6 +181,28 @@ function TodayTape({ verdict }: { verdict: ValuationVerdictResponse }) {
       </div>
     </section>
   );
+}
+
+function CompactTapeMetric({ label, value, note, color = "#bcbcc2" }: { label: string; value: string; note: string; color?: string }) {
+  return (
+    <div className="min-w-0 border-l border-white/[0.07] pl-2.5 first:border-l-0 first:pl-0">
+      <div className="text-[8.5px] font-bold uppercase tracking-[0.05em] text-[#666670]">{label}</div>
+      <div className="mt-0.5 truncate font-mono text-[11.5px] font-bold" style={{ color }}>{value}</div>
+      <div className="mt-0.5 line-clamp-2 text-[9.5px] leading-[1.35] text-[#777780]">{note}</div>
+    </div>
+  );
+}
+
+function strategicQuoteContext(agentId: string) {
+  if (agentId === "ben") return { subtitle: "secondary to business quality and five-year owner economics", badge: "Quote noise", label: "Owner relevance", value: "Background only", note: "A routine session does not change the moat, reinvestment runway, or owner-earnings thesis.", color: "#d6b36a" };
+  if (agentId === "sam") return { subtitle: "secondary to payout coverage and income durability", badge: "Income first", label: "Income relevance", value: "Background only", note: "Daily movement matters only if it signals a change in cash coverage or distribution safety.", color: "#3ecf8e" };
+  return { subtitle: "secondary to valuation, funding, and the earnings bridge", badge: "Entry context", label: "Underwriting relevance", value: "Timing input", note: "Use the quote for execution; let cash conversion, leverage, and margin of safety control the call.", color: "#74a4ff" };
+}
+
+function rangeContextText(current: number | null | undefined, low: number | null | undefined, high: number | null | undefined, position: number | null) {
+  if (current != null && high != null && current > high) return "Quote is above the reported high; feeds may be asynchronous.";
+  if (current != null && low != null && current < low) return "Quote is below the reported low; feeds may be asynchronous.";
+  return position == null ? "session range unavailable" : `${Math.round(position * 100)}% through today’s range`;
 }
 
 function TapeCard({ label, value, note, color }: { label: string; value: string; note: string; color: string }) {

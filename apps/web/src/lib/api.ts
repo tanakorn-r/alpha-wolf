@@ -297,6 +297,87 @@ export type StockNewsItem = {
   summary?: string;
 };
 
+export type NewsResearchHorizon = {
+  label: string;
+  direction: "BULLISH" | "BEARISH" | "MIXED" | "NEUTRAL";
+  confidence: number;
+  window: string;
+  thesis: string;
+  catalysts: string[];
+  invalidation: string;
+  sourceRanks: number[];
+};
+
+export type NewsResearchSource = {
+  title: string;
+  url: string;
+  publisher: string;
+  publishedAt?: string | null;
+  relevance: number;
+  sentiment: "BULLISH" | "BEARISH" | "MIXED" | "NEUTRAL";
+  horizon: "SHORT" | "MEDIUM" | "LONG" | "MULTIPLE";
+  eventType: "EARNINGS" | "GUIDANCE" | "CAPITAL" | "DIVIDEND" | "MANAGEMENT" | "REGULATION" | "LEGAL" | "CONTRACT" | "OPERATIONS" | "SECTOR" | "MACRO" | "MARKET" | "OTHER";
+  whyItMatters: string;
+};
+
+export type NewsResearchResponse = AIProductionMetadata & {
+  headline: string;
+  tone: "good" | "warn" | "bad" | "neutral";
+  confidence: number;
+  researchFocus: string;
+  summary: string;
+  keyEvents: string[];
+  horizons: NewsResearchHorizon[];
+  sources: NewsResearchSource[];
+  source?: "openai";
+  model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
+  refreshWarning?: string | null;
+};
+
+export type HistoricalTimelineEvent = {
+  period: string;
+  priceDirection: "UP" | "DOWN" | "SIDEWAYS" | "MIXED" | "UNKNOWN";
+  event: string;
+  businessChange: string;
+  marketImpact: string;
+  evidenceType: "MARKET_DATA" | "FILING" | "NEWS" | "MACRO" | "MIXED";
+  sourceRanks: number[];
+};
+
+export type HistoricalAnalysisResponse = AIProductionMetadata & {
+  symbol: string;
+  verdict: "IMPROVING" | "STABLE" | "DETERIORATING" | "TURNAROUND" | "CYCLICAL" | "INSUFFICIENT_DATA";
+  rating: number;
+  historyWindow: string;
+  headline: string;
+  summary: string;
+  priceStory: string;
+  earningsStory: string;
+  timeline: HistoricalTimelineEvent[];
+  currentYear: {
+    direction: "BETTER" | "WORSE" | "MIXED" | "TOO_EARLY";
+    whatChanged: string;
+    comparisonWithHistory: string;
+    evidence: string[];
+    sourceRanks: number[];
+  };
+  historyLessons: string[];
+  forwardOutlook: {
+    direction: "IMPROVING" | "STABLE" | "DETERIORATING" | "UNCERTAIN";
+    thesis: string;
+    catalysts: string[];
+    risks: string[];
+  };
+  agentConclusion: string;
+  sources: NewsResearchSource[];
+  source?: "openai";
+  model?: string;
+  agent?: AgentBadge | null;
+  generatedAt?: string | null;
+};
+
 export type MarketDataTrust = {
   provider: string;
   transport?: string;
@@ -536,14 +617,28 @@ export type AnalystBriefResponse = AIProductionMetadata & {
   tone: "good" | "warn" | "bad";
   confidence: number | null;
   summary: string;
+  timeHorizon: string;
+  controllingQuestion: string;
+  researchSynthesis: string;
   thesis: string;
   actionPlan: string;
+  decisionRule: string;
   evidence: string[];
   risks: string[];
   changeTrigger: string;
   recap: string;
   agentFit: "aligned" | "neutral" | "against";
   agentFitReason: string;
+  shortlistRankingContext?: {
+    ticker: string;
+    rank: number;
+    total: number;
+    mode: string;
+    strategyLabel: string;
+    rankingAction: string;
+    rankingConviction: number;
+    rankingReason: string;
+  } | null;
   source?: "openai";
   model?: string;
   agent?: AgentBadge | null;
@@ -554,6 +649,7 @@ export type AnalystReportResponse = {
   status: "ready";
   detail: StockDetailResponse;
   analysis: AnalystBriefResponse;
+  refreshWarning?: string | null;
 };
 
 export type AgentStyle = { Discipline: number; Patience: number; Data: number; Instinct: number };
@@ -566,6 +662,7 @@ export type AgentBadge = {
   color: string;
   avatarUrl?: string | null;
   premium?: boolean;
+  liveTradeOnly?: boolean;
   analystFocus?: string | null;
 };
 
@@ -712,6 +809,22 @@ export type TodayPerformanceResponse = AIProductionMetadata & {
   holdingAction: "HOLD" | "NO_ACTION" | "ADD_SMALL" | "ADD" | "REDUCE" | "SELL";
   holdingActionReason: string;
   todayRead: string;
+  oneDayOutlook?: "BULLISH" | "BEARISH" | "MIXED" | "NEUTRAL";
+  oneDayThesis?: string;
+  impactDrivers?: Array<{
+    driver: string;
+    scope: "COMPANY" | "SECTOR" | "INDEX" | "COUNTRY";
+    direction: "UP" | "DOWN" | "TWO_WAY" | "NEUTRAL";
+    timing: string;
+    mechanism: string;
+    sourceRanks?: number[];
+  }>;
+  fundamentalCheck?: {
+    status: "SUPPORTS" | "UNCHANGED" | "WEAKENS" | "UNKNOWN";
+    company: string;
+    index: string;
+    country: string;
+  };
   horizonAlignment: {
     status: "ALIGNED" | "WATCH" | "BROKEN" | "NO_PLAN";
     planHorizon: string;
@@ -730,6 +843,7 @@ export type TodayPerformanceResponse = AIProductionMetadata & {
   model?: string;
   agent?: AgentBadge | null;
   generatedAt?: string | null;
+  newsResearch?: NewsResearchResponse | null;
 };
 
 export type TechnicalAnalysisResponse = AIProductionMetadata & {
@@ -1050,11 +1164,21 @@ export type LiveTradeRow = {
   symbol: string;
   name: string;
   price?: number | null;
+  bid?: number | null;
+  ask?: number | null;
   changePct?: number | null;
   volume?: number | null;
   relativeVolume?: number | null;
   rsi?: number | null;
   rsi5?: number | null;
+  rsi15?: number | null;
+  rsi30?: number | null;
+  rsi60?: number | null;
+  rsi240?: number | null;
+  change5?: number | null;
+  change15?: number | null;
+  change60?: number | null;
+  change240?: number | null;
   signal: string;
 };
 
@@ -1070,6 +1194,35 @@ export type LiveTradeQuoteResponse = {
   source: string;
   warning?: string;
   row: LiveTradeRow | null;
+};
+
+export type LiveTradeRiskReview = {
+  action: "EXECUTE" | "HOLD" | "REJECT";
+  direction: "LONG" | "SHORT";
+  entryPrice: number;
+  hardStopLoss: number;
+  takeProfitTargets: number[];
+  calculatedPositionSize: number;
+  quantitativeJustification: string;
+  executionRating: number;
+  ratingReason: string;
+  invalidationCheck: string;
+  invalidationQuality: "LOGICAL" | "WEAK" | "ARBITRARY" | "UNVERIFIABLE";
+  structuralEvidence: string[];
+  fundamentalRisks: string[];
+  devilsAdvocate: string;
+  targetLogic: string;
+  executionPlan: string;
+  timeframeReads: Array<{ timeframe: "1m" | "5m" | "15m" | "1h" | "4h"; bias: "LONG" | "SHORT" | "NEUTRAL"; evidence: string }>;
+  waitingFor: string[];
+  sessionState: string;
+  marketPhase: string;
+  newsBlackout: boolean;
+  spreadCheck: "PASS" | "FAIL" | "UNVERIFIABLE";
+  drawdownCheck: "PASS" | "KILL_SWITCH" | "UNVERIFIABLE";
+  missingEvidence: string[];
+  sources: Array<{ title: string; url: string }>;
+  generatedAt?: string;
 };
 
 export async function loadStockDetail(symbol: string, strategy?: string, mode?: string): Promise<StockDetailResponse> {
@@ -1322,7 +1475,7 @@ export async function loadAgents(): Promise<AgentProfile[]> {
 }
 
 export async function loadLatestAiResult<T>(params: {
-  feature: "stock-analysis" | "analyst-report" | "quant" | "valuation" | "today" | "technical" | "strategy" | "portfolio" | "buy-timing" | "next-10";
+  feature: "stock-analysis" | "analyst-report" | "quant" | "valuation" | "today" | "technical" | "strategy" | "portfolio" | "buy-timing" | "next-10" | "news-research" | "history";
   subject: string;
   agent: string;
   variantPrefix?: string;
@@ -1386,15 +1539,63 @@ export async function summarizeStock(symbol: string, strategy?: string, agent?: 
   return (await response.json()) as StockAnalysisResponse;
 }
 
+export async function loadNewsResearch(symbol: string, strategy: string, agent: string, force = false): Promise<NewsResearchResponse> {
+  const startedAt = Date.now();
+  const deadlineMs = 270_000;
+  while (Date.now() - startedAt < deadlineMs) {
+    const params = new URLSearchParams({ agent });
+    if (force) params.set("force", "true");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 240_000);
+    let response: Response;
+    try {
+      response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/news-research?${params}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("Live web research timed out after 4 minutes. Please retry.");
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    if (response.status === 202) {
+      const pending = (await response.json()) as { retryAfterSeconds?: number };
+      await new Promise((resolve) => window.setTimeout(resolve, Math.max(1, pending.retryAfterSeconds ?? 3) * 1_000));
+      continue;
+    }
+    if (!response.ok) {
+      let message = `News research failed: ${response.status}`;
+      try { message = ((await response.json()) as { detail?: string }).detail ?? message; } catch { /* HTTP fallback */ }
+      throw new Error(message);
+    }
+    return (await response.json()) as NewsResearchResponse;
+  }
+  throw new Error("Live web research did not finish within 4.5 minutes. Please retry.");
+}
+
 export async function loadAnalystReport(
   symbol: string,
   strategy: string,
   agent: string,
   force = false,
   onStage?: (stage: "market_data" | "analysis") => void,
+  rankingContext?: {
+    ticker: string;
+    rank: number;
+    total: number;
+    mode: string;
+    strategyLabel: string;
+    action: string;
+    conviction: number;
+    reason: string;
+  },
 ): Promise<AnalystReportResponse> {
   const startedAt = Date.now();
-  const deadlineMs = 60_000;
+  const deadlineMs = 270_000;
   let firstRequest = true;
 
   while (Date.now() - startedAt < deadlineMs) {
@@ -1403,14 +1604,14 @@ export async function loadAnalystReport(
     const params = new URLSearchParams({ agent });
     if (force) params.set("force", "true");
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 35_000);
+    const timeout = window.setTimeout(() => controller.abort(), 240_000);
     let response: Response;
     try {
       response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/report?${params}`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ strategy }),
+        body: JSON.stringify({ strategy, rankingContext }),
         signal: controller.signal,
       });
     } catch (error) {
@@ -1437,7 +1638,7 @@ export async function loadAnalystReport(
     return (await response.json()) as AnalystReportResponse;
   }
 
-  throw new Error("Market data did not become ready within one minute. Please retry.");
+  throw new Error("Deep Analyst did not finish within 3 minutes. Please retry.");
 }
 
 export async function loadQuantPerspective(symbol: string, strategy?: string, mode?: string, agent?: string, force = false): Promise<QuantPerspectiveResponse> {
@@ -1539,6 +1740,44 @@ export async function loadTechnicalAnalysis(symbol: string, agent?: string, forc
   }
 
   throw new Error("Fresh market data did not become ready within one minute. Please retry.");
+}
+
+export async function loadHistoricalAnalysis(symbol: string, strategy: string, agent: string, force = false): Promise<HistoricalAnalysisResponse> {
+  const startedAt = Date.now();
+  const deadlineMs = 270_000;
+  while (Date.now() - startedAt < deadlineMs) {
+    const params = new URLSearchParams({ agent });
+    if (force) params.set("force", "true");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 240_000);
+    let response: Response;
+    try {
+      response = await trackedFetch(`${API_BASE}/analysis/${encodeURIComponent(symbol)}/history?${params}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("Historical Analysis timed out after 4 minutes. Please retry.");
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+    if (response.status === 202) {
+      const pending = (await response.json()) as { retryAfterSeconds?: number };
+      await new Promise((resolve) => window.setTimeout(resolve, Math.max(1, pending.retryAfterSeconds ?? 3) * 1_000));
+      continue;
+    }
+    if (!response.ok) {
+      let message = `Historical Analysis failed: ${response.status}`;
+      try { message = ((await response.json()) as { detail?: string }).detail ?? message; } catch { /* status fallback */ }
+      throw new Error(message);
+    }
+    return (await response.json()) as HistoricalAnalysisResponse;
+  }
+  throw new Error("Historical Analysis did not finish within 4.5 minutes. Please retry.");
 }
 
 export async function loadStrategyPlaybook(params: { strategy: string; candidateSymbols: string[]; region?: "all" | "us" | "th"; limit?: number; candidateLimit?: number; agent?: string; force?: boolean }): Promise<StrategyPlaybookResponse> {
@@ -1803,4 +2042,28 @@ export async function loadLiveTradeQuote(symbol: string): Promise<LiveTradeQuote
   const response = await trackedFetch(`${API_BASE}/live-trade/quote?symbol=${encodeURIComponent(symbol)}`);
   if (!response.ok) throw new Error(`Failed to load live trade quote: ${response.status}`);
   return (await response.json()) as LiveTradeQuoteResponse;
+}
+
+export async function loadLiveTradeRiskReview(payload: Record<string, unknown>): Promise<LiveTradeRiskReview> {
+  const controller = new AbortController();
+  const deadline = window.setTimeout(() => controller.abort(), 50_000);
+  try {
+    const response = await trackedFetch(`${API_BASE}/live-trade/risk-review`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => null) as { detail?: string } | null;
+      throw new Error(error?.detail || `Failed to load Dante risk review: ${response.status}`);
+    }
+    return (await response.json()) as LiveTradeRiskReview;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") throw new Error("Dante's audit exceeded 50 seconds and was stopped. No order was submitted; retry when ready.");
+    throw error;
+  } finally {
+    window.clearTimeout(deadline);
+  }
 }

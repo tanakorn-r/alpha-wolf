@@ -8,6 +8,154 @@ from internal.store.utils import json_safe
 MAX_PRICE_POINTS = 72
 
 
+def build_news_research_context(
+    bundle: dict[str, Any], *, agent_id: str | None = None,
+    financials: dict[str, Any] | None = None,
+    market_comparison: dict[str, Any] | None = None,
+    domain_insights: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Small, identity-rich context for a live web search; the web supplies the fresh evidence."""
+    stock = bundle.get("stock") or {}
+    business = bundle.get("business") or {}
+    return json_safe({
+        "asOfInstruction": "Treat the current request time as the research cutoff. Prefer recent primary sources and show publication dates when available.",
+        "stock": _pick(stock, "symbol", "name", "currency", "exchange"),
+        "companyIdentity": _pick(business, "sector", "industry", "longBusinessSummary"),
+        "researchMission": _agent_research_mission(agent_id, stock, business),
+        "structuralDiagnostics": _research_diagnostic_pack(
+            bundle,
+            financials=financials or {},
+            market_comparison=market_comparison or {},
+            domain_insights=domain_insights or {},
+        ),
+        "existingFeed": (bundle.get("news") or [])[:8],
+        "agentId": agent_id,
+        "instruction": "First use structuralDiagnostics to identify the Agent's weakest or unproven thesis claims, then research those claims on the web. Diagnostics form search hypotheses only: every fact used in the research conclusion must be verified by a returned web source. Do not use price, volume, or technical indicators.",
+    })
+
+
+def _research_diagnostic_pack(
+    bundle: dict[str, Any], *, financials: dict[str, Any],
+    market_comparison: dict[str, Any], domain_insights: dict[str, Any],
+) -> dict[str, Any]:
+    """Non-technical evidence used to decide what the web research needs to verify next."""
+    stock = bundle.get("stock") or {}
+    business = bundle.get("business") or {}
+    performance = bundle.get("performance") or {}
+    return {
+        "purpose": "Hypothesis generation only. Identify 2-4 weak, contradictory, or unproven claims and verify or refute each with live sources.",
+        "companyStructureProfile": bundle.get("companyStructure") or classify_company_structure(business, stock),
+        "reportedEconomics": _pick(
+            business,
+            "revenueGrowth", "earningsGrowth", "grossMargin", "operatingMargin", "profitMargin",
+            "roe", "roa", "debtToEquity", "freeCashflow", "operatingCashflow", "payoutRatio",
+            "dividendYield", "trailingPE", "forwardPE", "priceToBook",
+        ),
+        "reportedReturns": performance.get("returns") or {},
+        "financialResearch": _compact_financial_research(financials),
+        "industryRanking": bundle.get("peerRank") or {},
+        "sectorAndIndustryResearch": _compact_domain_insights(domain_insights),
+        "comparisonIdentity": _pick(market_comparison, "benchmark", "peer", "sector", "industry"),
+    }
+
+
+def _agent_research_mission(agent_id: str | None, stock: dict[str, Any], business: dict[str, Any]) -> dict[str, Any]:
+    """Give each persona a different evidence-acquisition plan, not merely a different voice."""
+    agent = (agent_id or "vera").strip().lower()
+    company = str(stock.get("name") or stock.get("symbol") or "the company")
+    industry = str(business.get("industry") or business.get("sector") or "its industry")
+    missions: dict[str, dict[str, Any]] = {
+        "ben": {
+            "decisionQuestion": f"Can {company} widen owner earnings per share over 5-10 years without weakening its moat or balance sheet?",
+            "searchQuestions": [
+                f"{company} five-year revenue EBITDA free cash flow capex and returns on invested capital trend",
+                f"{company} market share pricing power customer retention and competitive position in {industry}",
+                f"{company} management capital allocation dividends debt acquisitions and reinvestment track record",
+                f"{industry} competitor investment capacity disruption risk and industry structure",
+                f"Thailand regulator policy spectrum digital infrastructure cloud data center and national roadmap",
+                f"Thailand long-run household enterprise digital demand GDP demographics and downside scenarios affecting {company}",
+            ],
+            "sourcePortfolio": [
+                "at least two company filings, annual reports, results, or investor presentations",
+                "at least one regulator, ministry, central-bank, or national-plan source",
+                "at least one competitor, independent industry, or market-structure source",
+                "at least one credible bear-case source or fact that could impair owner economics",
+            ],
+        },
+        "sam": {
+            "decisionQuestion": f"Can {company} fund a durable and growing distribution through the next cycle?",
+            "searchQuestions": [f"{company} dividend policy payout coverage and free cash flow", f"{company} debt maturities interest coverage and refinancing", f"{industry} regulatory limits and cash-flow cyclicality", f"{company} dividend cut suspension or capital allocation risk"],
+            "sourcePortfolio": ["company filings and dividend declarations", "debt or credit evidence", "regulatory or industry-cycle evidence"],
+        },
+        "vera": {
+            "decisionQuestion": f"Does {company}'s normalized earning power and funding structure justify underwriting it now?",
+            "searchQuestions": [f"{company} latest filing earnings quality guidance and cash conversion", f"{company} debt refinancing dilution and material transactions", f"{industry} regulation competition and margin outlook", f"{company} downside case governance and accounting risks"],
+            "sourcePortfolio": ["company and exchange filings", "financing or transaction documents", "regulator or high-quality original reporting"],
+        },
+        "nadia": {
+            "decisionQuestion": f"Which measurable factors and regimes dominate {company}'s forward distribution of returns?",
+            "searchQuestions": [f"{company} factor exposure volatility liquidity and correlation", f"{industry} demand data and leading indicators", f"country macro rates currency inflation policy and regime shift affecting {company}", f"{company} event risk and quantified downside scenario"],
+            "sourcePortfolio": ["official datasets", "company-reported sensitivities", "independent quantitative or industry evidence"],
+        },
+        "rex": {
+            "decisionQuestion": f"What verified catalyst can move {company} over the next 1-60 trading days, and when does it fail?",
+            "searchQuestions": [f"{company} latest earnings guidance surprise and event dates", f"{company} contracts regulation management changes last 90 days", f"{industry} near-term catalyst calendar and fund flow", f"{company} opposing catalyst or event risk"],
+            "sourcePortfolio": ["fresh company or exchange announcements", "dated catalyst reporting", "one opposing or invalidating event"],
+        },
+        "kai": {
+            "decisionQuestion": f"Is attention around {company} accelerating now, with a fresh catalyst strong enough to sustain momentum?",
+            "searchQuestions": [f"{company} today latest launch announcement catalyst", f"{company} attention trend retail narrative and sector heat", f"{company} imminent event risk or momentum killer"],
+            "sourcePortfolio": ["same-day primary announcement", "fresh independent confirmation", "clear momentum risk"],
+        },
+        "alphawolf": {
+            "decisionQuestion": f"What is the highest-conviction action on {company} after resolving tactical, fundamental, macro, and risk disagreement?",
+            "searchQuestions": [f"{company} latest material catalysts", f"{company} earnings quality valuation funding and cash flow", f"{industry} structure regulation and country regime", f"{company} strongest bull case and strongest bear case"],
+            "sourcePortfolio": ["primary company evidence", "official sector or macro evidence", "independent bull and bear evidence"],
+        },
+    }
+    return missions.get(agent, missions["vera"])
+
+
+def build_historical_analysis_context(
+    bundle: dict[str, Any], *, agent_id: str | None,
+    monthly_price_history: list[dict[str, Any]],
+    financials: dict[str, Any] | None = None,
+    market_comparison: dict[str, Any] | None = None,
+    domain_insights: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persona-specific causal history: market path + reported economics + web verification."""
+    stock = bundle.get("stock") or {}
+    business = bundle.get("business") or {}
+    agent = (agent_id or "vera").strip().lower()
+    history_contracts = {
+        "ben": {"window": "5 years plus the current year", "focus": "moat, owner earnings, reinvestment, management allocation, balance-sheet resilience, industry structure, and whether earnings power is becoming larger"},
+        "sam": {"window": "5 years plus the current year", "focus": "dividend record, payout coverage, cash generation, debt service, yield-trap risk, and income durability"},
+        "vera": {"window": "3-5 years plus the current year", "focus": "earnings quality, normalized returns, funding, dilution, material transactions, and valuation regime"},
+        "nadia": {"window": "2-3 years plus the current regime", "focus": "factor leadership, volatility, drawdowns, correlations, macro regime changes, and measurable inflection points"},
+        "rex": {"window": "the last 12 months with emphasis on 3-6 months", "focus": "earnings surprises, guidance, contracts, regulation, catalysts, price reactions, and failed or sustained swings"},
+        "kai": {"window": "the last 3-4 months", "focus": "attention, launches, crowd catalysts, momentum bursts, reversals, and what ended each hot move"},
+        "alphawolf": {"window": "5 years plus the current year", "focus": "the interaction of business quality, valuation, macro regime, price cycles, catalysts, and permanent-loss risk"},
+    }
+    contract = history_contracts.get(agent, history_contracts["vera"])
+    return json_safe({
+        "asOfInstruction": "Treat the current request time as the cutoff. Distinguish completed historical facts from the forward assessment.",
+        "stock": _pick(stock, "symbol", "name", "currency", "exchange"),
+        "companyIdentity": _pick(business, "sector", "industry", "longBusinessSummary"),
+        "agentId": agent,
+        "historyContract": contract,
+        "monthlyPriceHistory": monthly_price_history,
+        "recentDailyHistory": (bundle.get("history") or [])[-120:],
+        "reportedEconomics": _pick(business, "revenueGrowth", "earningsGrowth", "grossMargin", "operatingMargin", "profitMargin", "roe", "roa", "debtToEquity", "dividendYield", "payoutRatio", "peRatio", "forwardPE", "priceToBook"),
+        "financialHistory": _compact_financial_research(financials or {}),
+        "companyStructureProfile": bundle.get("companyStructure") or classify_company_structure(business, stock),
+        "industryRanking": bundle.get("peerRank") or {},
+        "marketComparison": _compact_market_comparison(market_comparison or {}),
+        "sectorAndIndustryResearch": _compact_domain_insights(domain_insights or {}),
+        "existingFeed": (bundle.get("news") or [])[:8],
+        "instruction": "Use price and reported financial history to locate material inflection periods, then use web search to explain them. Never infer causation from coincident timing alone. If no reliable source explains a move, label it unexplained.",
+    })
+
+
 def build_analysis_context(
     bundle: dict[str, Any],
     *,
@@ -224,6 +372,45 @@ def _agent_input_pack(
         "selectedStrategy": bundle.get("strategy"),
         "companyStructureProfile": company_structure,
     }
+
+    if agent == "dante":
+        return {
+            "agent": "dante",
+            "inputPriority": ["market session", "live liquidity", "completed-bar momentum", "volatility regime", "entry/stop/TP", "scheduled event risk"],
+            "primary": {
+                **core,
+                "liveSetup": _pick(
+                    technicals,
+                    "signal",
+                    "rsi14",
+                    "macd",
+                    "macdSignal",
+                    "macdHistogram",
+                    "stochasticK",
+                    "stochasticD",
+                    "ema20",
+                    "sma20",
+                    "sma50",
+                    "support",
+                    "resistance",
+                    "momentum",
+                    "volatility",
+                    "avgVolume",
+                    "currentVolume",
+                    "volumeRatio",
+                    "multiTimeframe",
+                ),
+                "recentPriceAction": latest_history[-20:],
+                "riskContract": _risk_map(price, support, resistance, target),
+                "timestampedCatalysts": news[:5],
+                "eventRiskPolicy": "If current event timing is not explicitly supplied, mark event risk unverified. Never infer that a Fed, CPI, NFP, earnings, or central-bank window is clear.",
+            },
+            "secondary": {
+                "instrumentContext": _pick(business, "sector", "industry", "beta", "marketCap"),
+                "relativePerformance": {"returns": returns, "marketComparison": market_comparison},
+            },
+            "mustAnswer": ["LONG, SHORT, or WAIT now?", "What exact trigger activates entry?", "Where is the hard stop?", "Where are TP1 and TP2?", "What is the R multiple and maximum hold?", "Is event risk verified or unverified?"],
+        }
 
     if agent == "rex":
         return {

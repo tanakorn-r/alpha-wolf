@@ -13,6 +13,12 @@ export function actionPositionFromSignal(
 
   const strength = Math.max(0, Math.min(100, confidence)) / 2;
   const normalized = (signal ?? "").trim().toUpperCase().replace(/[_-]+/g, " ");
+  const isNeutralAction = ["HOLD", "WAIT", "OBSERVE", "WATCH", "NO ACTION"]
+    .some((word) => normalized === word || normalized.startsWith(`${word} `));
+  // Confidence answers "how sure is the Agent?"; it must not turn an explicit
+  // HOLD/WAIT decision into a visual BUY recommendation.
+  if (isNeutralAction) return 50;
+
   const isNegative = ["SELL", "TRIM", "REDUCE", "AVOID", "PASS", "BEARISH", "STAND ASIDE", "NO BUY"]
     .some((word) => normalized.includes(word));
   if (isNegative) return 50 - strength;

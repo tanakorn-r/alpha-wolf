@@ -7,6 +7,7 @@ import { formatCurrency } from "../../lib/format";
 import { clamp, formatAnalyzedAt } from "./lib";
 import { agentLoadingTitle, agentName, PremiumLoading } from "./ui";
 import type { HuntAi } from "./useHuntAi";
+import { AiVisualSummary } from "../../components/ai/AiVisualSummary";
 
 export function BuyTimingTab({ hunt }: { hunt: HuntAi }) {
   const timing = hunt.timing;
@@ -73,7 +74,7 @@ function TimingPage({ timing, analyzedAt, onRefresh }: { timing: BuyTimingRespon
   ];
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="aw-result-product aw-result-timing flex min-w-0 flex-col gap-3">
       <AgentCall
         agent={timing.agent}
         label={`Overall strategy for ${timing.symbol}`}
@@ -100,6 +101,7 @@ function TimingPage({ timing, analyzedAt, onRefresh }: { timing: BuyTimingRespon
           <div className="text-[12px] text-[#5a5a62]">{cycleLabel(timing)} · {timing.agentMonthlyPlan?.length ? "seasonality is evidence, not a promise" : "evidence only — not an Agent order"}</div>
         </div>
         <MonthlyBuyMap timing={timing} />
+        <TimingActionMix timing={timing} />
         <PriceContextRow timing={timing} />
       </section>
 
@@ -129,6 +131,14 @@ function TimingPage({ timing, analyzedAt, onRefresh }: { timing: BuyTimingRespon
       </section>
     </div>
   );
+}
+
+function TimingActionMix({ timing }: { timing: BuyTimingResponse }) {
+  const plan = timing.agentMonthlyPlan ?? [];
+  const buys = plan.filter((month) => month.action === "BUY" || month.action === "ADD_SMALL").length;
+  const holds = plan.filter((month) => month.action === "HOLD").length;
+  const trims = plan.filter((month) => month.action === "TRIM" || month.action === "SELL").length;
+  return <div className="mt-3"><AiVisualSummary title="12-month action mix" subtitle="How often the Agent plans to deploy, pause, or reduce" segments={[{ label: "Buy / add", value: buys, color: "#3ecf8e", icon: "+" }, { label: "Hold cash", value: holds, color: "#f5c451", icon: "•" }, { label: "Trim / sell", value: trims, color: "#f2575c", icon: "−" }]} /></div>;
 }
 
 function compactCopy(value: string, maxLength = 155) {
@@ -179,22 +189,14 @@ function MonthlyBuyMap({ timing }: { timing: BuyTimingResponse }) {
   const evidenceOnly = !sizedAgentPlan;
   const map = sizedAgentPlan ? timing.agentMonthlyPlan : timing.narrativeSource === "openai" ? null : timing.monthlyMap;
   if (!map || !map.length) return <div className="mt-4 text-[12px] text-[#5a5a62]">Monthly buy/trim map needs a fresh sync.</div>;
-  const keyMonths = map.filter((month) => month.isCurrent || month.isExMonth || month.action !== "HOLD");
-  const holdMonths = map.filter((month) => !keyMonths.includes(month));
   const year = timing.comparisonYear ?? new Date().getFullYear();
   const tacticalSizing = ["rex", "kai"].includes(timing.agent?.id ?? "");
   return (
     <div className="@container mt-5">
-      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.09em] text-[#686870]">Decision months</div>
+      <div className="mb-2 text-[8.5px] font-bold uppercase tracking-[0.09em] text-[#686870]">12-month plan</div>
       <div className="grid grid-cols-2 gap-1.5 @min-[540px]:grid-cols-3">
-        {keyMonths.map((month) => <MonthCell key={month.month} month={month} year={year} evidenceOnly={evidenceOnly} tacticalSizing={tacticalSizing} />)}
+        {map.map((month) => <MonthCell key={month.month} month={month} year={year} evidenceOnly={evidenceOnly} tacticalSizing={tacticalSizing} />)}
       </div>
-      {holdMonths.length ? (
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-white/[0.06] pt-3">
-          <span className="mr-1 text-[8.5px] font-bold uppercase tracking-[0.08em] text-[#686870]">Hold months</span>
-          {holdMonths.map((month) => <MonthChip key={month.month} month={month} year={year} />)}
-        </div>
-      ) : null}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[9px] text-[#777780]">
         <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#3ecf8e]" /> {evidenceOnly ? "Favorable evidence" : "Buy / add"}</span>
         <span className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${evidenceOnly ? "bg-[#f5c451]" : "bg-[#f2575c]"}`} /> {evidenceOnly ? "Caution evidence" : "Trim / sell"}</span>
@@ -233,17 +235,6 @@ function MonthCell({ month, year, evidenceOnly = false, tacticalSizing = false }
         <span style={{ color: actual == null ? "#5a5a62" : actual >= 0 ? "#3ecf8e" : "#f2575c" }}>Y{year} {actual == null ? "—" : `${signed(actual)}%`}</span>
       </div>
     </div>
-  );
-}
-
-function MonthChip({ month, year }: { month: MonthCellData; year: number }) {
-  const actual = month.currentYearReturnPct;
-  return (
-    <span className="inline-flex items-center gap-1.5 rounded-[6px] border border-[#2a2a31] bg-[#111113] px-2 py-1.5" title={`${month.month}: hold · historical avg ${signed(month.returnPct)}% · ${year} ${actual == null ? "not available" : `${signed(actual)}%`}`}>
-      <b className="font-mono text-[9px] text-[#bcbcc2]">{month.month}</b>
-      <span className="font-mono text-[8px] text-[#686870]">{signed(month.returnPct)}%</span>
-      {actual != null ? <span className="h-1 w-1 rounded-full" style={{ background: actual >= 0 ? "#3ecf8e" : "#f2575c" }} /> : null}
-    </span>
   );
 }
 

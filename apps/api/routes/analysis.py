@@ -12,9 +12,9 @@ from fastapi.responses import JSONResponse, Response
 from internal.auth_context import account_cache_scope, user_id_from_request
 from internal.ai.agents import normalize_agent_id
 from internal.ai.access import claim_ai_run, release_ai_run, require_ai_account
-from internal.ai.context import build_analysis_context, build_technical_context, build_today_context
+from internal.ai.context import build_analysis_context, build_historical_analysis_context, build_news_research_context, build_technical_context, build_today_context
 from internal.ai.production_gate import attach_run_context, build_decision_state
-from internal.ai.openai_client import OpenAIAnalysisError, analyze_brief_with_openai, analyze_quant_with_openai, analyze_technicals_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, review_portfolio_with_openai
+from internal.ai.openai_client import OpenAIAnalysisError, analyze_brief_with_openai, analyze_history_with_openai, analyze_quant_with_openai, analyze_technicals_with_openai, analyze_today_with_openai, analyze_valuation_with_openai, analyze_with_openai, recommend_strategy_with_openai, research_news_with_openai, review_portfolio_with_openai
 from internal.market.detail import build_detail_bundle, get_ai_financials, get_domain_insights, get_market_comparison
 from internal.market.data_trust import build_universe_data_trust, market_tape_needs_refresh
 from internal.market.portfolio import build_portfolio_dashboard
@@ -26,11 +26,13 @@ from internal.store.ai_audit import list_ai_decision_history, record_ai_failure
 from internal.store.db import connect
 from internal.store.portfolio import list_holdings
 from internal.store.utils import as_float
-from models import PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TodayPerformanceResponse, ValuationVerdictResponse
+from internal.yahoo.client import fetch_history, ticker as make_ticker
+from models import HistoricalAnalysisResponse, NewsResearchResponse, PortfolioReviewResponse, QuantPerspectiveResponse, StockAnalysisResponse, StrategyRecommendationRequest, StrategyPlaybookResponse, TodayPerformanceResponse, ValuationVerdictResponse
 
 router = APIRouter()
 
 _AI_FAILURE_DETAIL = "The Agent could not produce a reliable result. Your AI token was returned; please retry."
+_NEWS_RESEARCH_FAILURE_DETAIL = "Web research finished, but its source evidence could not be validated. Your AI token was returned; please retry."
 
 SAVED_AI_FEATURES = {
     "stock-analysis",
@@ -43,6 +45,8 @@ SAVED_AI_FEATURES = {
     "portfolio",
     "buy-timing",
     "next-10",
+    "news-research",
+    "history",
 }
 
 
@@ -67,7 +71,13 @@ _LEGACY_AI_MARKERS = {
     "portfolio": ":portfolio-review:",
     "buy-timing": ":ai-buy-timing:",
     "next-10": ":ai-next-10-technical:",
+    "news-research": ":news-research:",
+    "history": ":historical-analysis:",
 }
+
+
+def _saved_news_research(user_id: int, symbol: str, agent_id: str) -> dict[str, Any] | None:
+    return load_ai_result(AIResultKey(user_id, "news-research", symbol, agent_id, "v4"))
 
 
 @router.get("/api/ai/results/latest", response_model=None)
@@ -321,6 +331,7 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
         position_context=position_context,
         agent_id=agent_id,
     )
+    context["webNewsResearch"] = _saved_news_research(user_id, normalized, agent_id)
     context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
 
     usage_user_id, _ = claim_ai_run(request)
@@ -330,7 +341,7 @@ def analysis(symbol: str, request: Request, payload: dict[str, Any] | None = Bod
         record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
         release_ai_run(usage_user_id)
         if cached is not None:
-            return cached
+            return {**cached, "refreshWarning": _AI_FAILURE_DETAIL}
         raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
 
     result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
@@ -352,15 +363,18 @@ def analyst_report(
     """
     require_ai_account(request, premium_required=True)
     normalized = symbol.upper().strip()
-    strategy = parse_strategy((payload or {}).get("strategy"))
+    request_payload = payload or {}
+    strategy = parse_strategy(request_payload.get("strategy"))
+    ranking_context = _analyst_ranking_context(request_payload, normalized)
     agent_id = normalize_agent_id(agent)
     user_id = user_id_from_request(request)
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:analyst-report:v15-emotional-persona-voice:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    ranking_digest = hashlib.sha256(json.dumps(ranking_context or {}, sort_keys=True).encode("utf-8")).hexdigest()[:12]
+    cache_key = f"{account_scope}:analyst-report:v21-research-weighted-rating:{normalized}:{strategy}:{agent_id}:{position_cache_key}:{ranking_digest}"
 
-    result_key = AIResultKey(user_id, "analyst-report", normalized, agent_id, f"v15:{strategy}:{position_cache_key}")
+    result_key = AIResultKey(user_id, "analyst-report", normalized, agent_id, f"v21:{strategy}:{position_cache_key}:{ranking_digest}")
     cached_analysis = _load_saved_ai_result(result_key, cache_key)
     if cached_analysis is not None and not force:
         bundle = build_detail_bundle(normalized, strategy, refresh_stale=False)
@@ -392,6 +406,9 @@ def analyst_report(
         position_context=position_context,
         agent_id=agent_id,
     )
+    context["webNewsResearch"] = _saved_news_research(user_id, normalized, agent_id)
+    if ranking_context is not None:
+        context["shortlistRankingContext"] = ranking_context
     context["canonicalDecisionState"] = build_decision_state(context, data_trust=bundle.get("dataTrust"))
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     openai_started_at = time.monotonic()
@@ -413,8 +430,152 @@ def analyst_report(
     finally:
         print(f"Analyst OpenAI timing {normalized}: {time.monotonic() - openai_started_at:.3f}s")
 
-    result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached_analysis, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
+    published_result = {**result, "dataTrust": bundle.get("dataTrust")}
+    if ranking_context is not None:
+        published_result["shortlistRankingContext"] = ranking_context
+    result = _publish_ai_result(result_key, published_result, cached_analysis, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
     return {"status": "ready", "detail": bundle, "analysis": result}
+
+
+@router.post("/api/analysis/{symbol}/news-research", response_model=None)
+def news_research(
+    symbol: str,
+    request: Request,
+    payload: dict[str, Any] | None = Body(default=None),
+    agent: str = Query("vera"),
+    force: bool = Query(False),
+) -> NewsResearchResponse | JSONResponse | dict[str, Any]:
+    """Run explicit, source-cited web research without slowing ordinary detail reads."""
+    require_ai_account(request)
+    normalized = symbol.upper().strip()
+    strategy = parse_strategy((payload or {}).get("strategy"))
+    agent_id = normalize_agent_id(agent)
+    user_id = user_id_from_request(request)
+    result_key = AIResultKey(user_id, "news-research", normalized, agent_id, "v4")
+    cached = load_ai_result(result_key)
+    if cached is not None and not force:
+        return cached
+
+    include_financials, include_market, include_insights = _analyst_input_flags(agent_id)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
+        normalized,
+        strategy,
+        include_financials=include_financials,
+        include_market=include_market,
+        include_insights=include_insights,
+        refresh_market_tape=True,
+    )
+    if not bundle:
+        raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    if bundle.get("dataPending"):
+        return JSONResponse(status_code=202, content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3})
+
+    context = build_news_research_context(
+        bundle,
+        agent_id=agent_id,
+        financials=financials_data,
+        market_comparison=market_data,
+        domain_insights=insights_data,
+    )
+    usage_user_id, _ = claim_ai_run(request)
+    try:
+        result = research_news_with_openai(context, agent_id)
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
+        release_ai_run(usage_user_id)
+        if cached is not None:
+            return {**cached, "refreshWarning": _NEWS_RESEARCH_FAILURE_DETAIL}
+        raise HTTPException(status_code=503, detail=_NEWS_RESEARCH_FAILURE_DETAIL) from exc
+
+    return _publish_ai_result(
+        result_key,
+        result,
+        cached,
+        usage_user_id,
+        context=context,
+        data_trust=bundle.get("dataTrust"),
+    )
+
+
+def _monthly_history_points(frame: Any) -> list[dict[str, Any]]:
+    if frame is None or getattr(frame, "empty", True):
+        return []
+    by_month: dict[str, dict[str, Any]] = {}
+    for index, row in frame.iterrows():
+        try:
+            date = index.to_pydatetime().date().isoformat() if hasattr(index, "to_pydatetime") else str(index)[:10]
+            close = float(row.get("Close"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if close != close or close <= 0:
+            continue
+        by_month[date[:7]] = {"date": date, "close": round(close, 4)}
+    return list(by_month.values())[-60:]
+
+
+@router.post("/api/analysis/{symbol}/history", response_model=HistoricalAnalysisResponse)
+def historical_analysis(
+    symbol: str,
+    request: Request,
+    payload: dict[str, Any] | None = Body(default=None),
+    agent: str = Query("vera"),
+    force: bool = Query(False),
+) -> dict[str, Any]:
+    """Explain the causal price/business history through the active Agent's own horizon."""
+    require_ai_account(request, premium_required=True)
+    normalized = symbol.upper().strip()
+    strategy = parse_strategy((payload or {}).get("strategy"))
+    agent_id = normalize_agent_id(agent)
+    user_id = user_id_from_request(request)
+    result_key = AIResultKey(user_id, "history", normalized, agent_id, f"v1:{strategy}")
+    cached = load_ai_result(result_key)
+    if cached is not None and not force:
+        return cached
+
+    include_financials, include_market, include_insights = _analyst_input_flags(agent_id)
+    bundle, financials_data, market_data, insights_data = _fetch_analysis_data(
+        normalized,
+        strategy,
+        include_financials=True if agent_id in {"ben", "sam", "vera", "alphawolf"} else include_financials,
+        include_market=include_market,
+        include_insights=True if agent_id in {"ben", "nadia", "alphawolf"} else include_insights,
+        refresh_market_tape=True,
+    )
+    if not bundle:
+        raise HTTPException(status_code=404, detail=f"Symbol {normalized} not found")
+    if bundle.get("dataPending"):
+        return JSONResponse(status_code=202, content={"status": "pending", "stage": "market_data", "retryAfterSeconds": 3})
+
+    try:
+        history_frame = fetch_history(make_ticker(normalized), period="5y", refresh_stale=False)
+    except Exception as exc:
+        print(f"Warning: historical analysis price history failed for {normalized}: {exc}")
+        history_frame = None
+    context = build_historical_analysis_context(
+        bundle,
+        agent_id=agent_id,
+        monthly_price_history=_monthly_history_points(history_frame),
+        financials=financials_data,
+        market_comparison=market_data,
+        domain_insights=insights_data,
+    )
+    usage_user_id, _ = claim_ai_run(request, premium_required=True)
+    try:
+        result = analyze_history_with_openai(context, agent_id)
+    except (OpenAIAnalysisError, AIResultQualityError) as exc:
+        record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
+        release_ai_run(usage_user_id)
+        if cached is not None:
+            return cached
+        raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
+    return _publish_ai_result(
+        result_key,
+        {**result, "symbol": normalized, "dataTrust": bundle.get("dataTrust")},
+        cached,
+        usage_user_id,
+        context=context,
+        data_trust=bundle.get("dataTrust"),
+    )
 
 
 @router.post("/api/analysis/{symbol}/quant", response_model=QuantPerspectiveResponse)
@@ -604,8 +765,8 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
     account_scope = account_cache_scope(user_id)
     position_context = _position_context(normalized, user_id)
     position_cache_key = _position_cache_key(position_context)
-    cache_key = f"{account_scope}:today:v23-agent-evidence-consistency:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
-    result_key = AIResultKey(user_id, "today", normalized, agent_id, f"v23:{strategy}:{position_cache_key}")
+    cache_key = f"{account_scope}:today:v26-adaptive-research-challenge:{normalized}:{strategy}:{agent_id}:{position_cache_key}"
+    result_key = AIResultKey(user_id, "today", normalized, agent_id, f"v26:{strategy}:{position_cache_key}")
     cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached
@@ -634,6 +795,22 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
 
     usage_user_id, _ = claim_ai_run(request, premium_required=True)
     try:
+        research_context = build_news_research_context(
+            bundle,
+            agent_id=agent_id,
+            financials=financials_data,
+            market_comparison=market_data,
+            domain_insights=insights_data,
+        )
+        research_context["taskMode"] = "daily_brief"
+        research_context["marketBackdrop"] = context.get("marketBackdrop")
+        research_context["dailyResearchInstruction"] = (
+            "Find the company, sector, index, and country developments available by the research cutoff "
+            "that can plausibly affect this stock today or the next session. Follow the selected Agent's "
+            "evidence priorities; do not force irrelevant macro material into the result."
+        )
+        news_research = research_news_with_openai(research_context, agent_id)
+        context["webNewsResearch"] = news_research
         result = analyze_today_with_openai(context, agent_id)
     except (OpenAIAnalysisError, AIResultQualityError) as exc:
         record_ai_failure(key=result_key, context=context, data_trust=bundle.get("dataTrust"), error=exc)
@@ -642,7 +819,14 @@ def today_analysis(symbol: str, request: Request, payload: dict[str, Any] | None
             return cached
         raise HTTPException(status_code=503, detail=_AI_FAILURE_DETAIL) from exc
 
-    result = _publish_ai_result(result_key, {**result, "dataTrust": bundle.get("dataTrust")}, cached, usage_user_id, context=context, data_trust=bundle.get("dataTrust"))
+    result = _publish_ai_result(
+        result_key,
+        {**result, "newsResearch": news_research, "dataTrust": bundle.get("dataTrust")},
+        cached,
+        usage_user_id,
+        context=context,
+        data_trust=bundle.get("dataTrust"),
+    )
     return result
 
 
@@ -765,6 +949,43 @@ def _position_cache_key(context: dict[str, Any]) -> str:
     return ":".join(parts)
 
 
+def _analyst_ranking_context(payload: dict[str, Any], symbol: str) -> dict[str, Any] | None:
+    """Accept a bounded shortlist reference without treating client ranking as market truth."""
+    raw = payload.get("rankingContext")
+    if not isinstance(raw, dict) or str(raw.get("ticker") or "").strip().upper() != symbol:
+        return None
+    try:
+        rank = int(raw.get("rank"))
+        total = int(raw.get("total"))
+        conviction = int(raw.get("conviction"))
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= rank <= 5 or not rank <= total <= 5 or not 1 <= conviction <= 100:
+        return None
+    mode = str(raw.get("mode") or "").strip().lower()
+    if mode not in {"swing", "day", "long", "value", "fomo"}:
+        return None
+
+    def bounded(key: str, limit: int) -> str:
+        return str(raw.get(key) or "").strip()[:limit]
+
+    return {
+        "ticker": symbol,
+        "rank": rank,
+        "total": total,
+        "mode": mode,
+        "strategyLabel": bounded("strategyLabel", 40),
+        "rankingAction": bounded("action", 40),
+        "rankingConviction": conviction,
+        "rankingReason": bounded("reason", 500),
+        "interpretation": (
+            "This is a relative rank within a screened candidate set, not an automatic BUY. "
+            "Use the same strategy mandate, independently test the stock against absolute evidence, "
+            "and clearly reconcile any Deep Analysis action that differs from the ranking action."
+        ),
+    }
+
+
 @router.post("/api/strategy/recommendations", response_model=StrategyPlaybookResponse)
 def strategy_recommendations(payload: StrategyRecommendationRequest, request: Request, agent: str = Query("vera"), force: bool = Query(False)) -> dict[str, Any]:
     require_ai_account(request)
@@ -776,8 +997,8 @@ def strategy_recommendations(payload: StrategyRecommendationRequest, request: Re
     cache_digest = hashlib.sha256(
         f"{account_scope}:{strategy_prompt.lower()}:{payload.region}:{payload.limit}:{payload.candidateLimit}:{base_strategy}:{agent_id}:{','.join(sorted(payload.candidateSymbols))}".encode("utf-8")
     ).hexdigest()[:24]
-    cache_key = f"{account_scope}:strategy-playbook:v7-agent-method:{cache_digest}"
-    result_key = AIResultKey(user_id, "strategy", "universe", agent_id, f"v7:{cache_digest}")
+    cache_key = f"{account_scope}:strategy-playbook:v8-local-company-universe:{cache_digest}"
+    result_key = AIResultKey(user_id, "strategy", "universe", agent_id, f"v8:{cache_digest}")
     cached = _load_saved_ai_result(result_key, cache_key)
     if cached is not None and not force:
         return cached

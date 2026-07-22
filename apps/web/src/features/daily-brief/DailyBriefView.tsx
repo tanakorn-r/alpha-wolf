@@ -52,11 +52,10 @@ export function DailyBriefView({ brief }: { brief: DailyBrief }) {
       {brief.rows.length ? <CatalystTimeline brief={brief} /> : null}
 
       <section className="grid gap-2.5">
-        {brief.visibleRows.length ? brief.visibleRows.map((row, index) => (
+        {brief.visibleRows.length ? brief.visibleRows.map((row) => (
           <BriefQueueRow
             key={row.symbol}
             row={row}
-            defaultExpanded={index === 0}
             agentId={brief.activeAgentId}
             agent={brief.activeAgent}
             state={brief.rowAnalysis[row.symbol]}
@@ -75,9 +74,9 @@ function MorningMemo({ brief }: { brief: DailyBrief }) {
   if (brief.portfolioReviewLoading) return <PremiumLoading title={agentLoadingTitle(brief.activeAgentId, "portfolio", "your holdings")} subject="Portfolio" agentId={brief.activeAgentId} task="portfolio" />;
   if (review) {
     return (
-      <AgentCall agent={review.agent} label="Morning desk memo" score={review.score} scoreLabel="portfolio readiness" signal={review.verdict} headline={review.intro} summary={review.sections[0]?.b ?? brief.summary} bullets={review.bullets.slice(0, 4)} accent={review.agent.color} signoff={false} density="compact" dataTrust={review.dataTrust}>
+      <AgentCall agent={review.agent} label="Portfolio triage memo" score={review.score} scoreLabel="portfolio readiness" signal={review.verdict} headline={review.intro} summary={review.sections[0]?.b ?? brief.summary} bullets={review.bullets.slice(0, 4)} accent={review.agent.color} signoff={false} density="compact" dataTrust={review.dataTrust}>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t pt-3" style={{ borderColor: `${review.agent.color}30` }}>
-          <span className="text-[10px] text-[#6f6f78]">Saved memo · update when you want a fresh read</span>
+          <span className="text-[10px] text-[#6f6f78]">Portfolio-level triage · open a holding below for live one-day research</span>
           <AgentActionButton agent={review.agent} label="Refresh memo" sublabel="Update memo" onClick={() => void brief.generatePortfolioReview(true)} />
         </div>
         {brief.portfolioReviewError ? <div className="mt-3"><ErrorCard message={brief.portfolioReviewError} /></div> : null}
@@ -192,14 +191,12 @@ function nextCatalyst(rows: HoldingBriefRow[]) {
 
 function BriefQueueRow({
   row,
-  defaultExpanded,
   agentId,
   agent,
   state,
   onOpen,
 }: {
   row: HoldingBriefRow;
-  defaultExpanded: boolean;
   agentId: string;
   agent: DailyBrief["activeAgent"];
   state?: DailyBrief["rowAnalysis"][string];
@@ -208,7 +205,7 @@ function BriefQueueRow({
   const tag = triageTag(row);
   const hasResult = Boolean(state?.data);
   const [open, setOpen] = useState(false);
-  const [lensesOpen, setLensesOpen] = useState(defaultExpanded);
+  const [lensesOpen, setLensesOpen] = useState(false);
   const aiScore = state?.data?.buyScore;
   const aiTone = state?.data?.tone;
 
@@ -279,13 +276,13 @@ function BriefQueueRow({
             <AgentActionButton
               agent={state?.data?.agent ?? agent}
               fallbackName="Your Agent"
-              label={state?.restoring ? "Loading" : state?.loading ? "Analyzing" : hasResult ? open ? "Refresh" : "View" : "Ask Agent"}
-              sublabel={hasResult ? open ? "Refresh analysis" : "Open saved" : "Today’s read"}
+              label={state?.restoring ? "Loading" : state?.loading ? "Researching" : hasResult ? open ? "Refresh" : "View insight" : "Research today"}
+              sublabel={hasResult ? open ? "Refresh news + impact" : "Open saved brief" : "News + fundamentals"}
               loading={state?.loading || state?.restoring}
               onClick={runAnalysis}
               className="w-full flex-none"
             />
-            <button type="button" onClick={() => setLensesOpen((value) => !value)} className="text-[9px] font-bold uppercase tracking-[0.07em] text-[#74a4ff] hover:text-[#9bc0ff]">{lensesOpen ? "Hide desk lenses" : "Show desk lenses"}</button>
+            <button type="button" onClick={() => setLensesOpen((value) => !value)} className="text-[9px] font-bold uppercase tracking-[0.07em] text-[#74a4ff] hover:text-[#9bc0ff]">{lensesOpen ? "Hide data snapshot" : "Show pre-AI data"}</button>
           </div>
         </div>
       </article>
@@ -295,7 +292,7 @@ function BriefQueueRow({
       {open ? (
         <section className="flex flex-col gap-2">
           {state?.loading ? (
-            <PremiumLoading title={agentLoadingTitle(agentId, "analyst", row.symbol)} subject={row.symbol} agentId={agentId} task="analyst" onClose={() => setOpen(false)} />
+            <DailyInsightLoading symbol={row.symbol} agentName={agent?.name ?? "Your Agent"} onClose={() => setOpen(false)} />
           ) : (
             <div className="flex items-center justify-end">
               <button type="button" onClick={() => setOpen(false)} className="rounded-[var(--aw-radius-chip)] border border-[#2a2a31] bg-[#0e0e10] px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-[#8c8c95] hover:text-[#ececee]">
@@ -346,26 +343,66 @@ function toneColor(tone?: BriefTone | string) {
 function TodayPanel({ data }: { data: TodayPerformanceResponse }) {
   const color = toneColor(data.tone);
   const alignment = data.horizonAlignment;
+  const oneDayOutlook = data.oneDayOutlook ?? "NEUTRAL";
+  const oneDayThesis = data.oneDayThesis ?? data.todayRead ?? data.summary;
+  const impactDrivers = Array.isArray(data.impactDrivers) ? data.impactDrivers : [];
+  const fundamentalCheck = data.fundamentalCheck ?? {
+    status: "UNKNOWN" as const,
+    company: "This saved brief predates the live fundamental transmission check. Refresh to rebuild it.",
+    index: "Index impact was not recorded in this saved brief.",
+    country: "Country and policy impact was not recorded in this saved brief.",
+  };
+  const outlookColor = oneDayOutlookColor(oneDayOutlook);
+  const research = data.newsResearch;
   return (
-    <AgentCall agent={data.agent} label="Today's plan" score={data.buyScore} scoreLabel="Action position" scoreMode="action" scoreNote={`Evidence strength ${data.buyScore}/100`} signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Today only · generated on request · not financial advice" dataTrust={data.dataTrust}>
-      <div className="mt-4 grid gap-2.5 min-[760px]:grid-cols-[0.8fr_1.2fr]">
+    <AgentCall agent={data.agent} label="One-day impact decision" score={data.buyScore} scoreLabel="Action position" scoreMode="action" scoreNote={`Evidence strength ${data.buyScore}/100`} signal={data.signal} headline={data.headline} summary={data.summary} accent={color} meta="Live web research + market data · today/next session · not financial advice" dataTrust={data.dataTrust}>
+      <div className="mt-4 grid gap-2.5 min-[760px]:grid-cols-[0.72fr_0.78fr_1.5fr]">
         <div className="rounded-[10px] border bg-[#0e0e10] p-3.5" style={{ borderColor: `${holdingActionColor(data.holdingAction)}55` }}>
           <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Do this today</div>
           <div className="mt-1.5 font-mono text-[17px] font-extrabold" style={{ color: holdingActionColor(data.holdingAction) }}>{data.holdingAction}</div>
           <div className="mt-2 text-[11px] leading-[1.5] text-[#bcbcc2]">{data.holdingActionReason}</div>
         </div>
+        <div className="rounded-[10px] border bg-[#0e0e10] p-3.5" style={{ borderColor: `${outlookColor}55` }}>
+          <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#8c8c95]">Likely pressure</div>
+          <div className="mt-1.5 flex items-center gap-2 font-mono text-[17px] font-extrabold" style={{ color: outlookColor }}><span>{outlookArrow(oneDayOutlook)}</span>{oneDayOutlook}</div>
+          <div className="mt-2 text-[11px] leading-[1.5] text-[#bcbcc2]">Today through the next session</div>
+        </div>
         <div className="rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">Future alignment · {alignment.planHorizon}</div>
-            <span className="rounded-[5px] border px-2 py-1 font-mono text-[9px] font-bold" style={{ color, borderColor: `${color}55`, background: `${color}0d` }}>{alignment.status}</span>
-          </div>
-          <div className="mt-2 text-[12.5px] font-bold text-[#ececee]">{alignment.structureRead}</div>
-          <div className="mt-1 text-[11px] leading-[1.5] text-[#9b9ba3]">{alignment.why}</div>
+          <div className="text-[9px] font-bold uppercase tracking-[0.08em] text-[#78a7ff]">The linked story</div>
+          <div className="mt-2 text-[12.5px] font-bold leading-[1.45] text-[#ececee]">{oneDayThesis}</div>
+          <div className="mt-2 flex items-center gap-2 text-[9.5px] text-[#777780]"><span className="rounded-[5px] border px-2 py-0.5 font-mono font-bold" style={{ color, borderColor: `${color}55` }}>{alignment.status}</span><span>{alignment.planHorizon} plan remains the decision anchor</span></div>
         </div>
       </div>
 
+      <section className="mt-3 rounded-[10px] border border-[#2a2a31] bg-[#0b0b0d] p-3.5">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div><div className="text-[9px] font-black uppercase tracking-[0.11em] text-[#78a7ff]">What can move the price</div><div className="mt-1 text-[10px] text-[#6f6f78]">Ranked causal drivers—not a list of unrelated headlines</div></div>
+          <span className="font-mono text-[8.5px] text-[#5f5f68]">{research?.sources.length ?? 0} verified web source{research?.sources.length === 1 ? "" : "s"}</span>
+        </div>
+        {impactDrivers.length ? <div className="mt-3 grid gap-2 min-[760px]:grid-cols-2">
+          {impactDrivers.map((driver, index) => {
+            const driverColor = impactDirectionColor(driver.direction);
+            return <article key={`${driver.scope}:${driver.driver}:${index}`} className="rounded-[9px] border border-white/[0.07] bg-[#151518] p-3">
+              <div className="flex items-center justify-between gap-2"><span className="rounded-[5px] border border-[#78a7ff]/30 bg-[#78a7ff]/10 px-2 py-0.5 text-[8px] font-black text-[#78a7ff]">{driver.scope}</span><span className="font-mono text-[9px] font-black" style={{ color: driverColor }}>{impactArrow(driver.direction)} {driver.direction}</span></div>
+              <div className="mt-2 text-[12px] font-bold text-[#ececee]">{driver.driver}</div>
+              <p className="mt-1 text-[10.5px] leading-[1.5] text-[#9b9ba3]">{driver.mechanism}</p>
+              <div className="mt-2 flex items-center justify-between gap-2 text-[8.5px] text-[#62626b]"><span>{driver.timing}</span><span>{driver.sourceRanks?.length ? `Sources ${driver.sourceRanks.map((rank) => `#${rank}`).join(", ")}` : "Refresh for sources"}</span></div>
+            </article>;
+          })}
+        </div> : <div className="mt-3 rounded-[9px] border border-[#f5c451]/25 bg-[#f5c451]/[0.05] px-3 py-3 text-[10.5px] leading-[1.5] text-[#c9b778]">This saved brief uses the previous format. Its original action remains visible below; refresh once to add the linked company, index, country, and news-impact map.</div>}
+      </section>
+
+      <section className="mt-3 rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-2"><div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#c77dff]">Fundamental transmission check</div><span className="rounded-[5px] border px-2 py-1 font-mono text-[8.5px] font-bold" style={{ color: fundamentalStatusColor(fundamentalCheck.status), borderColor: `${fundamentalStatusColor(fundamentalCheck.status)}55` }}>{fundamentalCheck.status}</span></div>
+        <div className="mt-3 grid gap-2 min-[760px]:grid-cols-3">
+          <ImpactLayer label="Company" body={fundamentalCheck.company} />
+          <ImpactLayer label="Index / flows" body={fundamentalCheck.index} />
+          <ImpactLayer label="Country / policy" body={fundamentalCheck.country} />
+        </div>
+      </section>
+
       <div className="mt-3 rounded-[10px] border border-[#2a2a31] bg-[#0e0e10] p-3.5">
-        <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">Why this Agent chose it</div>
+        <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#6f6f78]">Why this Agent chose it · {alignment.planHorizon}</div>
         <p className="mt-1 text-[12px] leading-[1.5] text-[#bcbcc2]">{data.todayRead}</p>
         <ul className="mt-2 grid gap-1 text-[11px] leading-[1.45] text-[#9b9ba3] min-[760px]:grid-cols-3">
           {data.evidence.map((item, index) => <li key={index}>• {item}</li>)}
@@ -377,9 +414,79 @@ function TodayPanel({ data }: { data: TodayPerformanceResponse }) {
         <TodayField label="Reduce / exit if" body={data.exitGate} />
         <TodayField label="Check next" body={data.nextCheck} />
       </div>
+      {research?.sources.length ? <ResearchSources research={research} /> : null}
       <p className="mt-2.5 text-[10.5px] leading-[1.45] text-[#6f6f78]">Risk: {data.risk}</p>
     </AgentCall>
   );
+}
+
+function DailyInsightLoading({ symbol, agentName, onClose }: { symbol: string; agentName: string; onClose: () => void }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const researchDone = elapsed >= 12;
+  const stage = elapsed < 5 ? "Building the search agenda" : elapsed < 12 ? "Searching company, index and country evidence" : elapsed < 22 ? "Checking fundamentals and transmission" : "Linking the evidence into today’s decision";
+  return <section className="rounded-[12px] border border-[#3ecf8e]/30 bg-[linear-gradient(145deg,rgba(62,207,142,.07),#121214_42%)] p-4">
+    <div className="flex items-start justify-between gap-3"><div><div className="text-[9px] font-black uppercase tracking-[0.11em] text-[#3ecf8e]">{agentName} · one-day research · {symbol}</div><div className="mt-1 text-[14px] font-bold text-[#ececee]">{stage}…</div></div><button type="button" onClick={onClose} className="text-[10px] font-bold text-[#777780] hover:text-[#ececee]">Hide</button></div>
+    <div className="mt-4 grid gap-2 min-[640px]:grid-cols-2">
+      <LoadingStage number="01" title="Live web research" detail="Company · sector · index · country" active={!researchDone} complete={researchDone} />
+      <LoadingStage number="02" title="Impact synthesis" detail="Fundamentals · likely pressure · action" active={researchDone} complete={false} />
+    </div>
+    <div className="mt-3 flex items-center gap-2 text-[9px] text-[#6f6f78]"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#3ecf8e]" />{elapsed}s · Existing saved insight remains available until the refresh completes</div>
+  </section>;
+}
+
+function LoadingStage({ number, title, detail, active, complete }: { number: string; title: string; detail: string; active: boolean; complete: boolean }) {
+  const stageColor = complete ? "#3ecf8e" : active ? "#78a7ff" : "#5f5f68";
+  return <div className="rounded-[9px] border p-3" style={{ borderColor: `${stageColor}44`, background: `${stageColor}09` }}><div className="flex items-center gap-2"><span className="grid h-6 w-6 place-items-center rounded-full border font-mono text-[8px] font-black" style={{ color: stageColor, borderColor: `${stageColor}66` }}>{complete ? "✓" : number}</span><div><div className="text-[10.5px] font-bold text-[#d8d8dc]">{title}</div><div className="mt-0.5 text-[8.5px] text-[#777780]">{detail}</div></div></div></div>;
+}
+
+function ImpactLayer({ label, body }: { label: string; body: string }) {
+  return <div className="rounded-[8px] border border-white/[0.06] bg-[#151518] p-3"><div className="text-[8px] font-black uppercase tracking-[0.09em] text-[#777780]">{label}</div><p className="mt-1.5 text-[10.5px] leading-[1.5] text-[#bcbcc2]">{body}</p></div>;
+}
+
+function ResearchSources({ research }: { research: NonNullable<TodayPerformanceResponse["newsResearch"]> }) {
+  return <section className="mt-3 rounded-[10px] border border-[#2a2a31] bg-[#0b0b0d] p-3.5"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-[9px] font-black uppercase tracking-[0.1em] text-[#78a7ff]">Research trail</div><div className="mt-1 text-[10px] text-[#777780]">{research.researchFocus}</div></div><span className="font-mono text-[8.5px] text-[#5f5f68]">Updated {research.generatedAt ? formatLocalDate(new Date(research.generatedAt), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "now"}</span></div><div className="mt-3 grid gap-1.5">{research.sources.slice(0, 8).map((source, index) => <a key={source.url} href={source.url} target="_blank" rel="noreferrer" className="group grid gap-2 rounded-[8px] border border-white/[0.06] bg-[#151518] px-3 py-2.5 hover:border-[#78a7ff]/35 min-[680px]:grid-cols-[30px_minmax(0,1fr)_110px]"><span className="font-mono text-[9px] font-black text-[#78a7ff]">#{index + 1}</span><span className="min-w-0"><span className="block truncate text-[10.5px] font-bold text-[#d8d8dc] group-hover:text-[#9bc0ff]">{source.title}</span><span className="mt-0.5 block text-[9px] leading-[1.4] text-[#777780]">{source.whyItMatters}</span></span><span className="text-right text-[8.5px] text-[#5f5f68]">{source.publisher}<br />{source.eventType}</span></a>)}</div></section>;
+}
+
+function oneDayOutlookColor(outlook: NonNullable<TodayPerformanceResponse["oneDayOutlook"]>) {
+  if (outlook === "BULLISH") return "#3ecf8e";
+  if (outlook === "BEARISH") return "#ff5f68";
+  if (outlook === "MIXED") return "#f5c451";
+  return "#8c8c95";
+}
+
+function outlookArrow(outlook: NonNullable<TodayPerformanceResponse["oneDayOutlook"]>) {
+  if (outlook === "BULLISH") return "↗";
+  if (outlook === "BEARISH") return "↘";
+  if (outlook === "MIXED") return "↕";
+  return "→";
+}
+
+type ImpactDriver = NonNullable<TodayPerformanceResponse["impactDrivers"]>[number];
+
+function impactDirectionColor(direction: ImpactDriver["direction"]) {
+  if (direction === "UP") return "#3ecf8e";
+  if (direction === "DOWN") return "#ff5f68";
+  if (direction === "TWO_WAY") return "#f5c451";
+  return "#8c8c95";
+}
+
+function impactArrow(direction: ImpactDriver["direction"]) {
+  if (direction === "UP") return "↗";
+  if (direction === "DOWN") return "↘";
+  if (direction === "TWO_WAY") return "↕";
+  return "→";
+}
+
+function fundamentalStatusColor(status: NonNullable<TodayPerformanceResponse["fundamentalCheck"]>["status"]) {
+  if (status === "SUPPORTS") return "#3ecf8e";
+  if (status === "WEAKENS") return "#ff5f68";
+  if (status === "UNCHANGED") return "#f5c451";
+  return "#8c8c95";
 }
 
 function holdingActionColor(action: TodayPerformanceResponse["holdingAction"]) {

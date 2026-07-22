@@ -286,6 +286,60 @@ select:disabled,
   50% { opacity: 0.35; }
 }
 
+@keyframes analyst-loading-beam {
+  0% { transform: translateX(-55%); opacity: 0; }
+  15%, 80% { opacity: 1; }
+  100% { transform: translateX(155%); opacity: 0; }
+}
+
+@keyframes analyst-progress-sweep {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(410%); }
+}
+
+@keyframes analyst-card-shimmer {
+  from { transform: translateX(-120%) skewX(-12deg); }
+  to { transform: translateX(320%) skewX(-12deg); }
+}
+
+@keyframes analyst-source-scan {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(310%); }
+}
+
+@keyframes analyst-link-dot {
+  0% { left: -4px; opacity: 0; }
+  15%, 80% { opacity: 1; }
+  100% { left: calc(100% - 4px); opacity: 0; }
+}
+
+@keyframes analyst-activity-in {
+  from { transform: translateY(3px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.analyst-loading-beam {
+  width: 55%;
+  background: linear-gradient(90deg, transparent, #4d8dff, #3ecf8e, transparent);
+  animation: analyst-loading-beam 2.2s ease-in-out infinite;
+}
+
+.analyst-progress-sweep { animation: analyst-progress-sweep 1.7s linear infinite; }
+.analyst-card-shimmer { animation: analyst-card-shimmer 2.4s ease-in-out infinite; }
+.analyst-source-scan { animation: analyst-source-scan 1.45s ease-in-out infinite; }
+.analyst-link-dot { animation: analyst-link-dot 1.5s ease-in-out infinite; }
+.analyst-activity-in { animation: analyst-activity-in 0.3s ease-out; }
+.analyst-active-step { box-shadow: inset 0 0 30px rgba(77, 141, 255, 0.035), 0 0 24px rgba(77, 141, 255, 0.045); }
+
+@media (prefers-reduced-motion: reduce) {
+  .analyst-loading-beam,
+  .analyst-progress-sweep,
+  .analyst-card-shimmer,
+  .analyst-source-scan,
+  .analyst-link-dot,
+  .analyst-activity-in { animation-duration: 6s; }
+}
+
 /* Animated rainbow border: a 2px gradient frame around an inner panel. */
 .aw-rainbow-border {
   background: linear-gradient(135deg, #ff6b6b, #ffd93d, #6bcb77, #4d96ff, #c77dff, #ff6b6b);
@@ -304,3 +358,178 @@ select:disabled,
 }
 
 .aw-pulse-dot { animation: aw-pulse 2.4s ease infinite; }
+
+@keyframes aw-result-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.aw-decision-rail {
+  isolation: isolate;
+  background-image:
+    radial-gradient(circle at 10% -20%, rgba(62, 207, 142, 0.08), transparent 30%),
+    linear-gradient(180deg, #121315, #0f1012);
+}
+
+.aw-decision-scroll {
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+}
+
+.aw-decision-scroll::-webkit-scrollbar { display: none; }
+
+.aw-decision-mode::after {
+  content: "";
+  position: absolute;
+  inset: auto 14px 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+  opacity: 0;
+  transition: opacity .2s ease;
+}
+
+.aw-decision-mode:hover::after { opacity: 1; }
+.aw-result-enter { animation: aw-result-enter .28s cubic-bezier(.2,.8,.2,1); }
+
+.aw-analysis-stage {
+  container-type: inline-size;
+}
+
+@media (max-width: 1179px) {
+  .aw-decision-scroll {
+    grid-auto-columns: minmax(176px, 44vw);
+  }
+}
+
+/* Completed AI reports share one editorial system: predictable flow, readable
+   line lengths, and no floating UI over narrative copy. */
+.aw-report,
+.aw-report-body,
+.aw-result-product,
+.aw-result-product > *,
+.aw-result-product [class*="grid"],
+.aw-result-product [class*="flex"] {
+  min-width: 0;
+}
+
+.aw-report {
+  overflow: clip;
+  overflow-wrap: anywhere;
+}
+
+.aw-report-guide {
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.025);
+}
+
+.aw-report-guide::before {
+  content: "";
+  display: block;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--report-accent), transparent);
+  opacity: .72;
+}
+
+.aw-report-body > .aw-result-product,
+.aw-report-body > div > .aw-result-product {
+  width: 100%;
+}
+
+.aw-report .line-clamp-2,
+.aw-report .line-clamp-3,
+.aw-report .line-clamp-4 {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+}
+
+.aw-report .aw-agent-score-panel {
+  max-width: 100%;
+}
+
+.aw-result-verdict > section,
+.aw-result-timing > section,
+.aw-result-technical > section,
+.aw-result-history,
+.aw-result-analyst {
+  border-color: rgba(255,255,255,.085) !important;
+  box-shadow: 0 18px 48px rgba(0,0,0,.20);
+}
+
+.aw-result-verdict > section,
+.aw-result-timing > section {
+  background-color: #121315 !important;
+}
+
+.aw-report-signals .aw-report-body { --report-surface-tint: rgba(62,207,142,.04); }
+.aw-report-analyst .aw-report-body { --report-surface-tint: rgba(120,167,255,.04); }
+.aw-report-history .aw-report-body { --report-surface-tint: rgba(197,164,255,.04); }
+.aw-report-timing .aw-report-body { --report-surface-tint: rgba(101,231,173,.04); }
+.aw-report-technical .aw-report-body { --report-surface-tint: rgba(79,201,186,.04); }
+
+.aw-report-body {
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--report-surface-tint, transparent), transparent 180px);
+}
+
+@media (max-width: 719px) {
+  .aw-decision-scroll {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(5, minmax(112px, 1fr));
+    min-width: 560px;
+  }
+
+  .aw-decision-mode {
+    min-height: 78px;
+    padding: 10px 12px;
+  }
+
+  .aw-decision-mode .aw-mode-title {
+    margin-top: 8px;
+    font-size: 10.5px;
+    line-height: 1.25;
+  }
+
+  .aw-decision-mode .aw-mode-question,
+  .aw-decision-mode .aw-mode-arrow { display: none; }
+
+  .aw-decision-mode .aw-mode-meta > span:last-child {
+    max-width: 58px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .aw-report-guide ol {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+    scrollbar-width: none;
+  }
+
+  .aw-report-guide ol::-webkit-scrollbar { display: none; }
+
+  .aw-report .aw-agent-score-panel {
+    width: 100% !important;
+  }
+
+  .aw-report article > header,
+  .aw-report .aw-result-product > header {
+    padding-inline: 14px !important;
+  }
+}
+
+@media (max-width: 479px) {
+  .aw-decision-scroll {
+    grid-template-columns: repeat(5, minmax(106px, 1fr));
+    min-width: 530px;
+  }
+
+  .aw-report-guide {
+    margin-inline: -2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aw-result-enter { animation: none; }
+  .aw-decision-mode { transition: none; }
+}

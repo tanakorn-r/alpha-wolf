@@ -187,7 +187,7 @@ class AnalystCacheFirstTests(unittest.TestCase):
             response = analysis.analyst_report("AAPL", _request(), {"strategy": "capitalized"}, "vera", True)
 
         self.assertEqual(response["analysis"], saved)
-        self.assertEqual(response["refreshWarning"], "bad structured output")
+        self.assertEqual(response["refreshWarning"], "The Agent could not produce a reliable result. Your AI token was returned; please retry.")
         release.assert_called_once_with(1)
 
 
